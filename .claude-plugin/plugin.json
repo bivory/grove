@@ -1,0 +1,26 @@
+{
+  "name": "grove",
+  "version": "0.1.0",
+  "description": "Compound learning gate for Claude Code - enforces structured reflection at ticket boundaries with pluggable memory backends",
+  "author": "Grove Contributors",
+  "license": "Apache-2.0",
+  "repository": "https://github.com/user/grove",
+  "homepage": "https://github.com/user/grove",
+  "keywords": [
+    "learning",
+    "reflection",
+    "memory",
+    "claude-code",
+    "productivity"
+  ],
+  "engines": {
+    "claude-code": ">=1.0.0"
+  },
+  "main": "hooks/hooks.json",
+  "postinstall": ".claude-plugin/install.sh",
+  "files": [
+    "hooks/",
+    "skills/",
+    "rules/"
+  ]
+}

@@ -1,0 +1,506 @@
+//! Memory backend trait for Grove.
+//!
+//! This module defines the trait interface for memory backends that store
+//! and retrieve compound learnings. Backends include markdown files,
+//! Total Recall, and MCP memory servers.
+
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
+
+use crate::core::{CompoundLearning, LearningScope, LearningStatus};
+use crate::error::Result;
+
+/// Trait for memory backends that store and retrieve learnings.
+///
+/// Backends can be file-based (markdown), external (Total Recall),
+/// or server-based (MCP). All backends must be thread-safe.
+pub trait MemoryBackend: Send + Sync {
+    /// Write a learning to the backend.
+    ///
+    /// The backend is responsible for:
+    /// - Routing based on scope (project/team → shared, personal → user-local)
+    /// - Sanitizing content as needed
+    /// - Handling any backend-specific formatting
+    fn write(&self, learning: &CompoundLearning) -> Result<WriteResult>;
+
+    /// Search for learnings matching the query and filters.
+    ///
+    /// Returns learnings with their relevance scores. The scoring mechanism
+    /// varies by backend:
+    /// - Markdown: tag match (1.0), partial match (0.5), file overlap (0.8), keyword (0.3)
+    /// - Total Recall: delegates to Total Recall's scoring
+    /// - MCP: delegates to the server's scoring
+    fn search(&self, query: &SearchQuery, filters: &SearchFilters) -> Result<Vec<SearchResult>>;
+
+    /// Health check for the backend.
+    ///
+    /// Returns true if the backend is available and operational.
+    /// Used during discovery and for status reporting.
+    fn ping(&self) -> bool;
+
+    /// Get the backend name for logging and stats.
+    fn name(&self) -> &'static str;
+}
+
+/// Result of writing a learning to a backend.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct WriteResult {
+    /// Whether the write was successful.
+    pub success: bool,
+    /// The ID of the written learning.
+    pub learning_id: String,
+    /// Where the learning was written (e.g., file path, backend name).
+    pub location: String,
+    /// Optional message (e.g., warning about sanitization).
+    pub message: Option<String>,
+}
+
+impl WriteResult {
+    /// Create a successful write result.
+    pub fn success(learning_id: impl Into<String>, location: impl Into<String>) -> Self {
+        Self {
+            success: true,
+            learning_id: learning_id.into(),
+            location: location.into(),
+            message: None,
+        }
+    }
+
+    /// Create a successful write result with a message.
+    pub fn success_with_message(
+        learning_id: impl Into<String>,
+        location: impl Into<String>,
+        message: impl Into<String>,
+    ) -> Self {
+        Self {
+            success: true,
+            learning_id: learning_id.into(),
+            location: location.into(),
+            message: Some(message.into()),
+        }
+    }
+
+    /// Create a failed write result.
+    pub fn failure(learning_id: impl Into<String>, message: impl Into<String>) -> Self {
+        Self {
+            success: false,
+            learning_id: learning_id.into(),
+            location: String::new(),
+            message: Some(message.into()),
+        }
+    }
+}
+
+/// Query parameters for searching learnings.
+///
+/// This is a structured query containing available context, not a
+/// free-text search string. Fields are optional and combined with AND.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct SearchQuery {
+    /// Tags to match against learning tags.
+    pub tags: Vec<String>,
+    /// File paths to match against learning context_files.
+    pub files: Vec<String>,
+    /// Keywords to match against summary and detail.
+    pub keywords: Vec<String>,
+    /// Ticket ID to match against learning ticket_id.
+    pub ticket_id: Option<String>,
+}
+
+impl SearchQuery {
+    /// Create a new empty query.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Create a query with tags.
+    pub fn with_tags(tags: Vec<String>) -> Self {
+        Self {
+            tags,
+            ..Default::default()
+        }
+    }
+
+    /// Create a query with file paths.
+    pub fn with_files(files: Vec<String>) -> Self {
+        Self {
+            files,
+            ..Default::default()
+        }
+    }
+
+    /// Create a query with keywords.
+    pub fn with_keywords(keywords: Vec<String>) -> Self {
+        Self {
+            keywords,
+            ..Default::default()
+        }
+    }
+
+    /// Add tags to the query.
+    pub fn tags(mut self, tags: Vec<String>) -> Self {
+        self.tags = tags;
+        self
+    }
+
+    /// Add files to the query.
+    pub fn files(mut self, files: Vec<String>) -> Self {
+        self.files = files;
+        self
+    }
+
+    /// Add keywords to the query.
+    pub fn keywords(mut self, keywords: Vec<String>) -> Self {
+        self.keywords = keywords;
+        self
+    }
+
+    /// Set the ticket ID.
+    pub fn ticket_id(mut self, ticket_id: impl Into<String>) -> Self {
+        self.ticket_id = Some(ticket_id.into());
+        self
+    }
+
+    /// Check if the query is empty (no search criteria).
+    pub fn is_empty(&self) -> bool {
+        self.tags.is_empty()
+            && self.files.is_empty()
+            && self.keywords.is_empty()
+            && self.ticket_id.is_none()
+    }
+}
+
+/// Filters for narrowing search results.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SearchFilters {
+    /// Filter by learning status (default: Active only).
+    pub status: Option<LearningStatus>,
+    /// Filter by learning scope.
+    pub scope: Option<LearningScope>,
+    /// Only include learnings created after this time.
+    pub created_after: Option<DateTime<Utc>>,
+    /// Maximum number of results to return.
+    pub max_results: Option<usize>,
+}
+
+impl Default for SearchFilters {
+    fn default() -> Self {
+        Self {
+            // By default, only return active learnings
+            status: Some(LearningStatus::Active),
+            scope: None,
+            created_after: None,
+            max_results: None,
+        }
+    }
+}
+
+impl SearchFilters {
+    /// Create filters with no restrictions.
+    pub fn all() -> Self {
+        Self {
+            status: None,
+            scope: None,
+            created_after: None,
+            max_results: None,
+        }
+    }
+
+    /// Create filters for active learnings only.
+    pub fn active_only() -> Self {
+        Self::default()
+    }
+
+    /// Set the status filter.
+    pub fn status(mut self, status: LearningStatus) -> Self {
+        self.status = Some(status);
+        self
+    }
+
+    /// Set the scope filter.
+    pub fn scope(mut self, scope: LearningScope) -> Self {
+        self.scope = Some(scope);
+        self
+    }
+
+    /// Set the created_after filter.
+    pub fn created_after(mut self, time: DateTime<Utc>) -> Self {
+        self.created_after = Some(time);
+        self
+    }
+
+    /// Set the max_results limit.
+    pub fn max_results(mut self, limit: usize) -> Self {
+        self.max_results = Some(limit);
+        self
+    }
+
+    /// Check if a learning matches these filters.
+    pub fn matches(&self, learning: &CompoundLearning) -> bool {
+        // Check status filter
+        if let Some(ref status) = self.status {
+            if &learning.status != status {
+                return false;
+            }
+        }
+
+        // Check scope filter
+        if let Some(ref scope) = self.scope {
+            if &learning.scope != scope {
+                return false;
+            }
+        }
+
+        // Check created_after filter
+        if let Some(ref created_after) = self.created_after {
+            if &learning.timestamp < created_after {
+                return false;
+            }
+        }
+
+        true
+    }
+}
+
+/// A search result with the learning and its relevance score.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SearchResult {
+    /// The matched learning.
+    pub learning: CompoundLearning,
+    /// Relevance score (0.0 to 1.0, higher is more relevant).
+    pub relevance: f64,
+}
+
+impl SearchResult {
+    /// Create a new search result.
+    pub fn new(learning: CompoundLearning, relevance: f64) -> Self {
+        Self {
+            learning,
+            relevance,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::{Confidence, LearningCategory, WriteGateCriterion};
+
+    fn sample_learning() -> CompoundLearning {
+        CompoundLearning::new(
+            LearningCategory::Pattern,
+            "Test summary for the learning",
+            "Test detail explaining the pattern in more depth",
+            LearningScope::Project,
+            Confidence::High,
+            vec![WriteGateCriterion::BehaviorChanging],
+            vec!["rust".to_string(), "testing".to_string()],
+            "test-session-123",
+        )
+    }
+
+    // WriteResult tests
+
+    #[test]
+    fn test_write_result_success() {
+        let result = WriteResult::success("cl_20260101_001", ".grove/learnings.md");
+        assert!(result.success);
+        assert_eq!(result.learning_id, "cl_20260101_001");
+        assert_eq!(result.location, ".grove/learnings.md");
+        assert!(result.message.is_none());
+    }
+
+    #[test]
+    fn test_write_result_success_with_message() {
+        let result = WriteResult::success_with_message(
+            "cl_20260101_002",
+            ".grove/learnings.md",
+            "Content was sanitized",
+        );
+        assert!(result.success);
+        assert_eq!(result.learning_id, "cl_20260101_002");
+        assert_eq!(result.message, Some("Content was sanitized".to_string()));
+    }
+
+    #[test]
+    fn test_write_result_failure() {
+        let result = WriteResult::failure("cl_20260101_003", "Backend unavailable");
+        assert!(!result.success);
+        assert_eq!(result.learning_id, "cl_20260101_003");
+        assert!(result.location.is_empty());
+        assert_eq!(result.message, Some("Backend unavailable".to_string()));
+    }
+
+    #[test]
+    fn test_write_result_serialization() {
+        let result = WriteResult::success("cl_20260101_001", ".grove/learnings.md");
+        let json = serde_json::to_string(&result).unwrap();
+        let deserialized: WriteResult = serde_json::from_str(&json).unwrap();
+        assert_eq!(result, deserialized);
+    }
+
+    // SearchQuery tests
+
+    #[test]
+    fn test_search_query_new_is_empty() {
+        let query = SearchQuery::new();
+        assert!(query.is_empty());
+    }
+
+    #[test]
+    fn test_search_query_with_tags() {
+        let query = SearchQuery::with_tags(vec!["rust".to_string(), "testing".to_string()]);
+        assert!(!query.is_empty());
+        assert_eq!(query.tags.len(), 2);
+        assert!(query.files.is_empty());
+        assert!(query.keywords.is_empty());
+    }
+
+    #[test]
+    fn test_search_query_with_files() {
+        let query = SearchQuery::with_files(vec!["src/lib.rs".to_string()]);
+        assert!(!query.is_empty());
+        assert_eq!(query.files.len(), 1);
+    }
+
+    #[test]
+    fn test_search_query_with_keywords() {
+        let query = SearchQuery::with_keywords(vec!["error".to_string(), "handling".to_string()]);
+        assert!(!query.is_empty());
+        assert_eq!(query.keywords.len(), 2);
+    }
+
+    #[test]
+    fn test_search_query_builder_pattern() {
+        let query = SearchQuery::new()
+            .tags(vec!["rust".to_string()])
+            .files(vec!["src/lib.rs".to_string()])
+            .keywords(vec!["pattern".to_string()])
+            .ticket_id("ISSUE-123");
+
+        assert!(!query.is_empty());
+        assert_eq!(query.tags, vec!["rust".to_string()]);
+        assert_eq!(query.files, vec!["src/lib.rs".to_string()]);
+        assert_eq!(query.keywords, vec!["pattern".to_string()]);
+        assert_eq!(query.ticket_id, Some("ISSUE-123".to_string()));
+    }
+
+    #[test]
+    fn test_search_query_serialization() {
+        let query = SearchQuery::with_tags(vec!["rust".to_string()]);
+        let json = serde_json::to_string(&query).unwrap();
+        let deserialized: SearchQuery = serde_json::from_str(&json).unwrap();
+        assert_eq!(query, deserialized);
+    }
+
+    // SearchFilters tests
+
+    #[test]
+    fn test_search_filters_default_is_active_only() {
+        let filters = SearchFilters::default();
+        assert_eq!(filters.status, Some(LearningStatus::Active));
+        assert!(filters.scope.is_none());
+        assert!(filters.created_after.is_none());
+        assert!(filters.max_results.is_none());
+    }
+
+    #[test]
+    fn test_search_filters_all() {
+        let filters = SearchFilters::all();
+        assert!(filters.status.is_none());
+        assert!(filters.scope.is_none());
+    }
+
+    #[test]
+    fn test_search_filters_builder_pattern() {
+        let filters = SearchFilters::all()
+            .status(LearningStatus::Active)
+            .scope(LearningScope::Project)
+            .max_results(10);
+
+        assert_eq!(filters.status, Some(LearningStatus::Active));
+        assert_eq!(filters.scope, Some(LearningScope::Project));
+        assert_eq!(filters.max_results, Some(10));
+    }
+
+    #[test]
+    fn test_search_filters_matches_status() {
+        let filters = SearchFilters::active_only();
+        let mut learning = sample_learning();
+
+        // Active learning should match
+        assert!(filters.matches(&learning));
+
+        // Archived learning should not match
+        learning.status = LearningStatus::Archived;
+        assert!(!filters.matches(&learning));
+    }
+
+    #[test]
+    fn test_search_filters_matches_scope() {
+        let filters = SearchFilters::all().scope(LearningScope::Personal);
+        let mut learning = sample_learning();
+
+        // Project scope should not match
+        assert!(!filters.matches(&learning));
+
+        // Personal scope should match
+        learning.scope = LearningScope::Personal;
+        assert!(filters.matches(&learning));
+    }
+
+    #[test]
+    fn test_search_filters_matches_created_after() {
+        use chrono::Duration;
+
+        let now = Utc::now();
+        let filters = SearchFilters::all().created_after(now - Duration::hours(1));
+        let learning = sample_learning();
+
+        // Recent learning should match (just created)
+        assert!(filters.matches(&learning));
+
+        // Old learning should not match
+        let mut old_learning = sample_learning();
+        old_learning.timestamp = now - Duration::days(1);
+        assert!(!filters.matches(&old_learning));
+    }
+
+    #[test]
+    fn test_search_filters_matches_all_with_no_restrictions() {
+        let filters = SearchFilters::all();
+        let learning = sample_learning();
+        assert!(filters.matches(&learning));
+    }
+
+    #[test]
+    fn test_search_filters_serialization() {
+        let filters = SearchFilters::active_only().max_results(5);
+        let json = serde_json::to_string(&filters).unwrap();
+        let deserialized: SearchFilters = serde_json::from_str(&json).unwrap();
+        assert_eq!(filters, deserialized);
+    }
+
+    // SearchResult tests
+
+    #[test]
+    fn test_search_result_new() {
+        let learning = sample_learning();
+        let result = SearchResult::new(learning.clone(), 0.85);
+
+        assert_eq!(result.learning.id, learning.id);
+        assert!((result.relevance - 0.85).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_search_result_serialization() {
+        let learning = sample_learning();
+        let result = SearchResult::new(learning, 0.75);
+
+        let json = serde_json::to_string(&result).unwrap();
+        let deserialized: SearchResult = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(result.learning.id, deserialized.learning.id);
+        assert!((result.relevance - deserialized.relevance).abs() < f64::EPSILON);
+    }
+}

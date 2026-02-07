@@ -117,8 +117,7 @@ run = "markdownlint-cli2 '**/*.md' '#target'"
 
 [tasks.pre-commit]
 description = "Run all pre-commit checks"
-#depends = ["fmt:check", "clippy", "typos", "docs:lint", "dupes"]
-depends = ["typos", "docs:lint", "dupes"]
+depends = ["fmt:check", "clippy", "typos", "docs:lint", "dupes"]
 
 [tasks.ci]
 description = "Run all CI checks"

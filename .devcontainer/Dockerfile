@@ -105,3 +105,5 @@ RUN claude plugin marketplace add richardthe3rd/mise#claude-plugin \
     && claude plugin install mise-en-place@mise-en-place
 
 USER root
+
+ENV CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1

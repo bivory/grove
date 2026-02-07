@@ -1,0 +1,13 @@
+# cargo-release configuration
+# See: https://github.com/crate-ci/cargo-release
+
+[workspace]
+allow-branch = ["main"]
+sign-commit = false
+sign-tag = false
+push = true
+publish = false  # We don't publish to crates.io
+tag-message = "Release {{version}}"
+pre-release-commit-message = "chore: release {{version}}"
+
+pre-release-hook = ["./scripts/sync-plugin-version.sh", "{{version}}"]

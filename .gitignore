@@ -31,3 +31,8 @@ TODO.md
 CLAUDE.md
 .claude/
 .tissue/
+
+
+# Added by cargo
+
+/target

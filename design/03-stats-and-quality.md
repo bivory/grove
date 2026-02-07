@@ -28,16 +28,17 @@ materialized locally and rebuilt on demand.
 
 ### 1.2 Event Types
 
+All events include a `v` (version) field for schema evolution.
+
 ```jsonl
-{"ts":"2026-02-06T10:00:00Z","event":"surfaced","learning_id":"L001","session_id":"abc"}
-{"ts":"2026-02-06T10:05:00Z","event":"referenced","learning_id":"L001","session_id":"abc","ticket_id":"T042"}
-{"ts":"2026-02-06T11:00:00Z","event":"dismissed","learning_id":"L003","session_id":"abc"}
-{"ts":"2026-02-06T11:00:00Z","event":"corrected","learning_id":"L005","session_id":"abc","superseded_by":"L012"}
-{"ts":"2026-02-06T11:00:00Z","event":"reflection","session_id":"abc","candidates":5,"accepted":3,"categories":["pitfall","pattern"],"ticket_id":"T042","backend":"markdown"}
-{"ts":"2026-02-06T11:00:00Z","event":"skip","session_id":"abc","reason":"auto: 2 lines, version bump","decider":"agent","lines_changed":2,"ticket_id":"T042"}
-{"ts":"2026-02-06T11:00:00Z","event":"archived","learning_id":"L002","reason":"passive_decay"}
-{"ts":"2026-02-06T11:00:00Z","event":"restored","learning_id":"L002"}
-{"ts":"2026-02-06T11:00:00Z","event":"checkpoint","processed_through":"2026-01-06T00:00:00Z","aggregate":{}}
+{"v":1,"ts":"2026-02-06T10:00:00Z","event":"surfaced","learning_id":"L001","session_id":"abc"}
+{"v":1,"ts":"2026-02-06T10:05:00Z","event":"referenced","learning_id":"L001","session_id":"abc","ticket_id":"T042"}
+{"v":1,"ts":"2026-02-06T11:00:00Z","event":"dismissed","learning_id":"L003","session_id":"abc"}
+{"v":1,"ts":"2026-02-06T11:00:00Z","event":"corrected","learning_id":"L005","session_id":"abc","superseded_by":"L012"}
+{"v":1,"ts":"2026-02-06T11:00:00Z","event":"reflection","session_id":"abc","candidates":5,"accepted":3,"categories":["pitfall","pattern"],"ticket_id":"T042","backend":"markdown"}
+{"v":1,"ts":"2026-02-06T11:00:00Z","event":"skip","session_id":"abc","reason":"auto: 2 lines, version bump","decider":"agent","lines_changed":2,"ticket_id":"T042"}
+{"v":1,"ts":"2026-02-06T11:00:00Z","event":"archived","learning_id":"L002","reason":"passive_decay"}
+{"v":1,"ts":"2026-02-06T11:00:00Z","event":"restored","learning_id":"L002"}
 ```
 
 | Event | Fields | Written By |
@@ -50,7 +51,6 @@ materialized locally and rebuilt on demand.
 | `skip` | session_id, reason, decider, lines_changed, ticket_id? | `grove skip` |
 | `archived` | learning_id, reason | Passive decay check |
 | `restored` | learning_id | `grove maintain` |
-| `checkpoint` | processed_through, aggregate | `grove maintain --compact-log` |
 
 ### 1.3 Materialized Cache
 
@@ -115,19 +115,6 @@ count in `.grove/stats.log`. If they differ, rebuild.
 
 **Rebuild:** `grove stats` automatically rebuilds the cache from the log.
 `grove maintain --rebuild-stats` forces a rebuild.
-
-### 1.4 Log Rotation
-
-Over months, the log grows. `grove maintain --compact-log` compresses
-old entries:
-
-1. Materialize the aggregate for all entries older than N days (default: 90)
-2. Write a single `checkpoint` event containing the aggregate
-3. Remove the old entries
-4. Append new entries after the checkpoint
-
-The checkpoint event preserves aggregate counts. Detail (individual event
-timestamps, per-session breakdowns) is lost for the compacted period.
 
 ## 2. Per-Learning Stats
 
@@ -227,7 +214,7 @@ valuable learnings" view in `grove stats`.
 
 When injecting learnings at session start, each candidate is scored:
 
-```
+```text
 score = relevance × recency_weight × reference_boost
 ```
 
@@ -255,7 +242,7 @@ tags extracted from the ticket context. It is not a free-text string.
 
 Exponential decay from creation date:
 
-```
+```text
 recency_weight = e^(-λ × days_since_creation)
 ```
 
@@ -266,7 +253,7 @@ Where `λ` is tuned so that a 90-day-old learning has weight ~0.3 and a
 
 Learnings with proven value (high hit rate) get boosted:
 
-```
+```text
 reference_boost = 0.5 + (hit_rate × 0.5)
 ```
 
@@ -432,7 +419,7 @@ is local (`~/.grove/stats-cache.json`), not committed. Each developer
 has their own copy, rebuilt from the shared log.
 
 **Worst case.** If git somehow produces a malformed JSONL file (partial
-line from a merge), `grove stats` skips unparseable lines and logs a
+line from a merge), `grove stats` skips unparsable lines and logs a
 warning. The cache is rebuilt from parseable entries only.
 
 ## Related Documents

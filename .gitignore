@@ -1,0 +1,33 @@
+# Rust
+target/
+Cargo.lock
+**/*.rs.bk
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build artifacts
+*.log
+*.tmp
+
+# Test coverage
+coverage/
+*.profraw
+*.profdata
+
+# Local development
+.mise.local.toml
+TODO.md
+
+# Agents and tools
+CLAUDE.md
+.claude/
+.tissue/

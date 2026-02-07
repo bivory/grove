@@ -127,6 +127,8 @@ grove/
 | `GateStatus` | `core/state` | Idle/Active/Pending/Blocked/Reflected/Skipped |
 | `TicketContext` | `core/state` | Detected ticket info |
 | `TicketCloseIntent` | `core/state` | Pending ticket close (pre-confirmation) |
+| `SubagentObservation` | `core/state` | Observation from subagent (note + timestamp) |
+| `CircuitBreakerState` | `core/state` | Breaker state with `last_blocked_session_id` for reset logic |
 | `TraceEvent` | `core/state` | Individual trace entry |
 | `EventType` | `core/state` | Event type enum |
 
@@ -134,10 +136,9 @@ grove/
 
 | Type | Module | Description |
 |------|--------|-------------|
-| `CompoundLearning` | `core/learning` | Full learning with metadata |
+| `CompoundLearning` | `core/learning` | Full learning with metadata (includes `schema_version: u8`) |
 | `LearningCategory` | `core/learning` | Pattern/Pitfall/Convention/etc. |
 | `LearningScope` | `core/learning` | Project/Personal/Team/Ephemeral |
-| `Confidence` | `core/learning` | High/Medium/Low |
 | `LearningStatus` | `core/learning` | Active/Archived/Superseded |
 
 ### 2.3 Reflection Types
@@ -161,7 +162,7 @@ grove/
 
 | Type | Module | Description |
 |------|--------|-------------|
-| `StatsEvent` | `stats/tracker` | Single JSONL event entry (surfaced, referenced, dismissed, etc.) |
+| `StatsEvent` | `stats/tracker` | Single JSONL event entry with `v: u8` version field |
 | `StatsEventType` | `stats/tracker` | Enum of event types |
 | `StatsCache` | `stats/tracker` | Materialized aggregate from event log |
 | `LearningStats` | `stats/tracker` | Per-learning usage counters (derived from log) |
@@ -222,11 +223,14 @@ Appends to `.grove/learnings.md` in structured markdown format.
 
 | Function | Description |
 |----------|-------------|
-| `write` | Append learning entry with metadata header |
+| `write` | Append learning entry with metadata header (after sanitization) |
 | `search` | Parse file, match against query and tags |
 | `ping` | Check file exists and is writable |
 | `archive` | Mark learning as archived (status change in-place) |
 | `parse_learnings` | Parse markdown file into `Vec<CompoundLearning>` |
+| `sanitize_summary` | Single line, escape `#` and `\|` |
+| `sanitize_detail` | Balance unbalanced code fences |
+| `sanitize_tag` | Alphanumeric + hyphens only, lowercase |
 
 ### 4.3 Total Recall Adapter
 
@@ -256,8 +260,7 @@ Routes through MCP memory server tools.
 `grove hook session-start`
 
 1. Read `session_id`, `cwd`, `transcript_path`, `source` from stdin JSON
-2. If `source` is `"resume"`: search for predecessor session via
-   `find_recent(cwd, Active|Pending)` and inherit gate state
+2. If `source` is `"resume"`: create a fresh session (no inheritance)
 3. If `source` is `"compact"`: load existing session file for this `session_id`
 4. Otherwise: create new session state keyed by `session_id`
 5. Discover ticketing system (probe in order)
@@ -308,18 +311,7 @@ Routes through MCP memory server tools.
    - Block with instructions to run `/compound-reflect`
 6. Add `StopHookCalled` trace event
 
-### 5.5 SubagentStop Hook
-
-`grove hook subagent-stop`
-
-Not used for gate enforcement (subagents don't trigger the gate). Used only
-to capture subagent observations:
-
-1. Check if subagent wrote observations via `grove observe`
-2. Add `SubagentObservation` trace events
-3. Always approve
-
-### 5.6 SessionEnd Hook
+### 5.5 SessionEnd Hook
 
 `grove hook session-end`
 
@@ -423,6 +415,23 @@ block. Specific patterns:
 - Reflect: if backend write fails → log warning, still mark reflected
 - Stats: if stats write fails → log warning, don't block
 
+### 8.3 Panic Handling
+
+A global panic handler ensures crashes produce predictable behavior:
+
+```rust
+fn main() {
+    std::panic::set_hook(Box::new(|info| {
+        // Log to ~/.grove/crash.log
+        eprintln!("grove panic: {}", info);
+        std::process::exit(3);  // Distinct from 0=approve, 2=block
+    }));
+    // ...
+}
+```
+
+Exit codes: 0 = approve, 2 = block, 3 = crash (fail-open).
+
 ## 9. Plugin Integration
 
 ### 9.1 hooks.json
@@ -433,7 +442,6 @@ Configures Claude Code hooks:
 - `PreToolUse` (Bash) → `grove hook pre-tool-use`
 - `PostToolUse` (Bash) → `grove hook post-tool-use`
 - `Stop` → `grove hook stop`
-- `SubagentStop` → `grove hook subagent-stop`
 - `SessionEnd` → `grove hook session-end`
 
 ### 9.2 Plugin Structure

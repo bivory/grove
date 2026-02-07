@@ -1,0 +1,20 @@
+# Typos configuration
+# https://github.com/crate-ci/typos
+
+[files]
+extend-exclude = [
+    "target/",
+    "*.lock",
+    ".git/",
+    ".tissue/",
+]
+
+[default]
+extend-ignore-re = [
+    # UUIDs
+    "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}",
+]
+
+[default.extend-words]
+# Add project-specific words that are not typos
+grove = "grove"

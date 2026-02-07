@@ -1,0 +1,30 @@
+# Markdownlint configuration
+# https://github.com/DavidAnson/markdownlint-cli2
+
+config:
+  # Use default rules (strict mode)
+  default: true
+
+  # Line length - exclude tables and code blocks (inherently fixed width)
+  MD013:
+    tables: false
+    code_blocks: false
+
+  # Disable emphasis as heading - used intentionally for quotes
+  MD036: false
+
+  # Allow duplicate headings in sibling sections (e.g., Issue/Impact/Mitigation)
+  MD024:
+    siblings_only: true
+
+  # Allow YAML front matter (used in agents/grove.md)
+  MD041:
+    front_matter_title: ""
+
+  # Disable table column style - tables are readable without extra spacing
+  MD060: false
+
+# Ignore generated files
+ignores:
+  - "target/**"
+  - "node_modules/**"

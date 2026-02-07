@@ -40,7 +40,7 @@ flowchart TB
 |--------|----------------|
 | **Gate** | State machine governing when reflection is required |
 | **Reflection** | Parsing structured reflection output, applying write gate filter |
-| **Learning** | Learning entity: categories, scope, confidence, lifecycle |
+| **Learning** | Learning entity: categories, scope, lifecycle |
 | **Ticket Discovery** | Detecting which ticketing system is active |
 | **Backend Discovery** | Detecting which memory backends are available |
 | **Backend: Markdown** | Built-in append-only file storage |
@@ -62,7 +62,6 @@ flowchart TB
 classDiagram
     class Session {
         +id
-        +predecessor_id?
         +cwd
         +transcript_path
         +created_at
@@ -76,10 +75,16 @@ classDiagram
         +status : GateStatus
         +block_count
         +circuit_breaker_tripped
+        +last_blocked_session_id : string?
         +reflection : ReflectionResult?
         +skip : SkipDecision?
-        +subagent_observations : string[]
+        +subagent_observations : SubagentObservation[]
         +injected_learnings : InjectedLearning[]
+    }
+
+    class SubagentObservation {
+        +note : string
+        +timestamp : DateTime
     }
 
     class TicketContext {
@@ -100,11 +105,11 @@ classDiagram
 
     class Learning {
         +id
+        +schema_version : u8
         +category : Category
         +summary
         +detail
         +scope : Scope
-        +confidence : Confidence
         +criteria_met : WriteGateCriterion[]
         +tags : string[]
         +session_id
@@ -132,6 +137,7 @@ classDiagram
     GateState *-- ReflectionResult
     GateState *-- SkipDecision
     GateState *-- InjectedLearning
+    GateState *-- SubagentObservation
     ReflectionResult *-- Learning
 ```
 
@@ -175,14 +181,6 @@ stateDiagram-v2
     Archived --> Active : restored via grove maintain
     Superseded --> [*] : permanent
 ```
-
-### 3.5 Confidence
-
-| Level | Meaning |
-|-------|---------|
-| **High** | Well-validated, reproduced, or explicitly confirmed |
-| **Medium** | Observed once, reasonable confidence |
-| **Low** | Inferred or uncertain, may need verification |
 
 ## 4. Gate State Machine
 
@@ -245,7 +243,15 @@ Prevents infinite blocking loops.
 
 Behavior: each block increments a counter. When the counter reaches
 `max_blocks`, the breaker trips, forcing an approve and logging a warning.
-Resets after cooldown or on a new session.
+
+**Reset conditions** (any one triggers reset):
+
+1. Cooldown elapsed since last block
+2. Different `session_id` from last blocked session
+3. Successful reflection completes
+
+The breaker tracks `last_blocked_session_id` to distinguish new sessions
+from retries within the same session.
 
 ## 5. Discovery
 
@@ -324,7 +330,6 @@ Structural validation. Deterministic, runs first.
 | `summary ≠ detail` | Must differ | Reject candidate |
 | `tags` | 1-10 non-empty strings | Reject candidate |
 | `scope` | One of 4 enum values | Default to `project` |
-| `confidence` | One of 3 enum values | Default to `medium` |
 | `criteria_met` | At least one criterion claimed | Reject candidate |
 
 On total failure (no valid JSON, or zero candidates after schema
@@ -385,12 +390,8 @@ Fires when a Claude Code session begins.
 key for session state, stored at `~/.grove/sessions/<session_id>.json`.
 
 **Resume handling:** When `source` is `"resume"`, Claude Code issues a new
-`session_id`. Grove searches `~/.grove/sessions/` for the most recent
-session with the same `cwd` that is still in Active or Pending gate state.
-If found, grove inherits ticket context, subagent observations, and
-injected learnings from the predecessor. Block count is reset (fresh session
-shouldn't inherit circuit breaker state). The predecessor's `session_id` is
-stored in `predecessor_id` for traceability.
+`session_id`. Grove creates a fresh session. Ticket context and learnings
+are discovered anew.
 
 **Compact handling:** When `source` is `"compact"`, the same `session_id`
 is reused. Grove loads the existing session file.
@@ -398,7 +399,7 @@ is reused. Grove loads the existing session file.
 Steps:
 
 1. Read `session_id`, `cwd`, `transcript_path` from stdin JSON
-2. Create or load session state (with resume inheritance if applicable)
+2. Create or load session state
 3. Discover ticketing system (probe in configured order)
 4. Discover memory backends (probe in configured order)
 5. Load stats and learnings index
@@ -458,15 +459,7 @@ block → retry) don't recompute. In non-git repositories, diff size is
 unavailable and the auto-skip threshold check is bypassed (agent always
 decides).
 
-### 7.5 Subagent Stop
-
-Fires when a Claude Code subagent completes.
-
-Not used for gate enforcement. Subagents don't trigger the gate. Used only
-to capture subagent observations that were logged via `grove observe`.
-Always approves.
-
-### 7.6 Session End
+### 7.5 Session End
 
 Fires when a Claude Code session terminates.
 
@@ -653,7 +646,6 @@ sequenceDiagram
 | `get(id)` | Retrieve session by ID |
 | `put(session)` | Save session (atomic write) |
 | `list(limit)` | List recent sessions |
-| `find_recent(cwd, status)` | Find most recent session in directory with given gate status |
 | `delete(id)` | Remove session |
 
 ### 10.3 Memory Backend Interface

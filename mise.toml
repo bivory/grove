@@ -1,0 +1,177 @@
+# Mise configuration for grove
+# https://mise.jdx.dev/
+
+[tools]
+node = "24.13.0"
+rust = "1.92.0"
+
+# Rust tools (installed via cargo)
+"cargo:cargo-nextest" = "0.9.122"
+"cargo:cargo-machete" = "0.9.1"
+"cargo:cargo-outdated" = "0.17.0"
+"cargo:typos-cli" = "1.42.0"
+# Pre-PR quality tools
+"cargo:cargo-llvm-cov" = "0.6.23"
+"cargo:cargo-audit" = "0.22.0"
+"cargo:cargo-deny" = "0.19.0"
+"cargo:cargo-release" = "0.25.21"
+
+# CLI tools
+"npm:markdownlint-cli2" = "0.20.0"
+"npm:jscpd" = "4.0.7"
+"npm:@devcontainers/cli" = "0.81.1"
+
+[settings]
+experimental = true
+
+[env]
+RUST_LOG = "info"
+
+# =============================================================================
+# Setup Tasks
+# =============================================================================
+
+[tasks."setup:hooks"]
+description = "Install git pre-commit hooks"
+run = "mise generate git-pre-commit --write"
+
+# =============================================================================
+# Build & Test Tasks
+# =============================================================================
+
+[tasks.build]
+description = "Build the project"
+run = "cargo build"
+
+[tasks.check]
+description = "Type check without building"
+run = "cargo check"
+
+[tasks.test]
+description = "Run tests with nextest"
+run = "cargo nextest run"
+
+[tasks.clippy]
+description = "Run clippy lints"
+run = "cargo clippy --all-targets --all-features -- -D warnings"
+
+[tasks.fmt]
+description = "Format Rust code"
+run = "cargo fmt"
+
+[tasks."fmt:check"]
+description = "Check Rust formatting"
+run = "cargo fmt -- --check"
+
+[tasks.machete]
+description = "Find unused dependencies"
+run = "cargo machete"
+
+# =============================================================================
+# Quality Tasks
+# =============================================================================
+
+[tasks.typos]
+description = "Check for typos in code and docs"
+run = "typos"
+
+[tasks."typos:fix"]
+description = "Fix typos in code and docs"
+run = "typos -w"
+
+[tasks.dupes]
+description = "Check for code duplication"
+run = "jscpd --config .jscpd.json ."
+
+[tasks.outdated]
+description = "Check for outdated dependencies"
+run = "cargo outdated -R"
+
+[tasks.coverage]
+description = "Run tests with coverage (70% threshold)"
+run = "cargo llvm-cov nextest --fail-under-lines 70"
+
+[tasks."coverage:report"]
+description = "Generate HTML coverage report"
+run = "cargo llvm-cov nextest --html --open"
+
+[tasks.audit]
+description = "Check for security vulnerabilities in dependencies"
+run = "cargo audit"
+
+[tasks.deny]
+description = "Check dependency licenses and bans"
+run = "cargo deny check"
+
+[tasks."docs:build"]
+description = "Build documentation (check for errors)"
+run = "cargo doc --no-deps --document-private-items"
+
+[tasks."docs:lint"]
+description = "Lint markdown documentation"
+run = "markdownlint-cli2 '**/*.md' '#target'"
+
+# =============================================================================
+# Pre-commit & CI Tasks
+# =============================================================================
+
+[tasks.pre-commit]
+description = "Run all pre-commit checks"
+#depends = ["fmt:check", "clippy", "typos", "docs:lint", "dupes"]
+depends = ["typos", "docs:lint", "dupes"]
+
+[tasks.ci]
+description = "Run all CI checks"
+depends = ["fmt:check", "clippy", "test", "typos", "audit", "deny", "docs:lint", "dupes", "outdated"]
+
+[tasks.clean]
+description = "Clean build artifacts"
+run = "cargo clean"
+
+# =============================================================================
+# Development Tasks
+# =============================================================================
+
+[tasks."issue:list"]
+description = "List open issues"
+run = "tissue list"
+
+[tasks."issue:ready"]
+description = "Show issues ready to work on"
+run = "tissue ready"
+
+# =============================================================================
+# Devcontainer Tasks
+# =============================================================================
+
+[tasks."dc:build"]
+description = "Build devcontainer image"
+run = "docker build -t grove-devcontainer:local -f .devcontainer/Dockerfile ."
+
+[tasks."dc:shell"]
+description = "Get a shell in devcontainer"
+run = "docker run -it --rm -u vscode -v $(pwd):/workspaces/grove -w /workspaces/grove grove-devcontainer:local bash"
+
+[tasks."dc:claude"]
+description = "Run Claude Code in devcontainer (unrestricted)"
+run = "docker run -it --rm -u vscode -v $(pwd):/workspaces/grove -w /workspaces/grove grove-devcontainer:local claude --dangerously-skip-permissions"
+
+# =============================================================================
+# Release Tasks
+# =============================================================================
+
+[tasks."release:patch"]
+description = "Release a patch version (0.1.0 -> 0.1.1)"
+run = "cargo release patch --execute"
+
+[tasks."release:minor"]
+description = "Release a minor version (0.1.0 -> 0.2.0)"
+run = "cargo release minor --execute"
+
+[tasks."release:major"]
+description = "Release a major version (0.1.0 -> 1.0.0)"
+run = "cargo release major --execute"
+
+[tasks."release:dry-run"]
+description = "Dry run a patch release (see what would happen)"
+run = "cargo release patch"

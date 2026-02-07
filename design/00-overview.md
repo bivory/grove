@@ -131,7 +131,6 @@ grove hook session-start       # Discovery, context injection (reads stdin JSON)
 grove hook pre-tool-use        # Ticket close detection (reads stdin JSON)
 grove hook post-tool-use       # Ticket close confirmation (reads stdin JSON)
 grove hook stop                # Gate enforcement (reads stdin JSON)
-grove hook subagent-stop       # Subagent observation capture (reads stdin JSON)
 grove hook session-end         # Dismissed detection, cleanup (reads stdin JSON)
 ```
 

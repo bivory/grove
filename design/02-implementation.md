@@ -136,10 +136,11 @@ grove/
 
 | Type | Module | Description |
 |------|--------|-------------|
-| `CompoundLearning` | `core/learning` | Full learning with metadata (includes `schema_version: u8`) |
+| `CompoundLearning` | `core/learning` | Full learning with metadata (includes `schema_version: u8`, `confidence: Confidence`) |
 | `LearningCategory` | `core/learning` | Pattern/Pitfall/Convention/etc. |
 | `LearningScope` | `core/learning` | Project/Personal/Team/Ephemeral |
 | `LearningStatus` | `core/learning` | Active/Archived/Superseded |
+| `Confidence` | `core/learning` | High/Medium/Low |
 
 ### 2.3 Reflection Types
 
@@ -351,6 +352,11 @@ Routes through MCP memory server tools.
 | `grove debug <session_id>` | `cli/debug` | Full session state dump |
 | `grove trace <session_id>` | `cli/trace` | Trace event viewer |
 | `grove clean --before <duration>` | `cli/clean` | Remove old session files |
+
+**Note:** Debug commands are intended for development and troubleshooting only.
+They may expose internal state manipulation (e.g., `--set-gate`) that bypasses
+normal gate enforcement. These escape hatches exist for testing scenarios where
+the gate needs to be manually controlled.
 
 ## 7. Configuration
 

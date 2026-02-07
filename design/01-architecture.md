@@ -110,6 +110,7 @@ classDiagram
         +summary
         +detail
         +scope : Scope
+        +confidence : Confidence
         +criteria_met : WriteGateCriterion[]
         +tags : string[]
         +session_id
@@ -159,7 +160,7 @@ classDiagram
 |-------|---------|------------|
 | **Project** | Primary backend (committed) | Whole team |
 | **Team** | Primary backend (committed) | Whole team |
-| **Personal** | `~/.grove/personal-learnings.md` (gitignored) | Individual |
+| **Personal** | `~/.grove/personal-learnings.md` (outside project) | Individual |
 | **Ephemeral** | Daily log only (if available) | Transient |
 
 **Scope routing** is a core logic responsibility, not a backend concern.

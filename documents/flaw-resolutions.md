@@ -276,7 +276,7 @@ This resolution clarifies the boundary between Claude and grove:
 │  1. Reads reflection skill prompt                   │
 │  2. Analyzes session: what happened, what learned   │
 │  3. Produces structured JSON output                 │
-│  4. Calls: grove reflect --input '<json>'           │
+│  4. Calls: grove reflect (JSON via stdin)            │
 └──────────────────────┬──────────────────────────────┘
                        │
                        ▼

@@ -1002,7 +1002,7 @@ rm -rf "$GROVE_HOME"
 | Stable (latest) | Required |
 | Beta | Optional (nightly CI) |
 | Nightly | Not tested |
-| MSRV | 1.75.0 (edition 2021 features) |
+| MSRV | 1.82.0 (edition 2021 features) |
 
 ### 6.3 Coverage Requirements
 

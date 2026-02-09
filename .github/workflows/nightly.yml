@@ -14,12 +14,12 @@ jobs:
     name: Full CI Suite
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: llvm-tools-preview
       - uses: taiki-e/install-action@nextest
-      - uses: jdx/mise-action@v2
+      - uses: jdx/mise-action@v3
 
       - name: Format check
         run: mise run fmt:check
@@ -46,9 +46,9 @@ jobs:
     name: Security
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
-      - uses: jdx/mise-action@v2
+      - uses: jdx/mise-action@v3
 
       - name: Audit
         run: mise run audit
@@ -60,9 +60,9 @@ jobs:
     name: Outdated Dependencies
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
-      - uses: jdx/mise-action@v2
+      - uses: jdx/mise-action@v3
 
       - name: Check outdated
         run: mise run outdated
@@ -71,7 +71,7 @@ jobs:
     name: Beta Rust Build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@beta
       - uses: taiki-e/install-action@nextest
 

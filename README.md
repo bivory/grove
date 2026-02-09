@@ -24,7 +24,7 @@ This downloads the correct binary for your platform to `~/.local/bin`.
 After installing the binary, add the Grove plugin to Claude Code:
 
 ```text
-/plugin marketplace add bivory/grove
+/plugin marketplace add bivory/claude-plugin-marketplace
 /plugin install grove@bivory
 ```
 

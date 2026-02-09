@@ -16,3 +16,5 @@ updates:
       interval: "weekly"
     commit-message:
       prefix: "ci"
+    ignore:
+      - dependency-name: "dtolnay/rust-toolchain"

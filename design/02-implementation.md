@@ -65,6 +65,7 @@ grove/
 │   │   ├── backends_cmd.rs    # backends command
 │   │   ├── tickets_cmd.rs     # tickets command
 │   │   ├── observe.rs         # observe command (subagent logging)
+│   │   ├── sessions.rs        # sessions command (list sessions)
 │   │   ├── debug.rs           # debug command
 │   │   ├── trace.rs           # trace command
 │   │   └── clean.rs           # clean command
@@ -129,8 +130,8 @@ grove/
 | `TicketCloseIntent` | `core/state` | Pending ticket close (pre-confirmation) |
 | `SubagentObservation` | `core/state` | Observation from subagent (note + timestamp) |
 | `CircuitBreakerState` | `core/state` | Breaker state with `last_blocked_session_id` for reset logic |
-| `TraceEvent` | `core/state` | Individual trace entry |
-| `EventType` | `core/state` | Event type enum |
+| `TraceEvent` | `core/state` | Individual trace entry (event_type, timestamp, details) |
+| `EventType` | `core/state` | SessionStart/TicketDetected/BackendDetected/LearningsInjected/TicketCloseDetected/TicketClosed/TicketCloseFailed/StopHookCalled/GateBlocked/ReflectionComplete/Skip/CircuitBreakerTripped/SessionEnd/ObservationRecorded/LearningReferenced/LearningDismissed/GateStatusChanged |
 
 ### 2.2 Learning Types
 
@@ -235,14 +236,245 @@ Appends to `.grove/learnings.md` in structured markdown format.
 
 ### 4.3 Total Recall Adapter
 
-Translates `CompoundLearning` to Total Recall's format and shells out to
-`recall-write`.
+Translates `CompoundLearning` to Total Recall's format and invokes Total
+Recall commands. This adapter enables Grove to leverage Total Recall's
+tiered memory system while maintaining Grove's structured reflection model.
+
+#### 4.3.1 Detection
+
+Total Recall is detected when both conditions are met:
+
+- `memory/` directory exists in the project root
+- `rules/total-recall.md` OR `.claude/rules/total-recall.md` exists
+
+Detection function in `discovery/backends.rs`:
+
+```rust
+fn probe_total_recall(cwd: &Path) -> Option<BackendInfo> {
+    let memory_dir = cwd.join("memory");
+    let rules_v1 = cwd.join("rules/total-recall.md");
+    let rules_v2 = cwd.join(".claude/rules/total-recall.md");
+
+    if memory_dir.is_dir() && (rules_v1.is_file() || rules_v2.is_file()) {
+        Some(BackendInfo::new(BackendType::TotalRecall, Some(memory_dir), false))
+    } else {
+        None
+    }
+}
+```
+
+#### 4.3.2 Architecture Alignment
+
+Total Recall and Grove share similar write gate philosophies but with
+different criteria. Grove's write gate maps to Total Recall's as follows:
+
+| Grove Criterion | Total Recall Criterion |
+|-----------------|------------------------|
+| `behavior_changing` | Behavioral impact (preferences, patterns) |
+| `decision_rationale` | Decisions (choices with rationale) |
+| `stable_fact` | Stable facts (non-transient info) |
+| `explicit_request` | Explicit requests ("remember this") |
+| — | Commitments (deadlines, deliverables) |
+
+Grove learnings always pass at least one criterion before reaching the
+adapter. The adapter does NOT invoke Total Recall's write gate again —
+it uses `recall-log` for direct capture to avoid double-gating.
+
+#### 4.3.3 Scope to Tier Routing
+
+Grove's learning scopes map to Total Recall's memory tiers:
+
+| Grove Scope | Total Recall Destination | Rationale |
+|-------------|--------------------------|-----------|
+| `Project` | `memory/daily/YYYY-MM-DD.md` | Team-visible via daily log |
+| `Team` | `memory/daily/YYYY-MM-DD.md` | Same as Project |
+| `Personal` | `~/.grove/personal-learnings.md` | Bypasses TR entirely |
+| `Ephemeral` | `memory/daily/YYYY-MM-DD.md` | Captures but no promotion |
+
+**Important:** Grove writes to daily logs only. Promotion to registers
+is a user-driven action via Total Recall's `/recall-promote` command.
+Grove does not auto-promote learnings.
+
+#### 4.3.4 Format Translation
+
+Grove `CompoundLearning` translates to Total Recall daily log format:
+
+**Grove Learning:**
+
+```json
+{
+  "id": "learn-abc123",
+  "category": "Pitfall",
+  "summary": "Using unwrap() in async context causes panics",
+  "detail": "When an async task panics due to unwrap(), the entire...",
+  "scope": "Project",
+  "confidence": "High",
+  "criteria_met": ["behavior_changing"],
+  "tags": ["rust", "async", "error-handling"],
+  "context_files": ["src/api/handler.rs"],
+  "ticket_id": "grove-abc123"
+}
+```
+
+**Total Recall Daily Log Entry:**
+
+```markdown
+## Learnings
+
+[14:32] **Pitfall** (grove:learn-abc123): Using unwrap() in async context causes panics
+> When an async task panics due to unwrap(), the entire...
+
+Tags: #rust #async #error-handling | Confidence: High | Ticket: grove-abc123 | Files: src/api/handler.rs
+```
+
+#### 4.3.5 Functions
 
 | Function | Description |
 |----------|-------------|
-| `write` | Format as recall note, invoke `recall-write` |
-| `search` | Invoke `recall-search`, parse results |
-| `ping` | Check `memory/` dir and `recall-write` availability |
+| `write` | Format learning, append to daily log via `recall-log` |
+| `search` | Invoke `recall-search`, parse results into `Vec<CompoundLearning>` |
+| `ping` | Check `memory/` dir exists and is writable |
+| `format_learning` | Convert `CompoundLearning` to Total Recall daily log format |
+| `parse_search_result` | Parse Total Recall search output to `CompoundLearning` |
+
+#### 4.3.6 Command Invocation
+
+**Write Operation:**
+
+Grove invokes `recall-log` (not `recall-write`) to bypass Total Recall's
+write gate since Grove already applies its own validation:
+
+```rust
+fn write(&self, learning: &CompoundLearning) -> Result<WriteResult> {
+    let note = self.format_learning(learning);
+    let output = Command::new("claude")
+        .args(["skill", "recall-log", &note])
+        .current_dir(&self.project_dir)
+        .output()?;
+
+    if output.status.success() {
+        let daily_log = format!("memory/daily/{}.md", Utc::now().format("%Y-%m-%d"));
+        Ok(WriteResult::success(&learning.id, daily_log))
+    } else {
+        // Fail-open: log warning but don't block
+        let msg = String::from_utf8_lossy(&output.stderr);
+        warn!("Total Recall write failed: {}", msg);
+        Ok(WriteResult::failure(&learning.id, "Backend unavailable"))
+    }
+}
+```
+
+**Search Operation:**
+
+```rust
+fn search(&self, query: &SearchQuery, filters: &SearchFilters) -> Result<Vec<CompoundLearning>> {
+    let search_term = self.build_search_term(query);
+    let output = Command::new("claude")
+        .args(["skill", "recall-search", &search_term])
+        .current_dir(&self.project_dir)
+        .output()?;
+
+    if output.status.success() {
+        self.parse_search_results(&output.stdout)
+    } else {
+        // Fail-open: return empty results
+        warn!("Total Recall search failed: {}", String::from_utf8_lossy(&output.stderr));
+        Ok(vec![])
+    }
+}
+```
+
+#### 4.3.7 Search Term Construction
+
+Grove constructs search terms from available context:
+
+```rust
+fn build_search_term(&self, query: &SearchQuery) -> String {
+    let mut terms = Vec::new();
+
+    // Add ticket context
+    if let Some(title) = &query.ticket_title {
+        terms.push(title.clone());
+    }
+
+    // Add file path stems
+    for path in &query.file_paths {
+        if let Some(stem) = Path::new(path).file_stem() {
+            terms.push(stem.to_string_lossy().to_string());
+        }
+    }
+
+    // Add tags
+    terms.extend(query.tags.iter().cloned());
+
+    terms.join(" ")
+}
+```
+
+#### 4.3.8 Search Result Parsing
+
+Total Recall returns markdown-formatted results. Grove parses these back
+into `CompoundLearning` objects:
+
+```rust
+fn parse_search_results(&self, output: &[u8]) -> Result<Vec<CompoundLearning>> {
+    let text = String::from_utf8_lossy(output);
+    let mut learnings = Vec::new();
+
+    // Pattern: [HH:MM] **Category** (grove:id): Summary
+    let entry_re = Regex::new(
+        r"\[(\d{2}:\d{2})\] \*\*(\w+)\*\* \(grove:([^)]+)\): (.+)"
+    )?;
+
+    for cap in entry_re.captures_iter(&text) {
+        let category = cap[2].parse().unwrap_or(LearningCategory::Pattern);
+        let id = cap[3].to_string();
+        let summary = cap[4].to_string();
+
+        learnings.push(CompoundLearning {
+            id,
+            category,
+            summary,
+            // Detail, tags, etc. may not be fully recoverable from search
+            // results - marked as partial
+            ..Default::default()
+        });
+    }
+
+    Ok(learnings)
+}
+```
+
+**Note:** Search results from Total Recall may not contain all fields
+present in the original learning. The adapter marks these as partial
+results. Full learning details require parsing the daily log file directly.
+
+#### 4.3.9 Supersession Handling
+
+When a Grove learning supersedes an existing one:
+
+1. Grove marks the old learning as `Superseded` in its stats
+2. The adapter prepends a supersession note to the new entry:
+
+```markdown
+[14:45] **Pitfall** (grove:learn-def456): Correct approach for async error handling
+> [supersedes grove:learn-abc123 — previous advice was incomplete]
+> Use `?` operator with proper error context...
+```
+
+This aligns with Total Recall's contradiction protocol.
+
+#### 4.3.10 Error Handling
+
+| Error Condition | Behavior |
+|-----------------|----------|
+| `memory/` not writable | Log warning, return `BackendUnavailable` |
+| `claude` CLI not found | Log warning, return `BackendUnavailable` |
+| Skill invocation fails | Log warning, return `BackendUnavailable` |
+| Parse error on search | Log warning, return empty results |
+
+All errors follow fail-open philosophy: Grove continues operation
+with degraded functionality rather than blocking the user.
 
 ### 4.4 MCP Adapter
 
@@ -340,7 +572,9 @@ Routes through MCP memory server tools.
 | `grove search <query>` | `cli/search` | Search across all active backends |
 | `grove list` | `cli/list` | List recent learnings from active backend |
 | `grove stats` | `cli/stats` | Quality dashboard with insights |
-| `grove maintain` | `cli/maintain` | Review stale learnings, prune, archive |
+| `grove maintain` | `cli/maintain` | Review stale learnings, list candidates |
+| `grove maintain archive <ids>` | `cli/maintain` | Archive specific learnings by ID |
+| `grove maintain restore <ids>` | `cli/maintain` | Restore archived learnings by ID |
 | `grove init` | `cli/init` | Scaffold config, learnings file, session dir |
 | `grove backends` | `cli/backends_cmd` | Show discovered backends and status |
 | `grove tickets` | `cli/tickets_cmd` | Show discovered ticketing system |
@@ -349,6 +583,7 @@ Routes through MCP memory server tools.
 
 | Command | Module | Description |
 |---------|--------|-------------|
+| `grove sessions` | `cli/sessions` | List recent sessions with status |
 | `grove debug <session_id>` | `cli/debug` | Full session state dump |
 | `grove trace <session_id>` | `cli/trace` | Trace event viewer |
 | `grove clean --before <duration>` | `cli/clean` | Remove old session files |

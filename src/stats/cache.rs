@@ -14,6 +14,17 @@ use crate::core::LearningCategory;
 use crate::error::{GroveError, Result};
 use crate::stats::{StatsEvent, StatsEventType, StatsLogger};
 
+/// A rejected candidate summary for retrospective miss detection.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RejectedCandidateSummary {
+    /// Summary text of the rejected candidate.
+    pub summary: String,
+    /// Tags from the rejected candidate.
+    pub tags: Vec<String>,
+    /// When the candidate was rejected.
+    pub rejected_at: DateTime<Utc>,
+}
+
 /// Materialized stats cache.
 ///
 /// Aggregates event log data for fast dashboard reads. Rebuilt from the
@@ -37,6 +48,15 @@ pub struct StatsCache {
     pub cross_pollination: Vec<CrossPollinationEdge>,
     /// Aggregate statistics.
     pub aggregates: AggregateStats,
+    /// Tickets that had skipped reflections.
+    #[serde(default)]
+    pub skipped_tickets: std::collections::HashSet<String>,
+    /// Files from skipped sessions (for file path overlap detection).
+    #[serde(default)]
+    pub skipped_files: std::collections::HashSet<String>,
+    /// Recent rejected candidates for retrospective miss detection.
+    #[serde(default)]
+    pub recent_rejected: Vec<RejectedCandidateSummary>,
 }
 
 impl Default for StatsCache {
@@ -50,6 +70,9 @@ impl Default for StatsCache {
             write_gate: WriteGateStats::default(),
             cross_pollination: Vec::new(),
             aggregates: AggregateStats::default(),
+            skipped_tickets: std::collections::HashSet::new(),
+            skipped_files: std::collections::HashSet::new(),
+            recent_rejected: Vec::new(),
         }
     }
 }
@@ -168,9 +191,18 @@ impl StatsCache {
                 reason: _,
                 decider: _,
                 lines_changed: _,
-                ticket_id: _,
+                ticket_id,
+                context_files,
             } => {
                 self.reflections.skipped += 1;
+                // Track which tickets had skips for SkipMiss detection
+                if let Some(tid) = ticket_id {
+                    self.skipped_tickets.insert(tid.clone());
+                }
+                // Track files from skipped sessions for file path overlap detection
+                for file in context_files {
+                    self.skipped_files.insert(file.clone());
+                }
             }
 
             StatsEventType::Archived {
@@ -186,6 +218,17 @@ impl StatsCache {
                 // Mark learning as not archived
                 let stats = self.learnings.entry(learning_id.clone()).or_default();
                 stats.archived = false;
+            }
+
+            StatsEventType::Rejected {
+                session_id: _,
+                summary,
+                tags,
+                reason: _,
+                stage: _,
+            } => {
+                // Track rejected candidates for retrospective miss detection
+                self.track_rejected_candidate(summary, tags.clone(), event.ts);
             }
         }
     }
@@ -275,6 +318,100 @@ impl StatsCache {
             .rejection_reasons
             .entry(reason.to_string())
             .or_insert(0) += 1;
+    }
+
+    /// Track a rejected candidate for retrospective miss detection.
+    ///
+    /// Stores the summary and tags of rejected candidates to compare
+    /// against future accepted learnings.
+    pub fn track_rejected_candidate(
+        &mut self,
+        summary: &str,
+        tags: Vec<String>,
+        rejected_at: DateTime<Utc>,
+    ) {
+        // Keep only the last 100 rejected candidates to limit memory
+        const MAX_REJECTED: usize = 100;
+
+        self.recent_rejected.push(RejectedCandidateSummary {
+            summary: summary.to_string(),
+            tags,
+            rejected_at,
+        });
+
+        // Trim old entries
+        if self.recent_rejected.len() > MAX_REJECTED {
+            self.recent_rejected
+                .drain(0..self.recent_rejected.len() - MAX_REJECTED);
+        }
+    }
+
+    /// Check if an accepted learning matches a recently rejected candidate.
+    ///
+    /// Returns true if there's significant overlap in summary or tags.
+    pub fn check_retrospective_miss(&self, summary: &str, tags: &[String]) -> bool {
+        for rejected in &self.recent_rejected {
+            // Check tag overlap (any common tag)
+            if tags.iter().any(|t| rejected.tags.contains(t)) {
+                return true;
+            }
+
+            // Check summary similarity (simple word overlap)
+            if has_significant_overlap(summary, &rejected.summary) {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Check for retrospective misses against recent rejected candidates.
+    ///
+    /// Returns the count of accepted learnings that match rejected candidates.
+    pub fn count_retrospective_misses(&self, accepted_learnings: &[(String, Vec<String>)]) -> u32 {
+        let mut count = 0;
+        for (summary, tags) in accepted_learnings {
+            if self.check_retrospective_miss(summary, tags) {
+                count += 1;
+            }
+        }
+        count
+    }
+
+    /// Increment the retrospective misses counter.
+    pub fn add_retrospective_misses(&mut self, count: u32) {
+        self.write_gate.retrospective_misses += count;
+    }
+
+    /// Check if a learning's context files overlap with skipped session files.
+    ///
+    /// Returns true if any of the learning's context files were also
+    /// part of a skipped session, indicating a potential skip miss.
+    pub fn has_skipped_file_overlap(&self, context_files: &[String]) -> bool {
+        for file in context_files {
+            // Check for exact match
+            if self.skipped_files.contains(file) {
+                return true;
+            }
+            // Check for path-based suffix match (e.g., "src/main.rs" matches "/path/to/src/main.rs")
+            // We need to ensure it's a path component match, not just any suffix
+            for skipped in &self.skipped_files {
+                if paths_overlap(file, skipped) {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    /// Get learning IDs that have been corrected.
+    ///
+    /// Returns learning IDs where corrected count > 0.
+    pub fn get_corrected_learning_ids(&self) -> Vec<String> {
+        self.learnings
+            .iter()
+            .filter(|(_, stats)| stats.corrected > 0)
+            .map(|(id, _)| id.clone())
+            .collect()
     }
 }
 
@@ -373,6 +510,43 @@ pub struct AggregateStats {
     /// Stats by scope.
     #[serde(default)]
     pub by_scope: HashMap<String, CategoryStats>,
+}
+
+/// Check if two summaries have significant word overlap.
+///
+/// Returns true if at least 30% of the words in the shorter summary
+/// appear in the longer summary (case-insensitive).
+fn has_significant_overlap(a: &str, b: &str) -> bool {
+    let words_a: std::collections::HashSet<String> =
+        a.split_whitespace().map(|w| w.to_lowercase()).collect();
+    let words_b: std::collections::HashSet<String> =
+        b.split_whitespace().map(|w| w.to_lowercase()).collect();
+
+    if words_a.is_empty() || words_b.is_empty() {
+        return false;
+    }
+
+    let common = words_a.intersection(&words_b).count();
+    let min_words = words_a.len().min(words_b.len());
+
+    // At least 30% overlap in the shorter summary
+    common as f64 / min_words as f64 >= 0.3
+}
+
+/// Check if two file paths represent the same file.
+///
+/// Returns true if:
+/// - The paths are identical
+/// - One path ends with "/" + the other (path suffix match)
+fn paths_overlap(a: &str, b: &str) -> bool {
+    if a == b {
+        return true;
+    }
+    // Check if one is a path suffix of the other
+    // e.g., "src/main.rs" matches "/full/path/to/src/main.rs"
+    let a_with_sep = format!("/{}", a);
+    let b_with_sep = format!("/{}", b);
+    b.ends_with(&a_with_sep) || a.ends_with(&b_with_sep)
 }
 
 /// Stats cache manager that handles loading, saving, and rebuilding.
@@ -537,6 +711,10 @@ mod tests {
             5,
             None,
         ))
+    }
+
+    fn corrected_event(learning_id: &str, session_id: &str) -> StatsEvent {
+        StatsEvent::new(StatsEventType::corrected(learning_id, session_id, None))
     }
 
     // StatsCache tests
@@ -748,6 +926,230 @@ mod tests {
         );
     }
 
+    #[test]
+    fn test_corrected_tracking() {
+        let events = vec![
+            surfaced_event("L001", "s1"),
+            surfaced_event("L002", "s1"),
+            corrected_event("L001", "s2"),
+        ];
+
+        let cache = StatsCache::from_events(&events);
+
+        assert_eq!(cache.learnings.get("L001").unwrap().corrected, 1);
+        assert_eq!(cache.learnings.get("L002").unwrap().corrected, 0);
+    }
+
+    #[test]
+    fn test_get_corrected_learning_ids_empty() {
+        let events = vec![surfaced_event("L001", "s1"), surfaced_event("L002", "s1")];
+
+        let cache = StatsCache::from_events(&events);
+        let corrected = cache.get_corrected_learning_ids();
+
+        assert!(corrected.is_empty());
+    }
+
+    #[test]
+    fn test_get_corrected_learning_ids_returns_corrected_only() {
+        let events = vec![
+            surfaced_event("L001", "s1"),
+            surfaced_event("L002", "s1"),
+            surfaced_event("L003", "s1"),
+            corrected_event("L001", "s2"),
+            corrected_event("L003", "s2"),
+        ];
+
+        let cache = StatsCache::from_events(&events);
+        let mut corrected = cache.get_corrected_learning_ids();
+        corrected.sort();
+
+        assert_eq!(corrected.len(), 2);
+        assert!(corrected.contains(&"L001".to_string()));
+        assert!(corrected.contains(&"L003".to_string()));
+        assert!(!corrected.contains(&"L002".to_string()));
+    }
+
+    // Retrospective miss detection tests
+
+    #[test]
+    fn test_track_rejected_candidate() {
+        let mut cache = StatsCache::new();
+        let ts = Utc::now();
+
+        cache.track_rejected_candidate("test summary", vec!["tag1".to_string()], ts);
+
+        assert_eq!(cache.recent_rejected.len(), 1);
+        assert_eq!(cache.recent_rejected[0].summary, "test summary");
+        assert_eq!(cache.recent_rejected[0].tags, vec!["tag1".to_string()]);
+    }
+
+    #[test]
+    fn test_track_rejected_candidate_limits_size() {
+        let mut cache = StatsCache::new();
+        let ts = Utc::now();
+
+        // Add 150 rejected candidates (max is 100)
+        for i in 0..150 {
+            cache.track_rejected_candidate(&format!("summary {}", i), vec![], ts);
+        }
+
+        // Should be limited to 100
+        assert_eq!(cache.recent_rejected.len(), 100);
+        // Should keep the most recent ones
+        assert_eq!(cache.recent_rejected[0].summary, "summary 50");
+        assert_eq!(cache.recent_rejected[99].summary, "summary 149");
+    }
+
+    #[test]
+    fn test_check_retrospective_miss_tag_match() {
+        let mut cache = StatsCache::new();
+        let ts = Utc::now();
+
+        cache.track_rejected_candidate("implement authentication", vec!["feature".to_string()], ts);
+
+        // New learning with matching tag should be a retrospective miss
+        assert!(
+            cache.check_retrospective_miss("database migration script", &["feature".to_string()])
+        );
+
+        // No matching tag and no summary overlap should not be a retrospective miss
+        assert!(
+            !cache.check_retrospective_miss("database migration script", &["other".to_string()])
+        );
+    }
+
+    #[test]
+    fn test_check_retrospective_miss_summary_overlap() {
+        let mut cache = StatsCache::new();
+        let ts = Utc::now();
+
+        cache.track_rejected_candidate("implement user authentication flow", vec![], ts);
+
+        // High word overlap should be a match
+        assert!(cache.check_retrospective_miss("fixed user authentication flow bug", &[]));
+
+        // No overlap should not match
+        assert!(!cache.check_retrospective_miss("database migration script", &[]));
+    }
+
+    #[test]
+    fn test_count_retrospective_misses() {
+        let mut cache = StatsCache::new();
+        let ts = Utc::now();
+
+        cache.track_rejected_candidate("auth flow", vec!["auth".to_string()], ts);
+        cache.track_rejected_candidate("db migration", vec!["db".to_string()], ts);
+
+        let accepted = vec![
+            (
+                "auth flow improvement".to_string(),
+                vec!["auth".to_string()],
+            ),
+            ("unrelated feature".to_string(), vec!["other".to_string()]),
+            ("database migration fix".to_string(), vec![]),
+        ];
+
+        // Should find 2 retrospective misses (auth and db)
+        let count = cache.count_retrospective_misses(&accepted);
+        assert_eq!(count, 2);
+    }
+
+    #[test]
+    fn test_add_retrospective_misses() {
+        let mut cache = StatsCache::new();
+        assert_eq!(cache.write_gate.retrospective_misses, 0);
+
+        cache.add_retrospective_misses(3);
+        assert_eq!(cache.write_gate.retrospective_misses, 3);
+
+        cache.add_retrospective_misses(2);
+        assert_eq!(cache.write_gate.retrospective_misses, 5);
+    }
+
+    #[test]
+    fn test_has_significant_overlap_no_overlap() {
+        assert!(!has_significant_overlap("apple banana", "cat dog"));
+    }
+
+    #[test]
+    fn test_has_significant_overlap_high_overlap() {
+        assert!(has_significant_overlap(
+            "fix authentication bug",
+            "authentication bug found"
+        ));
+    }
+
+    #[test]
+    fn test_has_significant_overlap_empty_strings() {
+        assert!(!has_significant_overlap("", "hello"));
+        assert!(!has_significant_overlap("hello", ""));
+        assert!(!has_significant_overlap("", ""));
+    }
+
+    // File path overlap tests
+
+    #[test]
+    fn test_skipped_files_tracking() {
+        let events = vec![StatsEvent::new(StatsEventType::skip_with_files(
+            "s1",
+            "no learnings",
+            SkipDecider::Agent,
+            10,
+            None,
+            vec!["src/main.rs".to_string(), "src/lib.rs".to_string()],
+        ))];
+
+        let cache = StatsCache::from_events(&events);
+
+        assert!(cache.skipped_files.contains("src/main.rs"));
+        assert!(cache.skipped_files.contains("src/lib.rs"));
+        assert_eq!(cache.skipped_files.len(), 2);
+    }
+
+    #[test]
+    fn test_has_skipped_file_overlap_exact_match() {
+        let mut cache = StatsCache::new();
+        cache.skipped_files.insert("src/main.rs".to_string());
+
+        assert!(cache.has_skipped_file_overlap(&["src/main.rs".to_string()]));
+        assert!(!cache.has_skipped_file_overlap(&["src/other.rs".to_string()]));
+    }
+
+    #[test]
+    fn test_has_skipped_file_overlap_suffix_match() {
+        let mut cache = StatsCache::new();
+        cache
+            .skipped_files
+            .insert("/full/path/to/src/main.rs".to_string());
+
+        // Should match if one is suffix of the other
+        assert!(cache.has_skipped_file_overlap(&["src/main.rs".to_string()]));
+    }
+
+    #[test]
+    fn test_has_skipped_file_overlap_no_match() {
+        let mut cache = StatsCache::new();
+        cache.skipped_files.insert("src/main.rs".to_string());
+
+        assert!(!cache.has_skipped_file_overlap(&["src/other.rs".to_string()]));
+        assert!(!cache.has_skipped_file_overlap(&[]));
+    }
+
+    #[test]
+    fn test_has_skipped_file_overlap_multiple_files() {
+        let mut cache = StatsCache::new();
+        cache.skipped_files.insert("src/main.rs".to_string());
+        cache.skipped_files.insert("src/lib.rs".to_string());
+
+        // One matching file is enough
+        assert!(
+            cache.has_skipped_file_overlap(&["src/main.rs".to_string(), "other.rs".to_string()])
+        );
+        // No matches
+        assert!(!cache.has_skipped_file_overlap(&["a.rs".to_string(), "b.rs".to_string()]));
+    }
+
     // StatsCacheManager tests
 
     #[test]
@@ -877,5 +1279,157 @@ mod tests {
 
         assert_eq!(cache.log_entries_processed, parsed.log_entries_processed);
         assert_eq!(cache.learnings.len(), parsed.learnings.len());
+    }
+
+    // =========================================================================
+    // Property-based tests
+    // =========================================================================
+
+    mod proptests {
+        use super::*;
+        use proptest::prelude::*;
+
+        proptest! {
+            // Property: Event count equals log_entries_processed
+            #[test]
+            fn prop_event_count_matches_processed(
+                surfaced_count in 0usize..10,
+                referenced_count in 0usize..10,
+            ) {
+                let surfaced: Vec<StatsEvent> = (0..surfaced_count)
+                    .map(|i| StatsEvent::new(StatsEventType::Surfaced {
+                        learning_id: format!("L{:03}", i),
+                        session_id: "s1".to_string(),
+                    }))
+                    .collect();
+
+                let referenced: Vec<StatsEvent> = (0..referenced_count)
+                    .map(|i| StatsEvent::new(StatsEventType::Referenced {
+                        learning_id: format!("L{:03}", i % surfaced_count.max(1)),
+                        session_id: "s1".to_string(),
+                        ticket_id: None,
+                    }))
+                    .collect();
+
+                let events: Vec<StatsEvent> = surfaced.into_iter().chain(referenced).collect();
+                let cache = StatsCache::from_events(&events);
+
+                prop_assert_eq!(cache.log_entries_processed, surfaced_count + referenced_count);
+            }
+
+            // Property: Surfaced count is always >= referenced count for same learning
+            #[test]
+            fn prop_surfaced_geq_referenced(
+                surfaced_times in 1usize..10,
+                referenced_times in 0usize..10,
+            ) {
+                let mut events = Vec::new();
+
+                for _ in 0..surfaced_times {
+                    events.push(StatsEvent::new(StatsEventType::Surfaced {
+                        learning_id: "L001".to_string(),
+                        session_id: "s1".to_string(),
+                    }));
+                }
+
+                for _ in 0..referenced_times {
+                    events.push(StatsEvent::new(StatsEventType::Referenced {
+                        learning_id: "L001".to_string(),
+                        session_id: "s1".to_string(),
+                        ticket_id: None,
+                    }));
+                }
+
+                let cache = StatsCache::from_events(&events);
+                let stats = cache.learnings.get("L001").unwrap();
+
+                prop_assert_eq!(stats.surfaced, surfaced_times as u32);
+                prop_assert_eq!(stats.referenced, referenced_times as u32);
+            }
+
+            // Property: Hit rate is in [0.0, 1.0] when properly computed
+            #[test]
+            fn prop_hit_rate_bounded(
+                surfaced in 1u32..100,
+                referenced in 0u32..100,
+            ) {
+                let mut stats = LearningStats::default();
+                stats.surfaced = surfaced;
+                stats.referenced = referenced.min(surfaced); // Can't reference more than surfaced
+                // Compute hit rate like the cache does
+                stats.hit_rate = if surfaced > 0 {
+                    stats.referenced as f64 / surfaced as f64
+                } else {
+                    0.0
+                };
+
+                prop_assert!(stats.hit_rate >= 0.0);
+                prop_assert!(stats.hit_rate <= 1.0);
+            }
+
+            // Property: Cache serialization is a round-trip
+            #[test]
+            fn prop_cache_json_roundtrip(
+                surfaced_count in 0usize..5,
+                referenced_count in 0usize..5,
+            ) {
+                let mut events = Vec::new();
+
+                for i in 0..surfaced_count {
+                    events.push(StatsEvent::new(StatsEventType::Surfaced {
+                        learning_id: format!("L{:03}", i),
+                        session_id: "s1".to_string(),
+                    }));
+                }
+
+                for i in 0..referenced_count {
+                    events.push(StatsEvent::new(StatsEventType::Referenced {
+                        learning_id: format!("L{:03}", i % surfaced_count.max(1)),
+                        session_id: "s1".to_string(),
+                        ticket_id: None,
+                    }));
+                }
+
+                let cache = StatsCache::from_events(&events);
+                let json = serde_json::to_string(&cache).unwrap();
+                let parsed: StatsCache = serde_json::from_str(&json).unwrap();
+
+                prop_assert_eq!(cache.log_entries_processed, parsed.log_entries_processed);
+                prop_assert_eq!(cache.learnings.len(), parsed.learnings.len());
+            }
+
+            // Property: Staleness detection is correct
+            #[test]
+            fn prop_staleness_detection(
+                processed in 0usize..100,
+                log_count in 0usize..100,
+            ) {
+                let mut cache = StatsCache::new();
+                cache.log_entries_processed = processed;
+
+                let is_stale = cache.is_stale(log_count);
+                let expected_stale = log_count != processed;
+
+                prop_assert_eq!(is_stale, expected_stale);
+            }
+
+            // Property: Archive then restore returns to non-archived state
+            #[test]
+            fn prop_archive_restore_idempotent(_unused in 0..1) {
+                let events = vec![
+                    StatsEvent::new(StatsEventType::Surfaced {
+                        learning_id: "L001".to_string(),
+                        session_id: "s1".to_string(),
+                    }),
+                    StatsEvent::new(StatsEventType::archived("L001", "decay")),
+                    StatsEvent::new(StatsEventType::restored("L001")),
+                ];
+
+                let cache = StatsCache::from_events(&events);
+                let stats = cache.learnings.get("L001").unwrap();
+
+                prop_assert!(!stats.archived);
+            }
+        }
     }
 }

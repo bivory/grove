@@ -143,6 +143,53 @@ impl SessionEndInput {
     }
 }
 
+/// Input for TaskCompleted hook.
+///
+/// Fired when a Claude Code task is marked as completed.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct TaskCompletedInput {
+    /// Common hook input fields.
+    #[serde(flatten)]
+    pub common: HookInput,
+    /// The task's unique identifier.
+    pub task_id: String,
+    /// The task's subject/title.
+    pub task_subject: String,
+    /// Optional task description.
+    #[serde(default)]
+    pub task_description: Option<String>,
+    /// Optional teammate name (for agent teams).
+    #[serde(default)]
+    pub teammate_name: Option<String>,
+    /// Optional team name (for agent teams).
+    #[serde(default)]
+    pub team_name: Option<String>,
+}
+
+impl TaskCompletedInput {
+    /// Create a new task-completed input.
+    pub fn new(
+        common: HookInput,
+        task_id: impl Into<String>,
+        task_subject: impl Into<String>,
+    ) -> Self {
+        Self {
+            common,
+            task_id: task_id.into(),
+            task_subject: task_subject.into(),
+            task_description: None,
+            teammate_name: None,
+            team_name: None,
+        }
+    }
+
+    /// Create a task-completed input with description.
+    pub fn with_description(mut self, description: impl Into<String>) -> Self {
+        self.task_description = Some(description.into());
+        self
+    }
+}
+
 /// Parse hook input from JSON.
 ///
 /// This is a generic parser that handles common error cases.
@@ -407,6 +454,100 @@ mod tests {
         let json = r#"{ "session_id": 123 }"#;
 
         let result: crate::error::Result<HookInput> = parse_input(json);
+        assert!(result.is_err());
+    }
+
+    // TaskCompletedInput tests
+
+    #[test]
+    fn test_task_completed_input_new() {
+        let common = sample_common_input();
+        let input = TaskCompletedInput::new(common.clone(), "task-001", "Implement feature");
+
+        assert_eq!(input.common, common);
+        assert_eq!(input.task_id, "task-001");
+        assert_eq!(input.task_subject, "Implement feature");
+        assert!(input.task_description.is_none());
+        assert!(input.teammate_name.is_none());
+        assert!(input.team_name.is_none());
+    }
+
+    #[test]
+    fn test_task_completed_input_with_description() {
+        let common = sample_common_input();
+        let input = TaskCompletedInput::new(common, "task-001", "Implement feature")
+            .with_description("Add login and signup endpoints");
+
+        assert_eq!(
+            input.task_description,
+            Some("Add login and signup endpoints".to_string())
+        );
+    }
+
+    #[test]
+    fn test_task_completed_input_serialization() {
+        let input = TaskCompletedInput::new(sample_common_input(), "task-001", "Test task")
+            .with_description("Task description");
+
+        let json = serde_json::to_string(&input).unwrap();
+        let parsed: TaskCompletedInput = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(input, parsed);
+    }
+
+    #[test]
+    fn test_task_completed_input_flattened() {
+        let json = r#"{
+            "session_id": "test-session",
+            "transcript_path": "/path/to/transcript.jsonl",
+            "cwd": "/working/dir",
+            "task_id": "task-123",
+            "task_subject": "Implement authentication",
+            "task_description": "Add JWT auth",
+            "teammate_name": "implementer",
+            "team_name": "backend"
+        }"#;
+
+        let input: TaskCompletedInput = serde_json::from_str(json).unwrap();
+
+        assert_eq!(input.common.session_id, "test-session");
+        assert_eq!(input.task_id, "task-123");
+        assert_eq!(input.task_subject, "Implement authentication");
+        assert_eq!(input.task_description, Some("Add JWT auth".to_string()));
+        assert_eq!(input.teammate_name, Some("implementer".to_string()));
+        assert_eq!(input.team_name, Some("backend".to_string()));
+    }
+
+    #[test]
+    fn test_task_completed_input_minimal() {
+        let json = r#"{
+            "session_id": "test-session",
+            "transcript_path": "/path/to/transcript.jsonl",
+            "cwd": "/working/dir",
+            "task_id": "task-456",
+            "task_subject": "Fix bug"
+        }"#;
+
+        let input: TaskCompletedInput = serde_json::from_str(json).unwrap();
+
+        assert_eq!(input.task_id, "task-456");
+        assert_eq!(input.task_subject, "Fix bug");
+        assert!(input.task_description.is_none());
+        assert!(input.teammate_name.is_none());
+        assert!(input.team_name.is_none());
+    }
+
+    #[test]
+    fn test_task_completed_input_missing_required() {
+        // Missing task_subject
+        let json = r#"{
+            "session_id": "test-session",
+            "transcript_path": "/path/to/transcript.jsonl",
+            "cwd": "/working/dir",
+            "task_id": "task-456"
+        }"#;
+
+        let result: Result<TaskCompletedInput, _> = serde_json::from_str(json);
         assert!(result.is_err());
     }
 }

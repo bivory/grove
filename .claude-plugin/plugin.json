@@ -2,25 +2,19 @@
   "name": "grove",
   "version": "0.1.0",
   "description": "Compound learning gate for Claude Code - enforces structured reflection at ticket boundaries with pluggable memory backends",
-  "author": "Grove Contributors",
-  "license": "Apache-2.0",
-  "repository": "https://github.com/user/grove",
-  "homepage": "https://github.com/user/grove",
-  "keywords": [
-    "learning",
-    "reflection",
-    "memory",
-    "claude-code",
-    "productivity"
-  ],
-  "engines": {
-    "claude-code": ">=1.0.0"
+  "author": {
+    "name": "Bryan Ivory",
+    "url": "https://github.com/bivory"
   },
-  "main": "hooks/hooks.json",
-  "postinstall": ".claude-plugin/install.sh",
-  "files": [
-    "hooks/",
-    "skills/",
-    "rules/"
+  "homepage": "https://github.com/bivory/grove",
+  "repository": "https://github.com/bivory/grove",
+  "license": "AGPL-3.0-or-later",
+  "keywords": [
+    "compound-learning",
+    "reflection",
+    "memory"
+  ],
+  "agents": [
+    "./agents/grove.md"
   ]
 }

@@ -574,4 +574,173 @@ mod tests {
         assert_eq!(LearningStatus::default(), LearningStatus::Active);
         assert_eq!(Confidence::default(), Confidence::Medium);
     }
+
+    // =========================================================================
+    // Property-based tests
+    // =========================================================================
+
+    mod proptests {
+        use super::*;
+        use proptest::prelude::*;
+
+        fn arb_category() -> impl Strategy<Value = LearningCategory> {
+            prop_oneof![
+                Just(LearningCategory::Pattern),
+                Just(LearningCategory::Pitfall),
+                Just(LearningCategory::Convention),
+                Just(LearningCategory::Dependency),
+                Just(LearningCategory::Process),
+                Just(LearningCategory::Domain),
+                Just(LearningCategory::Debugging),
+            ]
+        }
+
+        fn arb_scope() -> impl Strategy<Value = LearningScope> {
+            prop_oneof![
+                Just(LearningScope::Project),
+                Just(LearningScope::Personal),
+                Just(LearningScope::Team),
+                Just(LearningScope::Ephemeral),
+            ]
+        }
+
+        fn arb_confidence() -> impl Strategy<Value = Confidence> {
+            prop_oneof![
+                Just(Confidence::High),
+                Just(Confidence::Medium),
+                Just(Confidence::Low),
+            ]
+        }
+
+        fn arb_status() -> impl Strategy<Value = LearningStatus> {
+            prop_oneof![
+                Just(LearningStatus::Active),
+                Just(LearningStatus::Archived),
+                Just(LearningStatus::Superseded),
+            ]
+        }
+
+        fn arb_criterion() -> impl Strategy<Value = WriteGateCriterion> {
+            prop_oneof![
+                Just(WriteGateCriterion::BehaviorChanging),
+                Just(WriteGateCriterion::DecisionRationale),
+                Just(WriteGateCriterion::StableFact),
+                Just(WriteGateCriterion::ExplicitRequest),
+            ]
+        }
+
+        fn arb_criteria() -> impl Strategy<Value = Vec<WriteGateCriterion>> {
+            prop::collection::vec(arb_criterion(), 1..4)
+        }
+
+        fn arb_tags() -> impl Strategy<Value = Vec<String>> {
+            prop::collection::vec("[a-z]{3,10}", 0..5)
+        }
+
+        proptest! {
+            // Property: Category round-trips through JSON
+            #[test]
+            fn prop_category_json_roundtrip(category in arb_category()) {
+                let json = serde_json::to_string(&category).unwrap();
+                let deserialized: LearningCategory = serde_json::from_str(&json).unwrap();
+                prop_assert_eq!(category, deserialized);
+            }
+
+            // Property: Scope round-trips through JSON
+            #[test]
+            fn prop_scope_json_roundtrip(scope in arb_scope()) {
+                let json = serde_json::to_string(&scope).unwrap();
+                let deserialized: LearningScope = serde_json::from_str(&json).unwrap();
+                prop_assert_eq!(scope, deserialized);
+            }
+
+            // Property: Confidence round-trips through JSON
+            #[test]
+            fn prop_confidence_json_roundtrip(confidence in arb_confidence()) {
+                let json = serde_json::to_string(&confidence).unwrap();
+                let deserialized: Confidence = serde_json::from_str(&json).unwrap();
+                prop_assert_eq!(confidence, deserialized);
+            }
+
+            // Property: Status round-trips through JSON
+            #[test]
+            fn prop_status_json_roundtrip(status in arb_status()) {
+                let json = serde_json::to_string(&status).unwrap();
+                let deserialized: LearningStatus = serde_json::from_str(&json).unwrap();
+                prop_assert_eq!(status, deserialized);
+            }
+
+            // Property: Criterion round-trips through JSON
+            #[test]
+            fn prop_criterion_json_roundtrip(criterion in arb_criterion()) {
+                let json = serde_json::to_string(&criterion).unwrap();
+                let deserialized: WriteGateCriterion = serde_json::from_str(&json).unwrap();
+                prop_assert_eq!(criterion, deserialized);
+            }
+
+            // Property: CompoundLearning round-trips through JSON
+            #[test]
+            fn prop_learning_json_roundtrip(
+                category in arb_category(),
+                scope in arb_scope(),
+                confidence in arb_confidence(),
+                criteria in arb_criteria(),
+                tags in arb_tags(),
+                summary in "[a-zA-Z0-9 ]{5,50}",
+                detail in "[a-zA-Z0-9 .,]{10,200}",
+            ) {
+                let learning = CompoundLearning::new(
+                    category,
+                    &summary,
+                    &detail,
+                    scope,
+                    confidence,
+                    criteria.clone(),
+                    tags.clone(),
+                    "session-test",
+                );
+
+                let json = serde_json::to_string(&learning).unwrap();
+                let deserialized: CompoundLearning = serde_json::from_str(&json).unwrap();
+
+                prop_assert_eq!(learning.category, deserialized.category);
+                prop_assert_eq!(learning.summary, deserialized.summary);
+                prop_assert_eq!(learning.detail, deserialized.detail);
+                prop_assert_eq!(learning.scope, deserialized.scope);
+                prop_assert_eq!(learning.confidence, deserialized.confidence);
+                prop_assert_eq!(learning.tags, deserialized.tags);
+            }
+
+            // Property: Personal/Team scope consistency
+            #[test]
+            fn prop_scope_personal_vs_committed(scope in arb_scope()) {
+                // A scope cannot be both personal and committed
+                if scope.is_personal() {
+                    prop_assert!(!scope.is_committed());
+                }
+                if scope.is_committed() {
+                    prop_assert!(!scope.is_personal());
+                }
+            }
+
+            // Property: Active status implies is_active()
+            #[test]
+            fn prop_status_active_consistency(status in arb_status()) {
+                let mut learning = CompoundLearning::new(
+                    LearningCategory::Pattern,
+                    "Test",
+                    "Detail",
+                    LearningScope::Project,
+                    Confidence::High,
+                    vec![WriteGateCriterion::BehaviorChanging],
+                    vec![],
+                    "session",
+                );
+                learning.status = status;
+
+                let is_active = learning.is_active();
+                prop_assert_eq!(is_active, status == LearningStatus::Active);
+            }
+        }
+    }
 }

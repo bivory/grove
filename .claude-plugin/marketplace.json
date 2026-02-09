@@ -1,0 +1,13 @@
+{
+  "name": "bivory",
+  "owner": "Bryan Ivory",
+  "description": "Marketplace for grove - compound learning gate for Claude Code",
+  "plugins": [
+    {
+      "name": "grove",
+      "source": "./",
+      "version": "0.1.0",
+      "description": "Compound learning gate for Claude Code - enforces structured reflection at ticket boundaries"
+    }
+  ]
+}

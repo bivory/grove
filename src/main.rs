@@ -195,6 +195,19 @@ enum Commands {
         quiet: bool,
     },
 
+    /// [Developer] List recent sessions
+    Sessions {
+        /// Output as JSON
+        #[arg(long, short)]
+        json: bool,
+        /// Suppress output
+        #[arg(long, short)]
+        quiet: bool,
+        /// Maximum number of sessions to show
+        #[arg(long, short, default_value = "20")]
+        limit: usize,
+    },
+
     /// [Developer] Debug session state
     Debug {
         /// Session ID to inspect
@@ -393,6 +406,7 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
         Commands::Init { json, quiet, force } => run_init(json, quiet, force, &cwd),
         Commands::Backends { json, quiet } => run_backends(json, quiet, &cwd),
         Commands::Tickets { json, quiet } => run_tickets(json, quiet, &cwd),
+        Commands::Sessions { json, quiet, limit } => run_sessions(json, quiet, limit),
         Commands::Debug {
             session_id,
             quiet,
@@ -751,6 +765,31 @@ fn run_tickets(
     Ok(ExitCode::from(exit_codes::APPROVE as u8))
 }
 
+fn run_sessions(
+    json: bool,
+    quiet: bool,
+    limit: usize,
+) -> Result<ExitCode, Box<dyn std::error::Error>> {
+    use grove::cli::sessions::{SessionsCommand, SessionsOptions};
+
+    let store = FileSessionStore::new()?;
+
+    let cmd = SessionsCommand::new(store);
+    let options = SessionsOptions { json, quiet, limit };
+
+    let output = cmd.run(&options);
+
+    if !quiet {
+        if json {
+            println!("{}", serde_json::to_string_pretty(&output)?);
+        } else {
+            println!("{}", output.format_text());
+        }
+    }
+
+    Ok(ExitCode::from(exit_codes::APPROVE as u8))
+}
+
 fn run_debug(
     session_id: &str,
     quiet: bool,
@@ -930,6 +969,18 @@ mod tests {
                 assert!(json);
             }
             _ => panic!("Expected Init command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_sessions() {
+        let cli = Cli::parse_from(["grove", "sessions", "--limit", "50", "--json"]);
+        match cli.command {
+            Commands::Sessions { json, limit, .. } => {
+                assert!(json);
+                assert_eq!(limit, 50);
+            }
+            _ => panic!("Expected Sessions command"),
         }
     }
 

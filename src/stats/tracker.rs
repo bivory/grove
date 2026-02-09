@@ -124,6 +124,9 @@ pub enum StatsEventType {
         /// The ticket associated with the skip (if any).
         #[serde(skip_serializing_if = "Option::is_none")]
         ticket_id: Option<String>,
+        /// Files that were modified during the skipped session.
+        #[serde(default)]
+        context_files: Vec<String>,
     },
 
     /// A learning was archived due to passive decay.
@@ -138,6 +141,21 @@ pub enum StatsEventType {
     Restored {
         /// The learning that was restored.
         learning_id: String,
+    },
+
+    /// A candidate was rejected during reflection.
+    Rejected {
+        /// The session where rejection occurred.
+        session_id: String,
+        /// Summary of the rejected candidate.
+        summary: String,
+        /// Tags from the rejected candidate (if available).
+        #[serde(default)]
+        tags: Vec<String>,
+        /// Why the candidate was rejected.
+        reason: String,
+        /// At which stage the candidate was rejected.
+        stage: String,
     },
 }
 
@@ -217,6 +235,26 @@ impl StatsEventType {
             decider,
             lines_changed,
             ticket_id,
+            context_files: Vec::new(),
+        }
+    }
+
+    /// Create a skip event with context files.
+    pub fn skip_with_files(
+        session_id: impl Into<String>,
+        reason: impl Into<String>,
+        decider: SkipDecider,
+        lines_changed: u32,
+        ticket_id: Option<String>,
+        context_files: Vec<String>,
+    ) -> Self {
+        Self::Skip {
+            session_id: session_id.into(),
+            reason: reason.into(),
+            decider,
+            lines_changed,
+            ticket_id,
+            context_files,
         }
     }
 
@@ -235,6 +273,23 @@ impl StatsEventType {
         }
     }
 
+    /// Create a rejected event.
+    pub fn rejected(
+        session_id: impl Into<String>,
+        summary: impl Into<String>,
+        tags: Vec<String>,
+        reason: impl Into<String>,
+        stage: impl Into<String>,
+    ) -> Self {
+        Self::Rejected {
+            session_id: session_id.into(),
+            summary: summary.into(),
+            tags,
+            reason: reason.into(),
+            stage: stage.into(),
+        }
+    }
+
     /// Get the event name as a string.
     pub fn event_name(&self) -> &'static str {
         match self {
@@ -246,6 +301,7 @@ impl StatsEventType {
             Self::Skip { .. } => "skip",
             Self::Archived { .. } => "archived",
             Self::Restored { .. } => "restored",
+            Self::Rejected { .. } => "rejected",
         }
     }
 }
@@ -406,6 +462,21 @@ impl StatsLogger {
     /// Append a restored event.
     pub fn append_restored(&self, learning_id: impl Into<String>) -> Result<()> {
         let event = StatsEvent::new(StatsEventType::restored(learning_id));
+        self.append(&event)
+    }
+
+    /// Append a rejected event.
+    pub fn append_rejected(
+        &self,
+        session_id: impl Into<String>,
+        summary: impl Into<String>,
+        tags: Vec<String>,
+        reason: impl Into<String>,
+        stage: impl Into<String>,
+    ) -> Result<()> {
+        let event = StatsEvent::new(StatsEventType::rejected(
+            session_id, summary, tags, reason, stage,
+        ));
         self.append(&event)
     }
 
@@ -605,6 +676,7 @@ mod tests {
             decider,
             lines_changed,
             ticket_id,
+            context_files,
         } = event
         {
             assert_eq!(session_id, "session-123");
@@ -612,6 +684,28 @@ mod tests {
             assert_eq!(decider, SkipDecider::Agent);
             assert_eq!(lines_changed, 2);
             assert_eq!(ticket_id, Some("T042".to_string()));
+            assert!(context_files.is_empty());
+        } else {
+            panic!("Expected Skip event");
+        }
+    }
+
+    #[test]
+    fn test_skip_event_with_files() {
+        let event = StatsEventType::skip_with_files(
+            "session-456",
+            "no learnings",
+            SkipDecider::User,
+            10,
+            None,
+            vec!["src/main.rs".to_string(), "src/lib.rs".to_string()],
+        );
+        assert_eq!(event.event_name(), "skip");
+
+        if let StatsEventType::Skip { context_files, .. } = event {
+            assert_eq!(context_files.len(), 2);
+            assert!(context_files.contains(&"src/main.rs".to_string()));
+            assert!(context_files.contains(&"src/lib.rs".to_string()));
         } else {
             panic!("Expected Skip event");
         }
@@ -643,6 +737,35 @@ mod tests {
             assert_eq!(learning_id, "L002");
         } else {
             panic!("Expected Restored event");
+        }
+    }
+
+    #[test]
+    fn test_rejected_event() {
+        let event = StatsEventType::rejected(
+            "session-1",
+            "test summary",
+            vec!["tag1".to_string(), "tag2".to_string()],
+            "schema_validation",
+            "Schema",
+        );
+        assert_eq!(event.event_name(), "rejected");
+
+        if let StatsEventType::Rejected {
+            session_id,
+            summary,
+            tags,
+            reason,
+            stage,
+        } = event
+        {
+            assert_eq!(session_id, "session-1");
+            assert_eq!(summary, "test summary");
+            assert_eq!(tags, vec!["tag1".to_string(), "tag2".to_string()]);
+            assert_eq!(reason, "schema_validation");
+            assert_eq!(stage, "Schema");
+        } else {
+            panic!("Expected Rejected event");
         }
     }
 

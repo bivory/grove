@@ -57,6 +57,17 @@
           }
         ]
       }
+    ],
+    "TaskCompleted": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "grove hook task-completed",
+            "timeout": 10
+          }
+        ]
+      }
     ]
   }
 }

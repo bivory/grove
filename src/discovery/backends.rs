@@ -16,6 +16,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use crate::backends::{MarkdownBackend, MemoryBackend, TotalRecallBackend};
 use crate::config::{project_grove_dir, project_learnings_path, BackendsConfig, Config};
 use crate::error::Result;
 
@@ -180,11 +181,23 @@ fn probe_config(cwd: &Path) -> Option<BackendInfo> {
 
 /// Probe for Total Recall memory system.
 ///
-/// Stage 2 implementation - currently returns None.
-fn probe_total_recall(_cwd: &Path) -> Option<BackendInfo> {
-    // Total Recall detection deferred to Stage 2
-    // Would check for memory/ directory + rules/total-recall.md
-    None
+/// Detects Total Recall by checking for:
+/// - `memory/` directory exists
+/// - AND either `rules/total-recall.md` OR `.claude/rules/total-recall.md` exists
+fn probe_total_recall(cwd: &Path) -> Option<BackendInfo> {
+    let memory_dir = cwd.join("memory");
+    let rules_v1 = cwd.join("rules/total-recall.md");
+    let rules_v2 = cwd.join(".claude/rules/total-recall.md");
+
+    if memory_dir.is_dir() && (rules_v1.is_file() || rules_v2.is_file()) {
+        Some(BackendInfo::new(
+            BackendType::TotalRecall,
+            Some(memory_dir),
+            false,
+        ))
+    } else {
+        None
+    }
 }
 
 /// Probe for MCP memory server.
@@ -253,6 +266,57 @@ pub fn create_default_backend(cwd: &Path) -> Result<PathBuf> {
     }
 
     Ok(learnings_path)
+}
+
+/// Create the primary memory backend based on detected backends.
+///
+/// This is the main entry point for multi-backend routing. It:
+/// 1. Detects available backends in the project
+/// 2. Selects the primary backend (first detected in discovery order)
+/// 3. Creates and returns the appropriate backend instance
+///
+/// **Scope routing** happens inside each backend:
+/// - Project/Team → configured storage location
+/// - Personal → `~/.grove/personal-learnings.md`
+/// - Ephemeral → daily log (Total Recall) or discarded (Markdown)
+///
+/// # Arguments
+///
+/// * `cwd` - The project's working directory
+/// * `config` - Optional configuration for discovery and overrides
+///
+/// # Returns
+///
+/// A boxed memory backend ready for use.
+pub fn create_primary_backend(cwd: &Path, config: Option<&Config>) -> Box<dyn MemoryBackend> {
+    let backends = detect_backends(cwd, config);
+
+    // Find the primary backend
+    let primary = backends.into_iter().find(|b| b.is_primary);
+
+    match primary {
+        Some(info) => match info.backend_type {
+            BackendType::TotalRecall => {
+                let memory_dir = info.path.unwrap_or_else(|| cwd.join("memory"));
+                Box::new(TotalRecallBackend::new(&memory_dir, cwd))
+            }
+            BackendType::Config | BackendType::Mcp => {
+                // Config and MCP currently fall back to markdown
+                // MCP support is Stage 2
+                let path = project_learnings_path(cwd);
+                Box::new(MarkdownBackend::new(&path))
+            }
+            BackendType::Markdown => {
+                let path = info.path.unwrap_or_else(|| project_learnings_path(cwd));
+                Box::new(MarkdownBackend::new(&path))
+            }
+        },
+        None => {
+            // No backends detected (shouldn't happen, but fallback to markdown)
+            let path = project_learnings_path(cwd);
+            Box::new(MarkdownBackend::new(&path))
+        }
+    }
 }
 
 #[cfg(test)]
@@ -372,10 +436,71 @@ mod tests {
     // probe_total_recall tests
 
     #[test]
-    fn test_probe_total_recall_returns_none() {
+    fn test_probe_total_recall_with_memory_and_rules_v1() {
         let dir = TempDir::new().unwrap();
 
-        // Stage 2: always returns None
+        // Create memory/ directory and rules/total-recall.md
+        fs::create_dir_all(dir.path().join("memory")).unwrap();
+        fs::create_dir_all(dir.path().join("rules")).unwrap();
+        fs::write(dir.path().join("rules/total-recall.md"), "# Total Recall").unwrap();
+
+        let result = probe_total_recall(dir.path());
+
+        assert!(result.is_some());
+        let info = result.unwrap();
+        assert_eq!(info.backend_type, BackendType::TotalRecall);
+        assert!(info.path.unwrap().ends_with("memory"));
+    }
+
+    #[test]
+    fn test_probe_total_recall_with_memory_and_rules_v2() {
+        let dir = TempDir::new().unwrap();
+
+        // Create memory/ directory and .claude/rules/total-recall.md
+        fs::create_dir_all(dir.path().join("memory")).unwrap();
+        fs::create_dir_all(dir.path().join(".claude/rules")).unwrap();
+        fs::write(
+            dir.path().join(".claude/rules/total-recall.md"),
+            "# Total Recall",
+        )
+        .unwrap();
+
+        let result = probe_total_recall(dir.path());
+
+        assert!(result.is_some());
+        let info = result.unwrap();
+        assert_eq!(info.backend_type, BackendType::TotalRecall);
+    }
+
+    #[test]
+    fn test_probe_total_recall_memory_only() {
+        let dir = TempDir::new().unwrap();
+
+        // Create only memory/ directory (no rules file)
+        fs::create_dir_all(dir.path().join("memory")).unwrap();
+
+        let result = probe_total_recall(dir.path());
+
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_probe_total_recall_rules_only() {
+        let dir = TempDir::new().unwrap();
+
+        // Create only rules file (no memory/ directory)
+        fs::create_dir_all(dir.path().join("rules")).unwrap();
+        fs::write(dir.path().join("rules/total-recall.md"), "# Total Recall").unwrap();
+
+        let result = probe_total_recall(dir.path());
+
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_probe_total_recall_empty_dir() {
+        let dir = TempDir::new().unwrap();
+
         let result = probe_total_recall(dir.path());
 
         assert!(result.is_none());
@@ -616,5 +741,85 @@ mod tests {
 
         // Should gracefully return None
         assert!(result.is_none());
+    }
+
+    // create_primary_backend tests
+
+    #[test]
+    fn test_create_primary_backend_markdown_default() {
+        let dir = TempDir::new().unwrap();
+
+        let backend = create_primary_backend(dir.path(), None);
+
+        // Should create a working backend
+        assert_eq!(backend.name(), "markdown");
+        assert!(backend.ping());
+    }
+
+    #[test]
+    fn test_create_primary_backend_detects_total_recall() {
+        let dir = TempDir::new().unwrap();
+
+        // Create Total Recall structure
+        fs::create_dir_all(dir.path().join("memory")).unwrap();
+        fs::create_dir_all(dir.path().join("rules")).unwrap();
+        fs::write(dir.path().join("rules/total-recall.md"), "# Total Recall").unwrap();
+
+        let backend = create_primary_backend(dir.path(), None);
+
+        // Should detect and create Total Recall backend
+        assert_eq!(backend.name(), "total-recall");
+    }
+
+    #[test]
+    fn test_create_primary_backend_with_config_override() {
+        let dir = TempDir::new().unwrap();
+
+        // Create Total Recall structure
+        fs::create_dir_all(dir.path().join("memory")).unwrap();
+        fs::create_dir_all(dir.path().join("rules")).unwrap();
+        fs::write(dir.path().join("rules/total-recall.md"), "# Total Recall").unwrap();
+
+        // But disable total-recall in config
+        let config = Config {
+            backends: BackendsConfig {
+                discovery: vec!["total-recall".to_string(), "markdown".to_string()],
+                overrides: {
+                    let mut m = HashMap::new();
+                    m.insert("total-recall".to_string(), false);
+                    m
+                },
+            },
+            ..Config::default()
+        };
+
+        let backend = create_primary_backend(dir.path(), Some(&config));
+
+        // Should fall back to markdown because TR is disabled
+        assert_eq!(backend.name(), "markdown");
+    }
+
+    #[test]
+    fn test_create_primary_backend_markdown_only_config() {
+        let dir = TempDir::new().unwrap();
+
+        // Create Total Recall structure (would normally be detected)
+        fs::create_dir_all(dir.path().join("memory")).unwrap();
+        fs::create_dir_all(dir.path().join("rules")).unwrap();
+        fs::write(dir.path().join("rules/total-recall.md"), "# Total Recall").unwrap();
+
+        // Config only includes markdown in discovery
+        let config = Config {
+            backends: BackendsConfig {
+                discovery: vec!["markdown".to_string()],
+                overrides: HashMap::new(),
+            },
+            ..Config::default()
+        };
+
+        let backend = create_primary_backend(dir.path(), Some(&config));
+
+        // Should use markdown because it's the only one in discovery list
+        assert_eq!(backend.name(), "markdown");
     }
 }

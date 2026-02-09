@@ -22,6 +22,7 @@ pub mod backends_cmd;
 pub mod clean;
 pub mod debug;
 pub mod init;
+pub mod sessions;
 pub mod tickets_cmd;
 pub mod trace;
 
@@ -34,6 +35,7 @@ pub use maintain::MaintainCommand;
 pub use observe::ObserveCommand;
 pub use reflect::ReflectCommand;
 pub use search::SearchCommand;
+pub use sessions::SessionsCommand;
 pub use skip::SkipCommand;
 pub use stats::StatsCommand;
 pub use tickets_cmd::TicketsCommand;

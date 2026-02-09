@@ -192,11 +192,11 @@ Captured by the `skip` event type.
 | `lines_changed` | Diff size at time of skip |
 | `ticket_id` | Associated ticket (if any) |
 
-**Retrospective skip miss detection**: When a session that was skipped
-touches the same files as a later session that produces learnings, it
+**Retrospective skip miss detection**: When a session on a ticket was
+skipped but a later session on the same ticket produces learnings, it
 suggests the skip may have been premature. Detection runs during
 `grove stats` generation by cross-referencing skip events with subsequent
-reflection events that share overlapping file paths.
+learnings that share the same ticket ID.
 
 ## 5. Cross-Pollination
 

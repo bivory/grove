@@ -1,0 +1,108 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    name: Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@nextest
+      - uses: jdx/mise-action@v2
+
+      - name: Format check
+        run: mise run fmt:check
+
+      - name: Clippy
+        run: mise run clippy
+
+      - name: Test
+        run: mise run test
+
+      - name: Typos
+        run: mise run typos
+
+      - name: Docs lint
+        run: mise run docs:lint
+
+      - name: Duplication check
+        run: mise run dupes
+
+  security:
+    name: Security
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: jdx/mise-action@v2
+
+      - name: Audit
+        run: mise run audit
+
+      - name: Deny
+        run: mise run deny
+
+  coverage:
+    name: Coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+      - uses: jdx/mise-action@v2
+
+      - name: Coverage
+        run: mise run coverage
+
+  msrv:
+    name: MSRV (1.75.0)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.75.0
+      - uses: taiki-e/install-action@nextest
+
+      - name: Build (MSRV)
+        run: cargo build
+
+      - name: Test (MSRV)
+        run: cargo nextest run
+
+  platforms:
+    name: Platform (${{ matrix.target }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+          - os: macos-latest
+            target: aarch64-apple-darwin
+          - os: macos-13
+            target: x86_64-apple-darwin
+
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: taiki-e/install-action@nextest
+
+      - name: Build
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Test
+        run: cargo nextest run

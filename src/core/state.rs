@@ -346,6 +346,8 @@ pub enum EventType {
     ObservationRecorded,
     /// Learning referenced during session.
     LearningReferenced,
+    /// Correction notice injected.
+    CorrectionNotice,
     /// Learning dismissed (not used).
     LearningDismissed,
     /// Gate status changed.

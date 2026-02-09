@@ -906,4 +906,125 @@ mod tests {
         }
         assert!(state.circuit_breaker_tripped);
     }
+
+    // =========================================================================
+    // Property-based tests
+    // =========================================================================
+
+    mod proptests {
+        use super::*;
+        use proptest::prelude::*;
+
+        fn arb_gate_status() -> impl Strategy<Value = GateStatus> {
+            prop_oneof![
+                Just(GateStatus::Idle),
+                Just(GateStatus::Active),
+                Just(GateStatus::Pending),
+                Just(GateStatus::Blocked),
+                Just(GateStatus::Reflected),
+                Just(GateStatus::Skipped),
+            ]
+        }
+
+        proptest! {
+            // Property: Terminal states are never reflection-requiring
+            #[test]
+            fn prop_terminal_never_requires_reflection(status in arb_gate_status()) {
+                if status.is_terminal() {
+                    prop_assert!(!status.requires_reflection());
+                }
+            }
+
+            // Property: Only Pending and Blocked require reflection
+            #[test]
+            fn prop_only_pending_blocked_require_reflection(status in arb_gate_status()) {
+                let requires = status.requires_reflection();
+                let expected = matches!(status, GateStatus::Pending | GateStatus::Blocked);
+                prop_assert_eq!(requires, expected);
+            }
+
+            // Property: Block count is monotonically increasing until reset
+            #[test]
+            fn prop_block_increments_on_block(
+                initial_count in 0u32..10,
+                max_blocks in 3u32..20,
+            ) {
+                let mut state = GateState {
+                    status: GateStatus::Pending,
+                    block_count: initial_count,
+                    ..Default::default()
+                };
+                let mut config = Config::default();
+                config.circuit_breaker.max_blocks = max_blocks;
+
+                let mut gate = Gate::new(&mut state, &config, "session-1");
+                let tripped = gate.block().unwrap();
+
+                if initial_count + 1 >= max_blocks {
+                    // Circuit breaker trips
+                    prop_assert!(tripped);
+                    prop_assert!(state.circuit_breaker_tripped);
+                } else {
+                    // Counter incremented
+                    prop_assert!(!tripped);
+                    prop_assert_eq!(state.block_count, initial_count + 1);
+                }
+            }
+
+            // Property: Skip always transitions to Skipped from valid states
+            #[test]
+            fn prop_skip_from_valid_states_succeeds(status in arb_gate_status()) {
+                let valid_for_skip = matches!(status, GateStatus::Pending | GateStatus::Blocked);
+                let mut state = GateState {
+                    status,
+                    ..Default::default()
+                };
+                let config = Config::default();
+                let mut gate = Gate::new(&mut state, &config, "session-1");
+
+                let result = gate.skip("test reason", SkipDecider::User);
+                prop_assert_eq!(result.is_ok(), valid_for_skip);
+                if result.is_ok() {
+                    prop_assert_eq!(state.status, GateStatus::Skipped);
+                }
+            }
+
+            // Property: Reflection always transitions to Reflected from Blocked
+            #[test]
+            fn prop_reflection_from_blocked_succeeds(
+                candidates in 0u32..100,
+                accepted in 0u32..100,
+            ) {
+                let mut state = GateState {
+                    status: GateStatus::Blocked,
+                    block_count: 5,
+                    ..Default::default()
+                };
+                let config = Config::default();
+                let mut gate = Gate::new(&mut state, &config, "session-1");
+
+                let result = ReflectionResult::new(vec![], candidates, accepted);
+                gate.complete_reflection(result).unwrap();
+
+                prop_assert_eq!(state.status, GateStatus::Reflected);
+                prop_assert_eq!(state.block_count, 0); // Reset on reflection
+            }
+
+            // Property: detect_ticket only succeeds from Idle
+            #[test]
+            fn prop_detect_ticket_only_from_idle(status in arb_gate_status()) {
+                let mut state = GateState {
+                    status,
+                    ..Default::default()
+                };
+                let config = Config::default();
+                let mut gate = Gate::new(&mut state, &config, "session-1");
+
+                let ticket = TicketContext::new("T-1", "tissue", "Test");
+                let result = gate.detect_ticket(ticket);
+
+                prop_assert_eq!(result.is_ok(), status == GateStatus::Idle);
+            }
+        }
+    }
 }

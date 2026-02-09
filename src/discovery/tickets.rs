@@ -6,7 +6,7 @@
 //! Supported ticketing systems:
 //! - **tissue**: Check for `.tissue/` directory
 //! - **beads**: Check for `.beads/` directory
-//! - **tasks**: Claude Code tasks (Stage 2)
+//! - **tasks**: Claude Code tasks (opt-in via config)
 //! - **session**: Always available (fallback)
 
 use std::path::Path;
@@ -23,7 +23,7 @@ pub enum TicketingSystem {
     Tissue,
     /// beads ticketing system (`.beads/` directory).
     Beads,
-    /// Claude Code tasks (Stage 2 - not yet implemented).
+    /// Claude Code tasks (opt-in via config).
     Tasks,
     /// Session fallback (always available).
     Session,
@@ -131,7 +131,7 @@ fn detect_with_config(cwd: &Path, config: &TicketingConfig) -> TicketingInfo {
         };
 
         // Probe for the system
-        if let Some(info) = probe_system(cwd, system) {
+        if let Some(info) = probe_system(cwd, system, config) {
             return info;
         }
     }
@@ -141,11 +141,15 @@ fn detect_with_config(cwd: &Path, config: &TicketingConfig) -> TicketingInfo {
 }
 
 /// Probe for a specific ticketing system.
-fn probe_system(cwd: &Path, system: TicketingSystem) -> Option<TicketingInfo> {
+fn probe_system(
+    cwd: &Path,
+    system: TicketingSystem,
+    config: &TicketingConfig,
+) -> Option<TicketingInfo> {
     match system {
         TicketingSystem::Tissue => probe_tissue(cwd),
         TicketingSystem::Beads => probe_beads(cwd),
-        TicketingSystem::Tasks => probe_tasks(cwd),
+        TicketingSystem::Tasks => probe_tasks(config),
         TicketingSystem::Session => Some(TicketingInfo::new(TicketingSystem::Session, None)),
     }
 }
@@ -179,10 +183,15 @@ pub fn probe_beads(cwd: &Path) -> Option<TicketingInfo> {
 
 /// Probe for Claude Code tasks.
 ///
-/// Stage 2 implementation - currently returns None.
-pub fn probe_tasks(_cwd: &Path) -> Option<TicketingInfo> {
-    // Claude Code tasks detection deferred to Stage 2
-    None
+/// Tasks mode uses config-based opt-in since there's no filesystem marker.
+/// Enable via `[ticketing.overrides] tasks = true` in config.
+pub fn probe_tasks(config: &TicketingConfig) -> Option<TicketingInfo> {
+    // Tasks mode requires explicit opt-in via config
+    if config.overrides.get("tasks") == Some(&true) {
+        Some(TicketingInfo::new(TicketingSystem::Tasks, None))
+    } else {
+        None
+    }
 }
 
 /// Match a command against ticket close patterns.
@@ -413,12 +422,32 @@ mod tests {
     // probe_tasks tests
 
     #[test]
-    fn test_probe_tasks_returns_none() {
-        let dir = TempDir::new().unwrap();
+    fn test_probe_tasks_returns_none_without_opt_in() {
+        // Without explicit opt-in, returns None
+        let config = TicketingConfig::default();
+        let result = probe_tasks(&config);
+        assert!(result.is_none());
+    }
 
-        // Stage 2: always returns None
-        let result = probe_tasks(dir.path());
+    #[test]
+    fn test_probe_tasks_returns_some_with_opt_in() {
+        let mut config = TicketingConfig::default();
+        config.overrides.insert("tasks".to_string(), true);
 
+        let result = probe_tasks(&config);
+
+        assert!(result.is_some());
+        let info = result.unwrap();
+        assert_eq!(info.system, TicketingSystem::Tasks);
+        assert!(info.marker_path.is_none());
+    }
+
+    #[test]
+    fn test_probe_tasks_disabled_override() {
+        let mut config = TicketingConfig::default();
+        config.overrides.insert("tasks".to_string(), false);
+
+        let result = probe_tasks(&config);
         assert!(result.is_none());
     }
 
@@ -522,6 +551,77 @@ mod tests {
 
         // All disabled, fallback to session
         assert_eq!(result.system, TicketingSystem::Session);
+    }
+
+    #[test]
+    fn test_detect_tasks_with_opt_in() {
+        let dir = TempDir::new().unwrap();
+
+        let mut config = Config::default();
+        config.ticketing.overrides.insert("tasks".to_string(), true);
+
+        let result = detect_ticketing_system(dir.path(), Some(&config));
+
+        // Tasks should be detected (enabled via config)
+        assert_eq!(result.system, TicketingSystem::Tasks);
+        assert!(result.marker_path.is_none());
+    }
+
+    #[test]
+    fn test_detect_tasks_requires_opt_in() {
+        let dir = TempDir::new().unwrap();
+        // No config overrides - tasks should not be detected
+        let result = detect_ticketing_system(dir.path(), None);
+
+        // Should fall back to session (tasks not enabled)
+        assert_eq!(result.system, TicketingSystem::Session);
+    }
+
+    #[test]
+    fn test_detect_tasks_priority_over_session() {
+        let dir = TempDir::new().unwrap();
+
+        let mut config = Config::default();
+        // Enable tasks - it should be found before session fallback
+        config.ticketing.overrides.insert("tasks".to_string(), true);
+
+        let result = detect_ticketing_system(dir.path(), Some(&config));
+
+        assert_eq!(result.system, TicketingSystem::Tasks);
+    }
+
+    #[test]
+    fn test_detect_tissue_over_tasks() {
+        let dir = TempDir::new().unwrap();
+        std::fs::create_dir(dir.path().join(".tissue")).unwrap();
+
+        let mut config = Config::default();
+        config.ticketing.overrides.insert("tasks".to_string(), true);
+
+        let result = detect_ticketing_system(dir.path(), Some(&config));
+
+        // tissue has higher priority by default
+        assert_eq!(result.system, TicketingSystem::Tissue);
+    }
+
+    #[test]
+    fn test_detect_tasks_with_custom_priority() {
+        let dir = TempDir::new().unwrap();
+        std::fs::create_dir(dir.path().join(".tissue")).unwrap();
+
+        let mut config = Config::default();
+        // Put tasks first in discovery order
+        config.ticketing.discovery = vec![
+            "tasks".to_string(),
+            "tissue".to_string(),
+            "session".to_string(),
+        ];
+        config.ticketing.overrides.insert("tasks".to_string(), true);
+
+        let result = detect_ticketing_system(dir.path(), Some(&config));
+
+        // tasks should be detected first now
+        assert_eq!(result.system, TicketingSystem::Tasks);
     }
 
     // match_close_command tests

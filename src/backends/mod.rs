@@ -9,7 +9,9 @@
 //! - **MCP**: Adapter for MCP memory servers
 
 pub mod markdown;
+pub mod total_recall;
 pub mod traits;
 
 pub use markdown::MarkdownBackend;
+pub use total_recall::TotalRecallBackend;
 pub use traits::{MemoryBackend, SearchFilters, SearchQuery, SearchResult, WriteResult};

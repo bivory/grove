@@ -120,6 +120,12 @@ classDiagram
         +status : LearningStatus
     }
 
+    class TraceEvent {
+        +event_type : EventType
+        +timestamp : DateTime
+        +details : string?
+    }
+
     class SkipDecision {
         +reason
         +decider : SkipDecider
@@ -135,6 +141,7 @@ classDiagram
 
     Session *-- GateState
     Session *-- TicketContext
+    Session *-- TraceEvent
     GateState *-- ReflectionResult
     GateState *-- SkipDecision
     GateState *-- InjectedLearning
@@ -182,6 +189,45 @@ stateDiagram-v2
     Archived --> Active : restored via grove maintain
     Superseded --> [*] : permanent
 ```
+
+### 3.5 Confidence Levels
+
+| Confidence | Description |
+|------------|-------------|
+| **High** | Well tested, established, or explicitly confirmed |
+| **Medium** | Reasonable certainty based on evidence (default) |
+| **Low** | Uncertain, speculative, or needs validation |
+
+Confidence is derived from write gate criterion plausibility during
+reflection. Learnings with strong indicator phrases receive higher
+confidence; those with weaker phrasing receive lower confidence.
+
+### 3.6 Trace Events
+
+Each session maintains a trace of events for debugging and auditing.
+
+| EventType | Description |
+|-----------|-------------|
+| `SessionStart` | Session initialized |
+| `TicketDetected` | Ticketing system detected a ticket |
+| `BackendDetected` | Memory backend discovered |
+| `LearningsInjected` | Relevant learnings injected at session start |
+| `TicketCloseDetected` | Ticket close command detected (PreToolUse) |
+| `TicketClosed` | Ticket close confirmed (PostToolUse success) |
+| `TicketCloseFailed` | Ticket close failed (PostToolUse failure) |
+| `StopHookCalled` | Stop hook invoked |
+| `GateBlocked` | Gate blocked session exit |
+| `ReflectionComplete` | Reflection successfully recorded |
+| `Skip` | Skip decision made |
+| `CircuitBreakerTripped` | Circuit breaker tripped after max blocks |
+| `SessionEnd` | Session ending |
+| `ObservationRecorded` | Subagent observation recorded |
+| `LearningReferenced` | Injected learning was referenced |
+| `LearningDismissed` | Injected learning was not used |
+| `GateStatusChanged` | Gate status transitioned |
+
+Trace events are stored in session state and can be viewed with
+`grove trace <session_id>`.
 
 ## 4. Gate State Machine
 
@@ -312,6 +358,137 @@ Default discovery order: `config → total-recall → mcp → markdown`
 
 Multiple backends can be active simultaneously. Learnings route by scope.
 Discovery order is configurable. Individual backends can be disabled.
+
+### 5.3 Total Recall Integration Details
+
+When Total Recall is detected, Grove leverages its tiered memory system
+while maintaining Grove's structured reflection model.
+
+#### 5.3.1 Architecture Relationship
+
+Total Recall and Grove are complementary systems:
+
+| Aspect | Total Recall | Grove |
+|--------|--------------|-------|
+| **Trigger** | Voluntary ("remember this") | Gate-enforced at ticket boundary |
+| **Structure** | Free-form notes | Seven-category taxonomy |
+| **Tiers** | Working → Registers → Daily → Archive | Single tier (routed by scope) |
+| **Promotion** | User-driven via `/recall-promote` | Not applicable |
+| **Write Gate** | Five criteria | Four criteria (subset overlap) |
+
+Grove writes to Total Recall's daily logs. Promotion to registers remains
+a user action — Grove does not auto-promote.
+
+#### 5.3.2 Write Gate Compatibility
+
+Both systems filter low-value content before persistence. Grove's criteria
+are a near-subset of Total Recall's:
+
+| Grove | Total Recall | Notes |
+|-------|--------------|-------|
+| `behavior_changing` | Behavioral impact | Direct match |
+| `decision_rationale` | Decisions | Direct match |
+| `stable_fact` | Stable facts | Direct match |
+| `explicit_request` | Explicit requests | Direct match |
+| — | Commitments | TR-only (deadlines) |
+
+Because Grove already validates learnings, the adapter uses `recall-log`
+(direct capture) rather than `recall-write` (gated capture) to avoid
+redundant validation.
+
+#### 5.3.3 Scope to Tier Mapping
+
+Grove's learning scopes route to Total Recall tiers:
+
+```mermaid
+flowchart LR
+    subgraph Grove
+        P[Project]
+        T[Team]
+        E[Ephemeral]
+        Personal[Personal]
+    end
+
+    subgraph TotalRecall["Total Recall"]
+        Daily["memory/daily/YYYY-MM-DD.md"]
+        Registers["memory/registers/*.md"]
+        Archive["memory/archive/"]
+    end
+
+    subgraph Local
+        PersonalFile["~/.grove/personal-learnings.md"]
+    end
+
+    P --> Daily
+    T --> Daily
+    E --> Daily
+    Personal --> PersonalFile
+
+    Daily -.->|"user promotes"| Registers
+    Daily -.->|"decay/maintain"| Archive
+```
+
+Grove writes all project/team/ephemeral scope learnings to daily logs.
+Users can promote high-value learnings to registers via `/recall-promote`.
+Grove's `maintain` command respects Total Recall's archive structure.
+
+#### 5.3.4 Search Integration
+
+Grove's search delegates to Total Recall's hierarchical search:
+
+1. **Query construction**: Grove combines ticket context, file paths,
+   and tags into a search term
+2. **Invocation**: Grove calls `recall-search <term>`
+3. **Result parsing**: Grove parses markdown results back into
+   `CompoundLearning` objects (partial — some metadata may be lost)
+4. **Scoring**: Grove applies its own composite scoring (relevance ×
+   recency × hit rate) on top of Total Recall's relevance ordering
+
+Total Recall searches across all tiers (working memory, registers,
+daily logs, archive) but returns results grouped by source.
+
+#### 5.3.5 Daily Log Entry Format
+
+Grove learnings appear in Total Recall daily logs with this format:
+
+```markdown
+## Learnings
+
+[14:32] **Pitfall** (grove:learn-abc123): Using unwrap() in async context
+> When an async task panics due to unwrap(), the entire runtime is at
+> risk. Use `?` with proper error context instead.
+
+Tags: #rust #async #error-handling | Confidence: High | Ticket: grove-abc123
+```
+
+The `grove:` prefix in IDs enables filtering Grove-originated entries.
+
+#### 5.3.6 Supersession Protocol
+
+When Grove detects a learning that supersedes an existing one:
+
+1. Grove marks the old learning as `Superseded` in its stats log
+2. The new learning includes a supersession reference:
+
+```markdown
+[14:45] **Pitfall** (grove:learn-def456): Correct async error handling
+> [supersedes grove:learn-abc123 — previous advice was incomplete]
+> The correct approach is...
+```
+
+This aligns with Total Recall's contradiction protocol (old claims
+receive `[superseded]` markers rather than silent overwrites).
+
+#### 5.3.7 Fail-Open Behavior
+
+| Failure | Grove Behavior |
+|---------|----------------|
+| `memory/` not writable | Log warning, continue without persistence |
+| `recall-log` command fails | Log warning, mark learning as "backend unavailable" |
+| `recall-search` fails | Return empty results, fall back to markdown if configured |
+| Total Recall uninstalled mid-session | Detect on next operation, switch to fallback |
+
+Grove never blocks user workflow due to Total Recall failures.
 
 ## 6. Validation and Write Gate
 
@@ -621,9 +798,76 @@ sequenceDiagram
     SS-->>CC: context with top N learnings
 ```
 
+### 9.6 Total Recall Backend: Write Flow
+
+```mermaid
+sequenceDiagram
+    participant Grove as grove reflect
+    participant Adapter as TR Adapter
+    participant TR as Total Recall
+    participant Daily as memory/daily/
+
+    Grove->>Grove: validate learning (schema + write gate)
+    Grove->>Adapter: write(learning)
+
+    Adapter->>Adapter: format_learning()
+    Note over Adapter: Convert to TR daily log format:<br/>[HH:MM] **Category** (grove:id): Summary
+
+    Adapter->>TR: claude skill recall-log <note>
+    Note over TR: Direct capture<br/>(bypasses TR write gate)
+
+    TR->>Daily: append to YYYY-MM-DD.md
+
+    alt success
+        TR-->>Adapter: exit 0
+        Adapter-->>Grove: WriteResult::Success
+    else failure
+        TR-->>Adapter: exit non-zero
+        Adapter-->>Grove: WriteResult::BackendUnavailable
+        Note over Grove: Fail-open: log warning,<br/>continue session
+    end
+
+    Grove->>Grove: append stats event
+```
+
+### 9.7 Total Recall Backend: Search Flow
+
+```mermaid
+sequenceDiagram
+    participant SS as session-start
+    participant Adapter as TR Adapter
+    participant TR as Total Recall
+    participant Memory as memory/*
+
+    SS->>Adapter: search(query, filters)
+    Adapter->>Adapter: build_search_term()
+    Note over Adapter: Combine ticket title,<br/>file stems, tags
+
+    Adapter->>TR: claude skill recall-search <term>
+
+    TR->>Memory: hierarchical search
+    Note over Memory: 1. Working memory<br/>2. Registers<br/>3. Daily logs<br/>4. Archive
+
+    Memory-->>TR: grouped results
+
+    alt success
+        TR-->>Adapter: markdown results
+        Adapter->>Adapter: parse_search_results()
+        Note over Adapter: Extract grove: prefixed entries<br/>Reconstruct CompoundLearning (partial)
+        Adapter-->>SS: Vec<CompoundLearning>
+    else failure
+        TR-->>Adapter: exit non-zero
+        Adapter-->>SS: empty Vec (fail-open)
+    end
+
+    SS->>SS: apply composite scoring
+```
+
 ## 10. Storage Architecture
 
 ### 10.1 File Layout
+
+**Standard layout (markdown backend):**
 
 ```text
 ~/.grove/                          # User-level (not committed)
@@ -631,6 +875,7 @@ sequenceDiagram
 │   ├── <session-id>.json          # Per-session state
 │   └── ...
 ├── stats-cache.json               # Materialized stats aggregate
+├── personal-learnings.md          # Personal scope learnings
 └── config.toml                    # Optional user config
 
 <project>/
@@ -639,6 +884,42 @@ sequenceDiagram
 │   ├── learnings.md               # Append-only learnings (built-in backend)
 │   └── stats.log                  # Append-only event log (JSONL)
 ```
+
+**Layout with Total Recall backend:**
+
+```text
+~/.grove/                          # User-level (not committed)
+├── sessions/
+│   ├── <session-id>.json          # Per-session state
+│   └── ...
+├── stats-cache.json               # Materialized stats aggregate
+├── personal-learnings.md          # Personal scope (bypasses TR)
+└── config.toml                    # Optional user config
+
+<project>/
+├── .grove/
+│   ├── config.toml                # Optional project config
+│   └── stats.log                  # Append-only event log (JSONL)
+│                                  # NOTE: No learnings.md when TR is active
+├── memory/                        # Total Recall managed
+│   ├── daily/
+│   │   ├── 2025-01-15.md          # Daily log (Grove writes here)
+│   │   └── ...
+│   ├── registers/
+│   │   └── *.md                   # User-promoted entries
+│   └── archive/
+│       └── *.md                   # Archived/superseded
+├── rules/
+│   └── total-recall.md            # Total Recall protocol
+└── CLAUDE.local.md                # Working memory (gitignored)
+```
+
+When Total Recall is the active backend:
+
+- Grove writes learnings to `memory/daily/YYYY-MM-DD.md`
+- Grove does NOT write to `.grove/learnings.md`
+- Grove maintains its own `stats.log` for tracking
+- Personal scope learnings always go to `~/.grove/personal-learnings.md`
 
 ### 10.2 Session Storage Interface
 
@@ -662,7 +943,7 @@ sequenceDiagram
 | Backend | Search Implementation |
 |---------|---------------------|
 | **Markdown** | Parse `.grove/learnings.md`, match tags against query tags (exact match = 1.0, partial = 0.5), match file paths against `context_files` (overlap = 0.8), keyword substring match against summary and detail (0.3). Return all matches with relevance scores. |
-| **Total Recall** | Delegate to Total Recall's search command. Relevance scoring handled by Total Recall. |
+| **Total Recall** | Invoke `recall-search <term>`. Total Recall searches hierarchically: working memory → registers → daily logs → archive. Results include source tier and confidence. Grove parses results and applies its own composite scoring on top. Note: search results may be partial (not all learning metadata is preserved in Total Recall's format). |
 | **MCP** | Invoke the MCP server's search tool. Relevance scoring handled by the server. |
 
 The `query` parameter is a structured object containing available context:
@@ -678,9 +959,17 @@ The `filters` parameter supports: `status` (active only by default),
 | Backend | Storage | Use Case |
 |---------|---------|----------|
 | **Markdown** | `.grove/learnings.md` | Default, no dependencies |
-| **Total Recall** | `memory/` (Total Recall managed) | Tiered memory with write gate |
+| **Total Recall** | `memory/daily/*.md` | Projects using Total Recall for memory |
 | **MCP** | External server | Custom or shared memory systems |
 | **In-Memory** | None (ephemeral) | Testing only |
+
+**Total Recall specifics:**
+
+- **Write destination:** `memory/daily/YYYY-MM-DD.md` (daily log)
+- **Command used:** `recall-log` (bypasses TR's write gate)
+- **ID format:** `grove:learn-<ulid>` prefix enables filtering Grove entries
+- **Promotion:** Grove does not auto-promote; users promote via `/recall-promote`
+- **Supersession:** Grove includes `[supersedes grove:<id>]` markers
 
 ## 11. Configuration
 

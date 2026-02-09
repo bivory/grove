@@ -11,7 +11,8 @@ pub mod backends;
 pub mod tickets;
 
 pub use backends::{
-    create_default_backend, detect_backends, probe_markdown, BackendInfo, BackendType,
+    create_default_backend, create_primary_backend, detect_backends, probe_markdown, BackendInfo,
+    BackendType,
 };
 pub use tickets::{
     detect_ticketing_system, match_close_command, probe_beads, probe_tissue, ClosePattern,

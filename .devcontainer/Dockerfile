@@ -104,6 +104,11 @@ RUN claude plugin install code-simplifier && \
 RUN claude plugin marketplace add richardthe3rd/mise#claude-plugin \
     && claude plugin install mise-en-place@mise-en-place
 
+# Install Total Recall
+RUN git config --global url."https://github.com/".insteadOf "git@github.com:"
+RUN claude plugin marketplace add davegoldblatt/recall-marketplace
+RUN claude plugin install recall@recall-marketplace
+
 USER root
 
 ENV CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1

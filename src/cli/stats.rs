@@ -10,6 +10,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::config::{project_stats_log_path, stats_cache_path, Config};
+use crate::core::{LearningCategory, WriteGateCriterion};
 use crate::stats::{
     generate_insights, AggregateStats, Insight, InsightConfig, ReflectionStats, StatsCache,
     StatsCacheManager, WriteGateStats,
@@ -281,12 +282,22 @@ impl StatsCommand {
             .filter_map(|(id, stats)| stats.last_surfaced.map(|ts| (id.clone(), ts)))
             .collect();
 
+        // Note: learning_categories, learning_criteria, and learning_context_files
+        // would need to be loaded from the backend to enable full insights.
+        // For now, pass empty maps.
+        let learning_categories: HashMap<String, LearningCategory> = HashMap::new();
+        let learning_criteria: HashMap<String, Vec<WriteGateCriterion>> = HashMap::new();
+        let learning_context_files: HashMap<String, Vec<String>> = HashMap::new();
+
         let insight_config = InsightConfig::default();
         let decay_config = &self.config.decay;
         let now = Utc::now();
         let insights = generate_insights(
             &cache,
             &learning_timestamps,
+            &learning_categories,
+            &learning_criteria,
+            &learning_context_files,
             decay_config,
             &insight_config,
             now,

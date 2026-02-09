@@ -659,7 +659,10 @@ impl DuplicateCheckResult {
 
 /// Check if a summary matches an existing active learning.
 ///
-/// Stage 1 behavior: Exact match only (case-insensitive summary comparison).
+/// Checks for near-duplicates using case-insensitive comparison:
+/// 1. Exact match (summaries are identical)
+/// 2. Substring match (one summary contains the other)
+///
 /// Only checks against active learnings (archived/superseded are ignored).
 fn check_duplicate_by_summary(
     summary: &str,
@@ -673,8 +676,20 @@ fn check_duplicate_by_summary(
             continue;
         }
 
+        let existing_normalized = learning.summary.to_lowercase();
+
         // Case-insensitive exact match
-        if learning.summary.to_lowercase() == normalized {
+        if existing_normalized == normalized {
+            return DuplicateCheckResult::duplicate(&learning.id, &learning.summary);
+        }
+
+        // Substring match: candidate contains existing summary
+        if normalized.contains(&existing_normalized) {
+            return DuplicateCheckResult::duplicate(&learning.id, &learning.summary);
+        }
+
+        // Substring match: existing summary contains candidate
+        if existing_normalized.contains(&normalized) {
             return DuplicateCheckResult::duplicate(&learning.id, &learning.summary);
         }
     }
@@ -684,7 +699,10 @@ fn check_duplicate_by_summary(
 
 /// Check if a candidate learning is a near-duplicate of existing learnings.
 ///
-/// Stage 1 behavior: Exact match only (case-insensitive summary comparison).
+/// Detects near-duplicates via case-insensitive comparison:
+/// - Exact match (identical summaries)
+/// - Substring match (one summary contains the other)
+///
 /// Only checks against active learnings (archived/superseded are ignored).
 pub fn check_near_duplicate(
     candidate: &CandidateLearning,
@@ -1800,6 +1818,131 @@ mod tests {
             category: "pattern".to_string(),
             summary: "Some learning".to_string(),
             detail: "Some different detail that is long enough to be valid.".to_string(),
+            scope: "project".to_string(),
+            confidence: "high".to_string(),
+            criteria_met: vec!["behavior_changing".to_string()],
+            tags: vec!["test".to_string()],
+            context_files: None,
+        };
+
+        let result = check_near_duplicate(&candidate, &existing);
+        assert!(!result.is_duplicate);
+    }
+
+    // =========================================================================
+    // Substring duplicate detection tests
+    // =========================================================================
+
+    #[test]
+    fn test_detects_substring_candidate_contains_existing() {
+        // Candidate summary contains the existing summary as a substring
+        let existing = vec![existing_learning(
+            "L001",
+            "validate user input",
+            LearningStatus::Active,
+        )];
+
+        let candidate = CandidateLearning {
+            category: "pattern".to_string(),
+            summary: "Always validate user input before processing".to_string(),
+            detail: "Some detail that is long enough to be valid for testing.".to_string(),
+            scope: "project".to_string(),
+            confidence: "high".to_string(),
+            criteria_met: vec!["behavior_changing".to_string()],
+            tags: vec!["test".to_string()],
+            context_files: None,
+        };
+
+        let result = check_near_duplicate(&candidate, &existing);
+        assert!(result.is_duplicate);
+        assert_eq!(result.duplicate_of, Some("L001".to_string()));
+    }
+
+    #[test]
+    fn test_detects_substring_existing_contains_candidate() {
+        // Existing summary contains the candidate summary as a substring
+        let existing = vec![existing_learning(
+            "L001",
+            "Always validate user input before processing",
+            LearningStatus::Active,
+        )];
+
+        let candidate = CandidateLearning {
+            category: "pattern".to_string(),
+            summary: "validate user input".to_string(),
+            detail: "Some detail that is long enough to be valid for testing.".to_string(),
+            scope: "project".to_string(),
+            confidence: "high".to_string(),
+            criteria_met: vec!["behavior_changing".to_string()],
+            tags: vec!["test".to_string()],
+            context_files: None,
+        };
+
+        let result = check_near_duplicate(&candidate, &existing);
+        assert!(result.is_duplicate);
+        assert_eq!(result.duplicate_of, Some("L001".to_string()));
+    }
+
+    #[test]
+    fn test_substring_match_is_case_insensitive() {
+        let existing = vec![existing_learning(
+            "L001",
+            "VALIDATE USER INPUT",
+            LearningStatus::Active,
+        )];
+
+        let candidate = CandidateLearning {
+            category: "pattern".to_string(),
+            summary: "always validate user input before processing".to_string(),
+            detail: "Some detail that is long enough to be valid for testing.".to_string(),
+            scope: "project".to_string(),
+            confidence: "high".to_string(),
+            criteria_met: vec!["behavior_changing".to_string()],
+            tags: vec!["test".to_string()],
+            context_files: None,
+        };
+
+        let result = check_near_duplicate(&candidate, &existing);
+        assert!(result.is_duplicate);
+    }
+
+    #[test]
+    fn test_no_substring_match_for_partial_word_overlap() {
+        // "user" appears in both but they're different concepts
+        let existing = vec![existing_learning(
+            "L001",
+            "User authentication flow",
+            LearningStatus::Active,
+        )];
+
+        let candidate = CandidateLearning {
+            category: "pattern".to_string(),
+            summary: "Database query optimization for user data".to_string(),
+            detail: "Some detail that is long enough to be valid for testing.".to_string(),
+            scope: "project".to_string(),
+            confidence: "high".to_string(),
+            criteria_met: vec!["behavior_changing".to_string()],
+            tags: vec!["test".to_string()],
+            context_files: None,
+        };
+
+        let result = check_near_duplicate(&candidate, &existing);
+        assert!(!result.is_duplicate);
+    }
+
+    #[test]
+    fn test_substring_match_ignores_archived() {
+        // Substring match but learning is archived
+        let existing = vec![existing_learning(
+            "L001",
+            "validate user input",
+            LearningStatus::Archived,
+        )];
+
+        let candidate = CandidateLearning {
+            category: "pattern".to_string(),
+            summary: "Always validate user input before processing".to_string(),
+            detail: "Some detail that is long enough to be valid for testing.".to_string(),
             scope: "project".to_string(),
             confidence: "high".to_string(),
             criteria_met: vec!["behavior_changing".to_string()],

@@ -36,7 +36,6 @@ Download from [Releases](https://github.com/bivory/grove/releases):
 |----------|--------|
 | Linux x86_64 | `grove-x86_64-unknown-linux-gnu` |
 | Linux ARM64 | `grove-aarch64-unknown-linux-gnu` |
-| macOS x86_64 | `grove-x86_64-apple-darwin` |
 | macOS ARM64 | `grove-aarch64-apple-darwin` |
 
 ## Quick Start

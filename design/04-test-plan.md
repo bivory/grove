@@ -987,13 +987,13 @@ rm -rf "$GROVE_HOME"
 
 ### 6.1 Platforms
 
-| Platform | CI | Local |
-|----------|-----|-------|
-| Linux x86_64 | GitHub Actions | Required |
-| Linux ARM64 | GitHub Actions | Required |
-| macOS x86_64 | GitHub Actions | Optional |
-| macOS ARM64 | GitHub Actions | Required |
-| Windows | Not supported | Not supported |
+| Platform | Release Build | CI Test | Local |
+|----------|---------------|---------|-------|
+| Linux x86_64 | Yes | Yes | Required |
+| Linux ARM64 | Yes | Yes | Required |
+| macOS ARM64 | Yes | Yes | Required |
+| macOS x86_64 | No | No | Not supported |
+| Windows | No | No | Not supported |
 
 ### 6.2 Rust Versions
 

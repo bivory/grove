@@ -56,8 +56,8 @@ get_target() {
     case "$os-$arch" in
         linux-x86_64)   echo "x86_64-unknown-linux-gnu" ;;
         linux-aarch64)  echo "aarch64-unknown-linux-gnu" ;;
-        darwin-x86_64)  echo "x86_64-apple-darwin" ;;
         darwin-aarch64) echo "aarch64-apple-darwin" ;;
+        darwin-x86_64)  error "macOS x86_64 (Intel) is not supported. Apple Silicon (ARM64) is required."; exit 1 ;;
         *)              error "Unsupported platform: $os-$arch"; exit 1 ;;
     esac
 }
@@ -228,20 +228,33 @@ run_self_tests() {
         failed=$((failed + 1))
     fi
 
-    # Test 3: get_target returns valid triple
+    # Test 3: get_target returns valid triple (or fails for unsupported platforms)
     echo -n "Test: get_target returns valid triple... "
     local target
-    target="$(get_target)"
-    case "$target" in
-        x86_64-unknown-linux-gnu|aarch64-unknown-linux-gnu|x86_64-apple-darwin|aarch64-apple-darwin)
-            echo "PASS (got: $target)"
+    if target="$(get_target 2>/dev/null)"; then
+        case "$target" in
+            x86_64-unknown-linux-gnu|aarch64-unknown-linux-gnu|aarch64-apple-darwin)
+                echo "PASS (got: $target)"
+                passed=$((passed + 1))
+                ;;
+            *)
+                echo "FAIL (got unexpected: $target)"
+                failed=$((failed + 1))
+                ;;
+        esac
+    else
+        # On macOS x86_64, get_target should fail
+        local os arch
+        os="$(detect_os)"
+        arch="$(detect_arch)"
+        if [ "$os-$arch" = "darwin-x86_64" ]; then
+            echo "PASS (correctly rejected macOS x86_64)"
             passed=$((passed + 1))
-            ;;
-        *)
-            echo "FAIL (got: $target)"
+        else
+            echo "FAIL (unexpected failure on $os-$arch)"
             failed=$((failed + 1))
-            ;;
-    esac
+        fi
+    fi
 
     # Test 4: verify_checksum works with valid checksum
     echo -n "Test: verify_checksum accepts valid checksum... "

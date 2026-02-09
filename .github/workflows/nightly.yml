@@ -19,7 +19,7 @@ jobs:
         with:
           components: llvm-tools-preview
       - uses: taiki-e/install-action@nextest
-      - uses: jdx/mise-action@v2
+      - uses: jdx/mise-action@v3
 
       - name: Format check
         run: mise run fmt:check
@@ -48,7 +48,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - uses: jdx/mise-action@v2
+      - uses: jdx/mise-action@v3
 
       - name: Audit
         run: mise run audit
@@ -62,7 +62,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - uses: jdx/mise-action@v2
+      - uses: jdx/mise-action@v3
 
       - name: Check outdated
         run: mise run outdated

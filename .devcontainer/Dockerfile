@@ -79,18 +79,23 @@ RUN mkdir -p ~/.local/bin \
     && rm /tmp/tissue.tar.gz
 RUN tissue version
 
-# Install roz - Step 1: Install the binary from latest release
+RUN claude plugin marketplace add bivory/claude-plugin-marketplace
+# Install roz
 RUN curl -fsSL https://raw.githubusercontent.com/bivory/roz/main/.claude-plugin/install.sh | bash
-
-# Verify roz binary is installed
 RUN roz --version
-
-# Install roz - Step 2: Install the Claude Code plugin
-RUN claude plugin marketplace add bivory/roz \
-    && claude plugin install roz@bivory
-
-# Verify roz plugin is installed
+RUN claude plugin install roz@bivory
 RUN claude plugin list | grep -q roz
+
+# Install grove
+RUN curl -fsSL https://raw.githubusercontent.com/bivory/grove/main/.claude-plugin/install.sh | bash
+RUN grove --version
+RUN claude plugin install grove@bivory
+RUN claude plugin list | grep -q grove
+
+# Install Total Recall for grove
+RUN git config --global url."https://github.com/".insteadOf "git@github.com:"
+RUN claude plugin marketplace add davegoldblatt/recall-marketplace
+RUN claude plugin install recall@recall-marketplace
 
 # Install additional Claude Code plugins
 RUN claude plugin marketplace add anthropics/claude-plugins-official
@@ -103,11 +108,6 @@ RUN claude plugin install code-simplifier && \
 # See: https://github.com/jdx/mise/discussions/6575
 RUN claude plugin marketplace add richardthe3rd/mise#claude-plugin \
     && claude plugin install mise-en-place@mise-en-place
-
-# Install Total Recall
-RUN git config --global url."https://github.com/".insteadOf "git@github.com:"
-RUN claude plugin marketplace add davegoldblatt/recall-marketplace
-RUN claude plugin install recall@recall-marketplace
 
 USER root
 

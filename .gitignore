@@ -26,11 +26,15 @@ coverage/
 # Local development
 .mise.local.toml
 TODO.md
+CLAUDE.local.md
+memory/
 
 # Agents and tools
 CLAUDE.md
 .claude/
 .tissue/
+CLAUDE.local.md
+memory/
 
 
 # Added by cargo

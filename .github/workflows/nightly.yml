@@ -16,6 +16,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - uses: jdx/mise-action@v3
+      - run: rustup component add rustfmt clippy
       - uses: taiki-e/install-action@cargo-llvm-cov
 
       - name: Format check

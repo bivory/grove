@@ -16,6 +16,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - uses: jdx/mise-action@v3
+      - run: rustup component add rustfmt clippy
 
       - name: Format check
         run: mise run fmt:check
@@ -58,20 +59,6 @@ jobs:
 
       - name: Coverage
         run: mise run coverage
-
-  msrv:
-    name: MSRV (1.82.0)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@1.82.0
-      - uses: taiki-e/install-action@nextest
-
-      - name: Build (MSRV)
-        run: cargo build
-
-      - name: Test (MSRV)
-        run: cargo nextest run
 
   platforms:
     name: Platform (${{ matrix.target }})

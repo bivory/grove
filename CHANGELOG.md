@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-02-09
+
+### Changed
+
+- Simplified CI workflows by removing MSRV checks and consolidating jobs
+- Removed x86_64-apple-darwin from platform matrix (GitHub Actions limitation)
+- Consolidated dependabot update schedule to weekly
+
+### Fixed
+
+- Resolved CI workflow Rust version conflicts
+- Bumped minimum supported Rust version from 1.75.0 to 1.82.0
+
 ## [0.1.0] - 2026-02-08
 
 Initial release of Grove, a compound learning gate for Claude Code.
@@ -81,5 +94,6 @@ Initial release of Grove, a compound learning gate for Claude Code.
 - Architecture design documents
 - Implementation task roadmap
 
-[Unreleased]: https://github.com/anthropics/grove/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/anthropics/grove/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/anthropics/grove/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/anthropics/grove/releases/tag/v0.1.0

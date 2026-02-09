@@ -1,7 +1,6 @@
 # cargo-release configuration
 # See: https://github.com/crate-ci/cargo-release
 
-[workspace]
 allow-branch = ["main"]
 sign-commit = false
 sign-tag = false

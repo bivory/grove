@@ -9,5 +9,6 @@
       "version": "0.1.0",
       "description": "Compound learning gate for Claude Code - enforces structured reflection at ticket boundaries"
     }
-  ]
+  ],
+  "version": "0.2.0"
 }

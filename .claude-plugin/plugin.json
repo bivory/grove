@@ -1,6 +1,6 @@
 {
   "name": "grove",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Compound learning gate for Claude Code - enforces structured reflection at ticket boundaries with pluggable memory backends",
   "author": {
     "name": "Bryan Ivory",

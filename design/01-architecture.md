@@ -392,9 +392,14 @@ are a near-subset of Total Recall's:
 | `explicit_request` | Explicit requests | Direct match |
 | — | Commitments | TR-only (deadlines) |
 
-Because Grove already validates learnings, the adapter uses `recall-log`
-(direct capture) rather than `recall-write` (gated capture) to avoid
-redundant validation.
+Because Grove already validates learnings, the adapter writes directly to
+Total Recall's daily log files rather than using the interactive
+`/recall-write` skill, avoiding redundant validation.
+
+**Note:** Total Recall's skills (`/recall-write`, `/recall-log`) are
+interactive Claude Code skills that work within conversations, not CLI
+commands that can be invoked as subprocesses. Grove writes directly to
+the same `memory/daily/YYYY-MM-DD.md` files that Total Recall uses.
 
 #### 5.3.3 Scope to Tier Mapping
 
@@ -434,18 +439,19 @@ Grove's `maintain` command respects Total Recall's archive structure.
 
 #### 5.3.4 Search Integration
 
-Grove's search delegates to Total Recall's hierarchical search:
+Grove searches Total Recall's memory files directly:
 
 1. **Query construction**: Grove combines ticket context, file paths,
    and tags into a search term
-2. **Invocation**: Grove calls `recall-search <term>`
+2. **File search**: Grove reads daily logs (last 14 days) and registers,
+   filtering for entries with `grove:` prefix that match the query
 3. **Result parsing**: Grove parses markdown results back into
    `CompoundLearning` objects (partial — some metadata may be lost)
 4. **Scoring**: Grove applies its own composite scoring (relevance ×
-   recency × hit rate) on top of Total Recall's relevance ordering
+   recency × hit rate)
 
-Total Recall searches across all tiers (working memory, registers,
-daily logs, archive) but returns results grouped by source.
+Grove searches daily logs first (most recent), then registers.
+Archive files are not searched by default.
 
 #### 5.3.5 Daily Log Entry Format
 
@@ -479,14 +485,21 @@ When Grove detects a learning that supersedes an existing one:
 This aligns with Total Recall's contradiction protocol (old claims
 receive `[superseded]` markers rather than silent overwrites).
 
-#### 5.3.7 Fail-Open Behavior
+#### 5.3.7 Fail-Open Behavior with Markdown Fallback
+
+When Total Recall is the primary backend, Grove automatically wraps it with
+a markdown fallback. If Total Recall write fails, learnings are persisted
+to `.grove/learnings.md` instead.
 
 | Failure | Grove Behavior |
 |---------|----------------|
-| `memory/` not writable | Log warning, continue without persistence |
-| `recall-log` command fails | Log warning, mark learning as "backend unavailable" |
-| `recall-search` fails | Return empty results, fall back to markdown if configured |
-| Total Recall uninstalled mid-session | Detect on next operation, switch to fallback |
+| `memory/` not writable | Fall back to markdown backend |
+| Daily log write fails | Fall back to markdown backend |
+| Search fails | Return empty results (fail-open) |
+| Total Recall uninstalled mid-session | Fall back to markdown backend |
+
+The fallback is automatic and transparent — learnings are always persisted
+somewhere. The `WriteResult.message` field indicates when fallback was used.
 
 Grove never blocks user workflow due to Total Recall failures.
 
@@ -803,28 +816,31 @@ sequenceDiagram
 ```mermaid
 sequenceDiagram
     participant Grove as grove reflect
-    participant Adapter as TR Adapter
-    participant TR as Total Recall
+    participant Fallback as FallbackBackend
+    participant TR as TR Adapter
     participant Daily as memory/daily/
+    participant MD as MarkdownBackend
 
     Grove->>Grove: validate learning (schema + write gate)
-    Grove->>Adapter: write(learning)
+    Grove->>Fallback: write(learning)
 
-    Adapter->>Adapter: format_learning()
-    Note over Adapter: Convert to TR daily log format:<br/>[HH:MM] **Category** (grove:id): Summary
-
-    Adapter->>TR: claude skill recall-log <note>
-    Note over TR: Direct capture<br/>(bypasses TR write gate)
+    Fallback->>TR: write(learning)
+    TR->>TR: format_learning()
+    Note over TR: Convert to TR daily log format:<br/>[HH:MM] **Category** (grove:id): Summary
 
     TR->>Daily: append to YYYY-MM-DD.md
+    Note over TR: Direct file write<br/>(no CLI invocation)
 
     alt success
-        TR-->>Adapter: exit 0
-        Adapter-->>Grove: WriteResult::Success
+        Daily-->>TR: file written
+        TR-->>Fallback: WriteResult::Success
+        Fallback-->>Grove: WriteResult::Success
     else failure
-        TR-->>Adapter: exit non-zero
-        Adapter-->>Grove: WriteResult::BackendUnavailable
-        Note over Grove: Fail-open: log warning,<br/>continue session
+        TR-->>Fallback: WriteResult::Failure
+        Note over Fallback: Primary failed,<br/>try markdown fallback
+        Fallback->>MD: write(learning)
+        MD-->>Fallback: WriteResult::Success
+        Fallback-->>Grove: WriteResult::Success (with fallback note)
     end
 
     Grove->>Grove: append stats event
@@ -835,29 +851,33 @@ sequenceDiagram
 ```mermaid
 sequenceDiagram
     participant SS as session-start
-    participant Adapter as TR Adapter
-    participant TR as Total Recall
-    participant Memory as memory/*
+    participant Fallback as FallbackBackend
+    participant TR as TR Adapter
+    participant Daily as memory/daily/
+    participant Registers as memory/registers/
+    participant MD as MarkdownBackend
 
-    SS->>Adapter: search(query, filters)
-    Adapter->>Adapter: build_search_term()
-    Note over Adapter: Combine ticket title,<br/>file stems, tags
+    SS->>Fallback: search(query, filters)
+    Fallback->>TR: search(query, filters)
 
-    Adapter->>TR: claude skill recall-search <term>
+    TR->>TR: build_search_term()
+    Note over TR: Combine ticket title,<br/>file stems, tags
 
-    TR->>Memory: hierarchical search
-    Note over Memory: 1. Working memory<br/>2. Registers<br/>3. Daily logs<br/>4. Archive
+    TR->>Daily: read last 14 days
+    TR->>Registers: read register files
+    Note over TR: Direct file search<br/>(no CLI invocation)
 
-    Memory-->>TR: grouped results
+    TR->>TR: filter for grove: prefix
+    TR->>TR: parse_search_results()
+    Note over TR: Extract grove: prefixed entries<br/>Reconstruct CompoundLearning (partial)
 
-    alt success
-        TR-->>Adapter: markdown results
-        Adapter->>Adapter: parse_search_results()
-        Note over Adapter: Extract grove: prefixed entries<br/>Reconstruct CompoundLearning (partial)
-        Adapter-->>SS: Vec<CompoundLearning>
-    else failure
-        TR-->>Adapter: exit non-zero
-        Adapter-->>SS: empty Vec (fail-open)
+    TR-->>Fallback: Vec<SearchResult>
+
+    Fallback->>MD: search(query, filters)
+    MD-->>Fallback: Vec<SearchResult>
+
+    Fallback->>Fallback: merge & deduplicate
+    Fallback-->>SS: Vec<SearchResult>
     end
 
     SS->>SS: apply composite scoring
@@ -943,7 +963,7 @@ When Total Recall is the active backend:
 | Backend | Search Implementation |
 |---------|---------------------|
 | **Markdown** | Parse `.grove/learnings.md`, match tags against query tags (exact match = 1.0, partial = 0.5), match file paths against `context_files` (overlap = 0.8), keyword substring match against summary and detail (0.3). Return all matches with relevance scores. |
-| **Total Recall** | Invoke `recall-search <term>`. Total Recall searches hierarchically: working memory → registers → daily logs → archive. Results include source tier and confidence. Grove parses results and applies its own composite scoring on top. Note: search results may be partial (not all learning metadata is preserved in Total Recall's format). |
+| **Total Recall** | Read daily logs (last 14 days) and registers directly, filtering for `grove:` prefixed entries. Match query terms against content. Grove applies its own composite scoring. Note: search results may be partial (not all learning metadata is preserved in Total Recall's format). |
 | **MCP** | Invoke the MCP server's search tool. Relevance scoring handled by the server. |
 
 The `query` parameter is a structured object containing available context:
@@ -966,7 +986,8 @@ The `filters` parameter supports: `status` (active only by default),
 **Total Recall specifics:**
 
 - **Write destination:** `memory/daily/YYYY-MM-DD.md` (daily log)
-- **Command used:** `recall-log` (bypasses TR's write gate)
+- **Write method:** Direct file append (no CLI invocation)
+- **Fallback:** Markdown backend (`.grove/learnings.md`) on write failure
 - **ID format:** `grove:learn-<ulid>` prefix enables filtering Grove entries
 - **Promotion:** Grove does not auto-promote; users promote via `/recall-promote`
 - **Supersession:** Grove includes `[supersedes grove:<id>]` markers

@@ -1,17 +1,20 @@
 //! Total Recall backend adapter for Grove.
 //!
 //! This module provides integration with Total Recall's tiered memory system.
-//! It shells out to Total Recall's CLI commands:
-//! - `claude skill recall-log <note>` for writes (bypasses TR write gate)
-//! - `claude skill recall-search <query>` for searches
+//! It writes directly to Total Recall's daily log files (`memory/daily/YYYY-MM-DD.md`)
+//! and searches by reading files directly.
 //!
-//! **Fail-open behavior**: If CLI is unavailable, log warning and continue
-//! without persistence.
+//! **Why direct file access?** Total Recall's skills (`/recall-write`, `/recall-log`)
+//! are interactive Claude Code skills that work within conversations, not CLI commands
+//! that can be invoked as subprocesses. Grove writes directly to the daily log files
+//! using the same format Total Recall expects.
+//!
+//! **Fail-open behavior**: If file operations fail, log warning and continue
+//! without persistence. Callers can optionally fall back to the markdown backend.
 
 use std::fs::{self, OpenOptions};
 use std::io::Write as IoWrite;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
 
 use chrono::Utc;
 use tracing::warn;
@@ -27,10 +30,14 @@ const GROVE_ID_PREFIX: &str = "grove:";
 
 /// Total Recall backend adapter.
 ///
-/// Integrates with Total Recall's tiered memory system by invoking CLI commands.
+/// Integrates with Total Recall's tiered memory system by writing directly to
+/// daily log files. Total Recall's skills are interactive Claude Code skills,
+/// not CLI commands, so Grove writes to the same files those skills use.
+///
 /// Supports:
-/// - Scope routing (project/team → recall-log, personal → direct file write)
-/// - fail-open behavior for CLI failures
+/// - Scope routing (project/team/ephemeral → daily log, personal → direct file)
+/// - Direct file writes to `memory/daily/YYYY-MM-DD.md`
+/// - fail-open behavior for file operation failures
 /// - grove: ID prefix for filtering searches
 #[derive(Debug, Clone)]
 pub struct TotalRecallBackend {
@@ -38,15 +45,16 @@ pub struct TotalRecallBackend {
     memory_dir: PathBuf,
     /// Path for personal learnings (bypasses TR).
     personal_path: PathBuf,
-    /// Path to the project directory (for CLI execution context).
-    project_dir: PathBuf,
 }
 
 impl TotalRecallBackend {
     /// Create a new Total Recall backend with the given memory directory.
     ///
     /// The personal learnings path is automatically set to `~/.grove/personal-learnings.md`.
-    pub fn new(memory_dir: impl AsRef<Path>, project_dir: impl AsRef<Path>) -> Self {
+    ///
+    /// Note: The `_project_dir` parameter is kept for API compatibility but is no longer used.
+    /// Grove now writes directly to memory files instead of invoking CLI commands.
+    pub fn new(memory_dir: impl AsRef<Path>, _project_dir: impl AsRef<Path>) -> Self {
         let personal_path = dirs::home_dir()
             .unwrap_or_else(|| PathBuf::from("."))
             .join(".grove")
@@ -55,20 +63,20 @@ impl TotalRecallBackend {
         Self {
             memory_dir: memory_dir.as_ref().to_path_buf(),
             personal_path,
-            project_dir: project_dir.as_ref().to_path_buf(),
         }
     }
 
     /// Create a backend with explicit paths for testing.
+    ///
+    /// Note: The `_project_dir` parameter is kept for API compatibility but is no longer used.
     pub fn with_paths(
         memory_dir: impl AsRef<Path>,
         personal_path: impl AsRef<Path>,
-        project_dir: impl AsRef<Path>,
+        _project_dir: impl AsRef<Path>,
     ) -> Self {
         Self {
             memory_dir: memory_dir.as_ref().to_path_buf(),
             personal_path: personal_path.as_ref().to_path_buf(),
-            project_dir: project_dir.as_ref().to_path_buf(),
         }
     }
 
@@ -219,44 +227,171 @@ impl TotalRecallBackend {
         md
     }
 
-    /// Invoke recall-log CLI command to write a learning.
-    fn invoke_recall_log(&self, note: &str) -> std::result::Result<(), String> {
-        let output = Command::new("claude")
-            .args(["skill", "recall-log", note])
-            .current_dir(&self.project_dir)
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .output();
+    /// Write a learning directly to the daily log file.
+    ///
+    /// Appends the formatted learning to `memory/daily/YYYY-MM-DD.md` under
+    /// the `## Learnings` section. Creates the file if it doesn't exist.
+    fn write_to_daily_log(&self, note: &str) -> std::result::Result<String, String> {
+        let today = Utc::now().format("%Y-%m-%d").to_string();
+        let daily_dir = self.memory_dir.join("daily");
+        let daily_path = daily_dir.join(format!("{}.md", today));
 
-        match output {
-            Ok(o) if o.status.success() => Ok(()),
-            Ok(o) => {
-                let stderr = String::from_utf8_lossy(&o.stderr);
-                Err(format!("recall-log failed: {}", stderr))
+        // Ensure daily directory exists
+        fs::create_dir_all(&daily_dir).map_err(|e| {
+            format!(
+                "Failed to create daily directory {}: {}",
+                daily_dir.display(),
+                e
+            )
+        })?;
+
+        // Read existing content or create template
+        let mut content = if daily_path.exists() {
+            fs::read_to_string(&daily_path)
+                .map_err(|e| format!("Failed to read daily log {}: {}", daily_path.display(), e))?
+        } else {
+            self.daily_log_template(&today)
+        };
+
+        // Find or create Learnings section and append
+        content = self.append_to_learnings_section(&content, note);
+
+        // Write back atomically (write to temp then rename would be better, but this is simpler)
+        fs::write(&daily_path, &content)
+            .map_err(|e| format!("Failed to write daily log {}: {}", daily_path.display(), e))?;
+
+        Ok(format!("memory/daily/{}.md", today))
+    }
+
+    /// Create a new daily log template.
+    fn daily_log_template(&self, date: &str) -> String {
+        format!(
+            r#"# {}
+
+## Decisions
+
+## Corrections
+
+## Commitments
+
+## Open Loops
+
+## Notes
+
+## Learnings
+
+"#,
+            date
+        )
+    }
+
+    /// Append a note to the Learnings section of the daily log content.
+    fn append_to_learnings_section(&self, content: &str, note: &str) -> String {
+        // Look for ## Learnings section
+        if let Some(learnings_pos) = content.find("## Learnings") {
+            // Find where Learnings section ends (next ## or end of file)
+            let after_header = learnings_pos + "## Learnings".len();
+            let section_end = content[after_header..]
+                .find("\n## ")
+                .map(|pos| after_header + pos)
+                .unwrap_or(content.len());
+
+            // Insert note at end of Learnings section
+            let mut new_content = content[..section_end].to_string();
+            if !new_content.ends_with('\n') {
+                new_content.push('\n');
             }
-            Err(e) => Err(format!("claude CLI not available: {}", e)),
+            new_content.push('\n');
+            new_content.push_str(note);
+            new_content.push('\n');
+            new_content.push_str(&content[section_end..]);
+            new_content
+        } else {
+            // No Learnings section found, append one
+            let mut new_content = content.to_string();
+            if !new_content.ends_with('\n') {
+                new_content.push('\n');
+            }
+            new_content.push_str("\n## Learnings\n\n");
+            new_content.push_str(note);
+            new_content.push('\n');
+            new_content
         }
     }
 
-    /// Invoke recall-search CLI command and return raw output.
-    fn invoke_recall_search(&self, query: &str) -> std::result::Result<String, String> {
-        let output = Command::new("claude")
-            .args(["skill", "recall-search", query])
-            .current_dir(&self.project_dir)
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .output();
+    /// Search for grove learnings in Total Recall's memory files.
+    ///
+    /// Searches across daily logs and registers for entries with `grove:` prefix.
+    fn search_memory_files(&self, query: &str) -> std::result::Result<String, String> {
+        let mut results = String::new();
 
-        match output {
-            Ok(o) if o.status.success() => Ok(String::from_utf8_lossy(&o.stdout).to_string()),
-            Ok(o) => {
-                let stderr = String::from_utf8_lossy(&o.stderr);
-                Err(format!("recall-search failed: {}", stderr))
+        // Search daily logs (most recent first)
+        let daily_dir = self.memory_dir.join("daily");
+        if daily_dir.is_dir() {
+            let mut daily_files: Vec<_> = fs::read_dir(&daily_dir)
+                .map_err(|e| format!("Failed to read daily dir: {}", e))?
+                .filter_map(|e| e.ok())
+                .filter(|e| e.path().extension().is_some_and(|ext| ext == "md"))
+                .collect();
+
+            // Sort by name descending (most recent first)
+            daily_files.sort_by_key(|b| std::cmp::Reverse(b.file_name()));
+
+            // Search last 14 days of logs
+            for entry in daily_files.into_iter().take(14) {
+                if let Ok(content) = fs::read_to_string(entry.path()) {
+                    // Only include if it has grove entries and matches query
+                    if content.contains(GROVE_ID_PREFIX) {
+                        let query_lower = query.to_lowercase();
+                        if content.to_lowercase().contains(&query_lower) {
+                            results.push_str(&format!("[{}]\n", entry.path().display()));
+                            // Extract grove entries
+                            for line in content.lines() {
+                                if line.contains(GROVE_ID_PREFIX)
+                                    || line.starts_with("> ")
+                                    || line.starts_with("Tags:")
+                                {
+                                    results.push_str(line);
+                                    results.push('\n');
+                                }
+                            }
+                            results.push_str("\n---\n\n");
+                        }
+                    }
+                }
             }
-            Err(e) => Err(format!("claude CLI not available: {}", e)),
         }
+
+        // Search registers
+        let registers_dir = self.memory_dir.join("registers");
+        if registers_dir.is_dir() {
+            if let Ok(entries) = fs::read_dir(&registers_dir) {
+                for entry in entries.filter_map(|e| e.ok()) {
+                    if entry.path().extension().is_some_and(|ext| ext == "md") {
+                        if let Ok(content) = fs::read_to_string(entry.path()) {
+                            if content.contains(GROVE_ID_PREFIX) {
+                                let query_lower = query.to_lowercase();
+                                if content.to_lowercase().contains(&query_lower) {
+                                    results.push_str(&format!("[{}]\n", entry.path().display()));
+                                    for line in content.lines() {
+                                        if line.contains(GROVE_ID_PREFIX)
+                                            || line.starts_with("> ")
+                                            || line.starts_with("Tags:")
+                                        {
+                                            results.push_str(line);
+                                            results.push('\n');
+                                        }
+                                    }
+                                    results.push_str("\n---\n\n");
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(results)
     }
 
     /// Build a search term from a SearchQuery.
@@ -452,15 +587,12 @@ impl MemoryBackend for TotalRecallBackend {
         // Format the learning for Total Recall
         let note = self.format_learning(learning);
 
-        // Invoke recall-log CLI
-        match self.invoke_recall_log(&note) {
-            Ok(()) => {
-                let daily_log = format!("memory/daily/{}.md", Utc::now().format("%Y-%m-%d"));
-                Ok(WriteResult::success(&learning.id, daily_log))
-            }
+        // Write directly to daily log file
+        match self.write_to_daily_log(&note) {
+            Ok(location) => Ok(WriteResult::success(&learning.id, location)),
             Err(err) => {
                 // Fail-open: log warning, return failure result but don't block
-                warn!("{}", err);
+                warn!("Total Recall write failed: {}", err);
                 Ok(WriteResult::failure(&learning.id, "Backend unavailable"))
             }
         }
@@ -474,11 +606,11 @@ impl MemoryBackend for TotalRecallBackend {
 
         let search_term = self.build_search_term(query);
 
-        match self.invoke_recall_search(&search_term) {
+        match self.search_memory_files(&search_term) {
             Ok(output) => Ok(self.parse_search_results(&output, filters)),
             Err(err) => {
                 // Fail-open: log warning, return empty results
-                warn!("{}", err);
+                warn!("Total Recall search failed: {}", err);
                 Ok(Vec::new())
             }
         }
@@ -702,7 +834,7 @@ Another non-grove entry
     // Scope routing tests
 
     #[test]
-    fn test_write_project_scope_invokes_recall_log() {
+    fn test_write_project_scope_to_daily_log() {
         let temp = TempDir::new().unwrap();
         let memory_dir = temp.path().join("memory");
         fs::create_dir_all(&memory_dir).unwrap();
@@ -710,21 +842,28 @@ Another non-grove entry
         let backend = TotalRecallBackend::new(&memory_dir, temp.path());
         let learning = sample_learning(); // Project scope by default
 
-        // Project scope should invoke recall-log
-        // May succeed or fail depending on CLI availability
+        // Project scope should write directly to daily log
         let result = backend.write(&learning);
 
         assert!(result.is_ok());
         let write_result = result.unwrap();
+        assert!(write_result.success);
         assert!(!write_result.learning_id.is_empty());
-        // Location should be daily log path (if succeeded) or empty (if failed)
-        if write_result.success {
-            assert!(write_result.location.contains("memory/daily/"));
-        }
+        assert!(write_result.location.contains("memory/daily/"));
+
+        // Verify file was created with correct content
+        let daily_path = memory_dir
+            .join("daily")
+            .join(format!("{}.md", chrono::Utc::now().format("%Y-%m-%d")));
+        assert!(daily_path.exists());
+        let content = fs::read_to_string(&daily_path).unwrap();
+        assert!(content.contains("## Learnings"));
+        assert!(content.contains(&format!("grove:{}", learning.id)));
+        assert!(content.contains("Avoid N+1 queries"));
     }
 
     #[test]
-    fn test_write_team_scope_invokes_recall_log() {
+    fn test_write_team_scope_to_daily_log() {
         let temp = TempDir::new().unwrap();
         let memory_dir = temp.path().join("memory");
         fs::create_dir_all(&memory_dir).unwrap();
@@ -734,12 +873,14 @@ Another non-grove entry
         let mut learning = sample_learning();
         learning.scope = LearningScope::Team;
 
-        // Team scope should also invoke recall-log (same as Project)
+        // Team scope should also write to daily log (same as Project)
         let result = backend.write(&learning);
 
         assert!(result.is_ok());
         let write_result = result.unwrap();
+        assert!(write_result.success);
         assert!(!write_result.learning_id.is_empty());
+        assert!(write_result.location.contains("memory/daily/"));
     }
 
     #[test]
@@ -793,7 +934,7 @@ Another non-grove entry
     // Fail-open tests
 
     #[test]
-    fn test_write_returns_result_without_panic() {
+    fn test_write_always_succeeds_with_valid_memory_dir() {
         let temp = TempDir::new().unwrap();
         let memory_dir = temp.path().join("memory");
         fs::create_dir_all(&memory_dir).unwrap();
@@ -801,19 +942,17 @@ Another non-grove entry
         let backend = TotalRecallBackend::new(&memory_dir, temp.path());
         let learning = sample_learning();
 
-        // This may succeed or fail depending on whether 'claude' CLI is available
-        // The key is that it should not panic and should return a valid result
+        // Direct file writes should always succeed with a valid memory directory
         let result = backend.write(&learning);
 
-        // Should return Ok (fail-open behavior) regardless of CLI availability
         assert!(result.is_ok());
         let write_result = result.unwrap();
-        // Either succeeded (CLI available) or failed gracefully (CLI unavailable)
+        assert!(write_result.success);
         assert!(!write_result.learning_id.is_empty());
     }
 
     #[test]
-    fn test_search_cli_unavailable_returns_empty() {
+    fn test_search_no_grove_entries_returns_empty() {
         let temp = TempDir::new().unwrap();
         let memory_dir = temp.path().join("memory");
         fs::create_dir_all(&memory_dir).unwrap();
@@ -822,10 +961,9 @@ Another non-grove entry
 
         let query = SearchQuery::with_keywords(vec!["test".to_string()]);
 
-        // This will fail because 'claude' CLI is not available in tests
+        // No grove entries exist yet, should return empty
         let results = backend.search(&query, &SearchFilters::default()).unwrap();
 
-        // Should fail-open: return empty vec but not panic/error
         assert!(results.is_empty());
     }
 

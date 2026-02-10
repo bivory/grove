@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::backends::{MarkdownBackend, MemoryBackend, TotalRecallBackend};
+use crate::backends::{FallbackBackend, MarkdownBackend, MemoryBackend, TotalRecallBackend};
 use crate::config::{project_grove_dir, project_learnings_path, BackendsConfig, Config};
 use crate::error::Result;
 
@@ -297,8 +297,13 @@ pub fn create_primary_backend(cwd: &Path, config: Option<&Config>) -> Box<dyn Me
     match primary {
         Some(info) => match info.backend_type {
             BackendType::TotalRecall => {
+                // Total Recall backend with markdown fallback
+                // If Total Recall write fails, fall back to markdown
                 let memory_dir = info.path.unwrap_or_else(|| cwd.join("memory"));
-                Box::new(TotalRecallBackend::new(&memory_dir, cwd))
+                let tr_backend = Box::new(TotalRecallBackend::new(&memory_dir, cwd));
+                let md_path = project_learnings_path(cwd);
+                let md_backend = Box::new(MarkdownBackend::new(&md_path));
+                Box::new(FallbackBackend::new(tr_backend, md_backend))
             }
             BackendType::Config | BackendType::Mcp => {
                 // Config and MCP currently fall back to markdown

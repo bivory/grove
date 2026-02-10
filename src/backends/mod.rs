@@ -12,9 +12,11 @@
 pub mod fallback;
 pub mod markdown;
 pub mod total_recall;
+pub mod total_recall_format;
 pub mod traits;
 
 pub use fallback::FallbackBackend;
 pub use markdown::MarkdownBackend;
 pub use total_recall::TotalRecallBackend;
+pub use total_recall_format as tr_format;
 pub use traits::{MemoryBackend, SearchFilters, SearchQuery, SearchResult, WriteResult};

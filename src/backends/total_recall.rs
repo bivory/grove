@@ -11,6 +11,9 @@
 //!
 //! **Fail-open behavior**: If file operations fail, log warning and continue
 //! without persistence. Callers can optionally fall back to the markdown backend.
+//!
+//! Format constants are centralized in [`super::total_recall_format`] to simplify
+//! updates if Total Recall changes its format.
 
 use std::fs::{self, OpenOptions};
 use std::io::Write as IoWrite;
@@ -19,14 +22,17 @@ use std::path::{Path, PathBuf};
 use chrono::Utc;
 use tracing::warn;
 
+use crate::backends::total_recall_format::{
+    self as fmt, BLOCKQUOTE_PREFIX, DAILY_LOG_SEARCH_LIMIT, DATE_FORMAT, ENTRY_SEPARATOR,
+    GROVE_ID_PREFIX, LABEL_CATEGORY, LABEL_CONFIDENCE, LABEL_CREATED, LABEL_FILES, LABEL_SUMMARY,
+    LABEL_TAGS, LABEL_TICKET, MAX_ID_LENGTH, METADATA_SEPARATOR, SECTION_LEARNINGS, SECTION_PREFIX,
+    TIMESTAMP_FORMAT, TIME_FORMAT,
+};
 use crate::backends::traits::{
     MemoryBackend, SearchFilters, SearchQuery, SearchResult, WriteResult,
 };
 use crate::core::{CompoundLearning, Confidence, LearningScope};
 use crate::error::Result;
-
-/// Prefix for Grove learning IDs in Total Recall.
-const GROVE_ID_PREFIX: &str = "grove:";
 
 /// Total Recall backend adapter.
 ///
@@ -93,7 +99,7 @@ impl TotalRecallBackend {
         let mut note = String::new();
 
         // Timestamp prefix [HH:MM]
-        note.push_str(&format!("[{}] ", learning.timestamp.format("%H:%M")));
+        note.push_str(&format!("[{}] ", learning.timestamp.format(TIME_FORMAT)));
 
         // Header with category and ID
         note.push_str(&format!(
@@ -110,7 +116,7 @@ impl TotalRecallBackend {
 
         // Detail as blockquote (handle multiline)
         for line in learning.detail.lines() {
-            note.push_str("> ");
+            note.push_str(BLOCKQUOTE_PREFIX);
             note.push_str(line);
             note.push('\n');
         }
@@ -121,30 +127,31 @@ impl TotalRecallBackend {
         // Tags
         if !learning.tags.is_empty() {
             let tags: Vec<String> = learning.tags.iter().map(|t| format!("#{}", t)).collect();
-            meta_parts.push(format!("Tags: {}", tags.join(" ")));
+            meta_parts.push(format!("{} {}", LABEL_TAGS, tags.join(" ")));
         }
 
         // Confidence
         meta_parts.push(format!(
-            "Confidence: {}",
+            "{} {}",
+            LABEL_CONFIDENCE,
             confidence_display(&learning.confidence)
         ));
 
         // Ticket
         if let Some(ref ticket_id) = learning.ticket_id {
-            meta_parts.push(format!("Ticket: {}", ticket_id));
+            meta_parts.push(format!("{} {}", LABEL_TICKET, ticket_id));
         }
 
         // Files
         if let Some(ref files) = learning.context_files {
             if !files.is_empty() {
-                meta_parts.push(format!("Files: {}", files.join(", ")));
+                meta_parts.push(format!("{} {}", LABEL_FILES, files.join(", ")));
             }
         }
 
         if !meta_parts.is_empty() {
             note.push('\n');
-            note.push_str(&meta_parts.join(" | "));
+            note.push_str(&meta_parts.join(METADATA_SEPARATOR));
         }
 
         note
@@ -202,14 +209,18 @@ impl TotalRecallBackend {
 
         // Metadata
         md.push_str(&format!(
-            "**Category:** {}\n",
+            "{} {}\n",
+            LABEL_CATEGORY,
             learning.category.display_name()
         ));
-        md.push_str(&format!("**Summary:** {}\n", learning.summary));
+        md.push_str(&format!("{} {}\n", LABEL_SUMMARY, learning.summary));
         md.push_str(&format!(
-            "**Confidence:** {} | **Created:** {}\n",
+            "{} {}{}{} {}\n",
+            LABEL_CONFIDENCE,
             confidence_display(&learning.confidence),
-            learning.timestamp.format("%Y-%m-%dT%H:%M:%SZ")
+            METADATA_SEPARATOR,
+            LABEL_CREATED,
+            learning.timestamp.format(TIMESTAMP_FORMAT)
         ));
 
         // Tags
@@ -222,7 +233,7 @@ impl TotalRecallBackend {
         md.push_str(&format!("\n{}\n", learning.detail));
 
         // Separator
-        md.push_str("\n---\n\n");
+        md.push_str(&format!("\n{}\n\n", ENTRY_SEPARATOR));
 
         md
     }
@@ -232,7 +243,7 @@ impl TotalRecallBackend {
     /// Appends the formatted learning to `memory/daily/YYYY-MM-DD.md` under
     /// the `## Learnings` section. Creates the file if it doesn't exist.
     fn write_to_daily_log(&self, note: &str) -> std::result::Result<String, String> {
-        let today = Utc::now().format("%Y-%m-%d").to_string();
+        let today = Utc::now().format(DATE_FORMAT).to_string();
         let daily_dir = self.memory_dir.join("daily");
         let daily_path = daily_dir.join(format!("{}.md", today));
 
@@ -250,7 +261,7 @@ impl TotalRecallBackend {
             fs::read_to_string(&daily_path)
                 .map_err(|e| format!("Failed to read daily log {}: {}", daily_path.display(), e))?
         } else {
-            self.daily_log_template(&today)
+            fmt::daily_log_template(&today)
         };
 
         // Find or create Learnings section and append
@@ -263,36 +274,14 @@ impl TotalRecallBackend {
         Ok(format!("memory/daily/{}.md", today))
     }
 
-    /// Create a new daily log template.
-    fn daily_log_template(&self, date: &str) -> String {
-        format!(
-            r#"# {}
-
-## Decisions
-
-## Corrections
-
-## Commitments
-
-## Open Loops
-
-## Notes
-
-## Learnings
-
-"#,
-            date
-        )
-    }
-
     /// Append a note to the Learnings section of the daily log content.
     fn append_to_learnings_section(&self, content: &str, note: &str) -> String {
         // Look for ## Learnings section
-        if let Some(learnings_pos) = content.find("## Learnings") {
+        if let Some(learnings_pos) = content.find(SECTION_LEARNINGS) {
             // Find where Learnings section ends (next ## or end of file)
-            let after_header = learnings_pos + "## Learnings".len();
+            let after_header = learnings_pos + SECTION_LEARNINGS.len();
             let section_end = content[after_header..]
-                .find("\n## ")
+                .find(SECTION_PREFIX)
                 .map(|pos| after_header + pos)
                 .unwrap_or(content.len());
 
@@ -312,7 +301,7 @@ impl TotalRecallBackend {
             if !new_content.ends_with('\n') {
                 new_content.push('\n');
             }
-            new_content.push_str("\n## Learnings\n\n");
+            new_content.push_str(&format!("\n{}\n\n", SECTION_LEARNINGS));
             new_content.push_str(note);
             new_content.push('\n');
             new_content
@@ -337,8 +326,8 @@ impl TotalRecallBackend {
             // Sort by name descending (most recent first)
             daily_files.sort_by_key(|b| std::cmp::Reverse(b.file_name()));
 
-            // Search last 14 days of logs
-            for entry in daily_files.into_iter().take(14) {
+            // Search last N days of logs
+            for entry in daily_files.into_iter().take(DAILY_LOG_SEARCH_LIMIT) {
                 if let Ok(content) = fs::read_to_string(entry.path()) {
                     // Only include if it has grove entries
                     if content.contains(GROVE_ID_PREFIX) {
@@ -346,14 +335,14 @@ impl TotalRecallBackend {
                         // Extract grove entries
                         for line in content.lines() {
                             if line.contains(GROVE_ID_PREFIX)
-                                || line.starts_with("> ")
-                                || line.starts_with("Tags:")
+                                || line.starts_with(BLOCKQUOTE_PREFIX)
+                                || line.starts_with(LABEL_TAGS)
                             {
                                 results.push_str(line);
                                 results.push('\n');
                             }
                         }
-                        results.push_str("\n---\n\n");
+                        results.push_str(&format!("\n{}\n\n", ENTRY_SEPARATOR));
                     }
                 }
             }
@@ -370,14 +359,14 @@ impl TotalRecallBackend {
                                 results.push_str(&format!("[{}]\n", entry.path().display()));
                                 for line in content.lines() {
                                     if line.contains(GROVE_ID_PREFIX)
-                                        || line.starts_with("> ")
-                                        || line.starts_with("Tags:")
+                                        || line.starts_with(BLOCKQUOTE_PREFIX)
+                                        || line.starts_with(LABEL_TAGS)
                                     {
                                         results.push_str(line);
                                         results.push('\n');
                                     }
                                 }
-                                results.push_str("\n---\n\n");
+                                results.push_str(&format!("\n{}\n\n", ENTRY_SEPARATOR));
                             }
                         }
                     }
@@ -406,8 +395,8 @@ impl TotalRecallBackend {
             // Sort by name descending (most recent first)
             daily_files.sort_by_key(|b| std::cmp::Reverse(b.file_name()));
 
-            // Search last 14 days of logs
-            for entry in daily_files.into_iter().take(14) {
+            // Search last N days of logs
+            for entry in daily_files.into_iter().take(DAILY_LOG_SEARCH_LIMIT) {
                 if let Ok(content) = fs::read_to_string(entry.path()) {
                     // Only include if it has grove entries and matches query
                     if content.contains(GROVE_ID_PREFIX) {
@@ -417,14 +406,14 @@ impl TotalRecallBackend {
                             // Extract grove entries
                             for line in content.lines() {
                                 if line.contains(GROVE_ID_PREFIX)
-                                    || line.starts_with("> ")
-                                    || line.starts_with("Tags:")
+                                    || line.starts_with(BLOCKQUOTE_PREFIX)
+                                    || line.starts_with(LABEL_TAGS)
                                 {
                                     results.push_str(line);
                                     results.push('\n');
                                 }
                             }
-                            results.push_str("\n---\n\n");
+                            results.push_str(&format!("\n{}\n\n", ENTRY_SEPARATOR));
                         }
                     }
                 }
@@ -444,14 +433,14 @@ impl TotalRecallBackend {
                                     results.push_str(&format!("[{}]\n", entry.path().display()));
                                     for line in content.lines() {
                                         if line.contains(GROVE_ID_PREFIX)
-                                            || line.starts_with("> ")
-                                            || line.starts_with("Tags:")
+                                            || line.starts_with(BLOCKQUOTE_PREFIX)
+                                            || line.starts_with(LABEL_TAGS)
                                         {
                                             results.push_str(line);
                                             results.push('\n');
                                         }
                                     }
-                                    results.push_str("\n---\n\n");
+                                    results.push_str(&format!("\n{}\n\n", ENTRY_SEPARATOR));
                                 }
                             }
                         }
@@ -528,7 +517,7 @@ impl TotalRecallBackend {
         let mut current = String::new();
 
         for line in output.lines() {
-            if line.trim() == "---" || (line.is_empty() && !current.is_empty()) {
+            if line.trim() == ENTRY_SEPARATOR || (line.is_empty() && !current.is_empty()) {
                 if !current.trim().is_empty() && current.contains(GROVE_ID_PREFIX) {
                     entries.push(current.trim().to_string());
                 }
@@ -559,7 +548,7 @@ impl TotalRecallBackend {
         let id_end = entry[after_prefix..]
             .find([')', ':', ' ', '\n'])
             .map(|i| after_prefix + i)
-            .unwrap_or(entry.len().min(after_prefix + 30));
+            .unwrap_or(entry.len().min(after_prefix + MAX_ID_LENGTH));
 
         if id_end <= after_prefix {
             return None;
@@ -568,25 +557,21 @@ impl TotalRecallBackend {
         let grove_id = entry[after_prefix..id_end].trim();
 
         // Extract category from **Category** pattern
-        let category = if entry.contains("**Pattern**") {
-            crate::core::LearningCategory::Pattern
-        } else if entry.contains("**Pitfall**") {
-            crate::core::LearningCategory::Pitfall
-        } else if entry.contains("**Convention**") {
-            crate::core::LearningCategory::Convention
-        } else if entry.contains("**Dependency**") {
-            crate::core::LearningCategory::Dependency
-        } else if entry.contains("**Process**") {
-            crate::core::LearningCategory::Process
-        } else if entry.contains("**Domain**") {
-            crate::core::LearningCategory::Domain
-        } else if entry.contains("**Debugging**") {
-            crate::core::LearningCategory::Debugging
-        } else {
-            crate::core::LearningCategory::Pattern // Default
-        };
+        let category = fmt::CATEGORY_MARKERS
+            .iter()
+            .find(|(marker, _)| entry.contains(*marker))
+            .map(|(_, name)| match *name {
+                "Pattern" => crate::core::LearningCategory::Pattern,
+                "Pitfall" => crate::core::LearningCategory::Pitfall,
+                "Convention" => crate::core::LearningCategory::Convention,
+                "Dependency" => crate::core::LearningCategory::Dependency,
+                "Process" => crate::core::LearningCategory::Process,
+                "Domain" => crate::core::LearningCategory::Domain,
+                "Debugging" => crate::core::LearningCategory::Debugging,
+                _ => crate::core::LearningCategory::Pattern,
+            })
+            .unwrap_or(crate::core::LearningCategory::Pattern);
 
-        // Extract summary (text after the category/ID header, before newline)
         // Extract summary (text after the category/ID header, before newline)
         // Find the line containing the grove ID, which has the summary
         let summary = entry
@@ -603,17 +588,17 @@ impl TotalRecallBackend {
         // Extract detail from blockquotes
         let detail: String = entry
             .lines()
-            .filter(|line| line.starts_with("> "))
-            .map(|line| line.strip_prefix("> ").unwrap_or(line))
+            .filter(|line| line.starts_with(BLOCKQUOTE_PREFIX))
+            .map(|line| line.strip_prefix(BLOCKQUOTE_PREFIX).unwrap_or(line))
             .collect::<Vec<_>>()
             .join("\n");
 
         // Extract tags from "Tags: #tag1 #tag2" pattern
         let tags = entry
             .lines()
-            .find(|line| line.contains("Tags:"))
+            .find(|line| line.contains(LABEL_TAGS))
             .map(|line| {
-                line.split("Tags:")
+                line.split(LABEL_TAGS)
                     .nth(1)
                     .unwrap_or("")
                     .split('|')
@@ -952,11 +937,11 @@ Tags: #performance #database | Confidence: High | Ticket: T001";
         // Verify file was created with correct content
         let daily_path = memory_dir
             .join("daily")
-            .join(format!("{}.md", chrono::Utc::now().format("%Y-%m-%d")));
+            .join(format!("{}.md", chrono::Utc::now().format(DATE_FORMAT)));
         assert!(daily_path.exists());
         let content = fs::read_to_string(&daily_path).unwrap();
-        assert!(content.contains("## Learnings"));
-        assert!(content.contains(&format!("grove:{}", learning.id)));
+        assert!(content.contains(SECTION_LEARNINGS));
+        assert!(content.contains(&format!("{}{}", GROVE_ID_PREFIX, learning.id)));
         assert!(content.contains("Avoid N+1 queries"));
     }
 

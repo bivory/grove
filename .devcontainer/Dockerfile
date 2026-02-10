@@ -1,4 +1,10 @@
 # Devcontainer image for grove
+# Multi-stage build
+FROM rust:1.92 AS builder
+WORKDIR /app
+COPY . .
+RUN cargo build --release
+
 # Build: docker build -t grove-devcontainer .devcontainer/
 FROM mcr.microsoft.com/devcontainers/base:ubuntu-24.04
 
@@ -89,8 +95,10 @@ RUN roz --version
 RUN claude plugin install roz@bivory
 RUN claude plugin list | grep -q roz
 
-# Install grove
-RUN curl -fsSL https://raw.githubusercontent.com/bivory/grove/main/.claude-plugin/install.sh | bash -s -- v0.3.0
+# Install grove -- Release version
+#RUN curl -fsSL https://raw.githubusercontent.com/bivory/grove/main/.claude-plugin/install.sh | bash -s -- v0.4.0
+# Install grove -- Local version
+COPY --from=builder /app/target/release/grove /usr/local/bin/grove
 RUN grove --version
 RUN claude plugin install grove@bivory
 RUN claude plugin list | grep -q grove
@@ -98,6 +106,9 @@ RUN claude plugin list | grep -q grove
 # Install Total Recall for grove
 RUN claude plugin marketplace add davegoldblatt/recall-marketplace
 RUN claude plugin install recall@recall-marketplace
+# Fails need to login
+# RUN claude -m /recall:recall-init
+# RUN claude -p "Initialize recall" --append-system-prompt "Follow the recall-init protocol"
 
 # Install additional Claude Code plugins
 RUN claude plugin marketplace add anthropics/claude-plugins-official

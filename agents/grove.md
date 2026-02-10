@@ -45,9 +45,9 @@ EOF
 
 Run when the work was trivial and doesn't warrant reflection:
 
-```text
-/skip "typo fix"
-/skip "version bump only"
+```bash
+grove skip "typo fix" --session-id <ID>
+grove skip "version bump only" --session-id <ID>
 ```
 
 ### /observe

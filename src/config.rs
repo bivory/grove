@@ -73,7 +73,6 @@ impl Default for BackendsConfig {
     fn default() -> Self {
         Self {
             discovery: vec![
-                "config".to_string(),
                 "total-recall".to_string(),
                 "mcp".to_string(),
                 "markdown".to_string(),
@@ -411,7 +410,7 @@ mod tests {
         // Backends defaults
         assert_eq!(
             config.backends.discovery,
-            vec!["config", "total-recall", "mcp", "markdown"]
+            vec!["total-recall", "mcp", "markdown"]
         );
         assert!(config.backends.overrides.is_empty());
 

@@ -105,13 +105,10 @@ The gate approves exit once you reflect or skip.
 Grove uses layered TOML configuration:
 
 1. `.grove/config.toml` (project, highest priority)
-2. `~/.config/grove/config.toml` (user)
+2. `~/.grove/config.toml` (user)
 3. Built-in defaults
 
 ```toml
-[gate]
-enabled = true
-
 [gate.auto_skip]
 enabled = true
 line_threshold = 5
@@ -121,19 +118,25 @@ discovery = ["total-recall", "mcp", "markdown"]
 
 [decay]
 passive_duration_days = 90
+
+[retrieval]
+max_injections = 5
+strategy = "moderate"  # conservative, moderate, aggressive
+
+[circuit_breaker]
+max_blocks = 3
+cooldown_seconds = 300
 ```
 
 ### Forcing a Specific Backend
 
-By default, Grove auto-detects backends in discovery order. To bypass detection
-and force a specific backend:
+By default, Grove auto-detects backends in discovery order. To force a specific
+backend, set the discovery list to only that backend:
 
 ```toml
 [backends]
-primary = "total-recall"  # or "markdown"
+discovery = ["total-recall"]  # Only use Total Recall
 ```
-
-When `primary` is set, Grove skips auto-detection and uses that backend directly.
 
 ## Learning Categories
 

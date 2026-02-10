@@ -5,7 +5,7 @@
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 
-use crate::backends::markdown::MarkdownBackend;
+use crate::backends::MemoryBackend;
 use crate::config::Config;
 use crate::core::LearningStatus;
 use crate::error::Result;
@@ -149,14 +149,14 @@ impl MaintainOutput {
 }
 
 /// The maintain command implementation.
-pub struct MaintainCommand {
-    backend: MarkdownBackend,
+pub struct MaintainCommand<B: MemoryBackend> {
+    backend: B,
     config: Config,
 }
 
-impl MaintainCommand {
+impl<B: MemoryBackend> MaintainCommand<B> {
     /// Create a new maintain command.
-    pub fn new(backend: MarkdownBackend, config: Config) -> Self {
+    pub fn new(backend: B, config: Config) -> Self {
         Self { backend, config }
     }
 
@@ -256,7 +256,7 @@ impl MaintainCommand {
     /// In a more complete implementation, this would look up the last reference
     /// time from the stats cache.
     fn find_stale_learnings(&self, stale_days: u32) -> Result<Vec<StaleLearningInfo>> {
-        let learnings = self.backend.parse_all_learnings()?;
+        let learnings = self.backend.list_all()?;
         let decay_days = self.config.decay.passive_duration_days as i64;
         let now = Utc::now();
 
@@ -387,6 +387,7 @@ impl MaintainCommand {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::backends::MarkdownBackend;
     use chrono::Duration;
     use std::fs;
     use tempfile::TempDir;

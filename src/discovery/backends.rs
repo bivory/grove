@@ -822,4 +822,150 @@ mod tests {
         // Should use markdown because it's the only one in discovery list
         assert_eq!(backend.name(), "markdown");
     }
+
+    // Integration tests: verify backend operations work through discovery
+
+    mod integration_tests {
+        use super::*;
+        use crate::backends::{SearchFilters, SearchQuery};
+        use crate::core::{Confidence, LearningCategory, LearningScope, WriteGateCriterion};
+
+        fn sample_learning() -> crate::core::CompoundLearning {
+            crate::core::CompoundLearning::new(
+                LearningCategory::Pattern,
+                "Integration test learning",
+                "This tests that discovered backends work end-to-end",
+                LearningScope::Project,
+                Confidence::High,
+                vec![WriteGateCriterion::BehaviorChanging],
+                vec!["integration".to_string(), "test".to_string()],
+                "integration-test-session",
+            )
+        }
+
+        #[test]
+        fn test_discovered_backend_write_and_search() {
+            let dir = TempDir::new().unwrap();
+
+            // No Total Recall structure, so markdown should be used
+            let config = Config::default();
+            let backend = create_primary_backend(dir.path(), Some(&config));
+
+            assert_eq!(backend.name(), "markdown");
+
+            // Write a learning through the discovered backend
+            let learning = sample_learning();
+            let write_result = backend.write(&learning).unwrap();
+            assert!(write_result.success);
+
+            // Search should find it
+            let results = backend
+                .search(&SearchQuery::new(), &SearchFilters::default())
+                .unwrap();
+            assert_eq!(results.len(), 1);
+            assert_eq!(results[0].learning.summary, "Integration test learning");
+        }
+
+        #[test]
+        fn test_discovered_backend_list_all() {
+            let dir = TempDir::new().unwrap();
+
+            let config = Config::default();
+            let backend = create_primary_backend(dir.path(), Some(&config));
+
+            // Write two learnings
+            let learning1 = sample_learning();
+            backend.write(&learning1).unwrap();
+
+            let mut learning2 = sample_learning();
+            learning2.summary = "Second integration test learning".to_string();
+            backend.write(&learning2).unwrap();
+
+            // list_all should return both
+            let learnings = backend.list_all().unwrap();
+            assert_eq!(learnings.len(), 2);
+        }
+
+        #[test]
+        fn test_discovered_backend_archive_restore() {
+            let dir = TempDir::new().unwrap();
+
+            let config = Config::default();
+            let backend = create_primary_backend(dir.path(), Some(&config));
+
+            // Write a learning
+            let learning = sample_learning();
+            backend.write(&learning).unwrap();
+
+            // Archive it
+            backend.archive(&learning.id).unwrap();
+
+            // Should not appear in active-only search
+            let active_results = backend
+                .search(&SearchQuery::new(), &SearchFilters::active_only())
+                .unwrap();
+            assert_eq!(active_results.len(), 0);
+
+            // Should appear in all search
+            let all_results = backend
+                .search(&SearchQuery::new(), &SearchFilters::all())
+                .unwrap();
+            assert_eq!(all_results.len(), 1);
+
+            // Restore it
+            backend.restore(&learning.id).unwrap();
+
+            // Should appear in active search again
+            let active_results = backend
+                .search(&SearchQuery::new(), &SearchFilters::active_only())
+                .unwrap();
+            assert_eq!(active_results.len(), 1);
+        }
+
+        #[test]
+        fn test_total_recall_backend_detected_and_functional() {
+            let dir = TempDir::new().unwrap();
+
+            // Create Total Recall structure
+            fs::create_dir_all(dir.path().join("memory")).unwrap();
+            fs::create_dir_all(dir.path().join("rules")).unwrap();
+            fs::write(dir.path().join("rules/total-recall.md"), "# Total Recall").unwrap();
+
+            let config = Config::default();
+            let backend = create_primary_backend(dir.path(), Some(&config));
+
+            // Should detect Total Recall
+            assert_eq!(backend.name(), "total-recall");
+            assert!(backend.ping());
+
+            // Write should work (may fail-open if claude CLI unavailable)
+            let learning = sample_learning();
+            let write_result = backend.write(&learning);
+            assert!(write_result.is_ok());
+        }
+
+        #[test]
+        fn test_config_discovery_order_respected() {
+            let dir = TempDir::new().unwrap();
+
+            // Create Total Recall structure
+            fs::create_dir_all(dir.path().join("memory")).unwrap();
+            fs::create_dir_all(dir.path().join("rules")).unwrap();
+            fs::write(dir.path().join("rules/total-recall.md"), "# Total Recall").unwrap();
+
+            // Config puts markdown first
+            let config = Config {
+                backends: BackendsConfig {
+                    discovery: vec!["markdown".to_string(), "total-recall".to_string()],
+                    overrides: HashMap::new(),
+                },
+                ..Config::default()
+            };
+
+            let backend = create_primary_backend(dir.path(), Some(&config));
+
+            // Markdown should be selected because it's first in discovery order
+            assert_eq!(backend.name(), "markdown");
+        }
+    }
 }

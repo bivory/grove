@@ -388,6 +388,16 @@ impl MemoryBackend for MarkdownBackend {
     fn name(&self) -> &'static str {
         "markdown"
     }
+
+    fn archive(&self, learning_id: &str) -> Result<()> {
+        // Delegate to the inherent method
+        self.update_status(learning_id, LearningStatus::Archived)
+    }
+
+    fn restore(&self, learning_id: &str) -> Result<()> {
+        // Delegate to the inherent method
+        self.update_status(learning_id, LearningStatus::Active)
+    }
 }
 
 /// Check if two file paths overlap (same file or one contains the other).

@@ -1204,4 +1204,153 @@ mod tests {
         //
         // The actual integration is tested via the trace event check above.
     }
+
+    // Additional ticketing system tests
+
+    #[test]
+    fn test_beads_close_triggers_gate_transition() {
+        let runner = test_runner();
+
+        // 1. Session start
+        let start_input = r#"{
+            "session_id": "beads-close-test",
+            "transcript_path": "/tmp/transcript.jsonl",
+            "cwd": "/tmp/project"
+        }"#;
+        runner
+            .run_with_input(HookType::SessionStart, start_input)
+            .unwrap();
+
+        // 2. Pre-tool-use: beads close detected
+        let pre_input = r#"{
+            "session_id": "beads-close-test",
+            "transcript_path": "/tmp/transcript.jsonl",
+            "cwd": "/tmp/project",
+            "tool_name": "Bash",
+            "tool_input": {"command": "beads close issue-456"}
+        }"#;
+        runner
+            .run_with_input(HookType::PreToolUse, pre_input)
+            .unwrap();
+
+        // Verify intent recorded
+        let session = runner.store.get("beads-close-test").unwrap().unwrap();
+        assert!(session.gate.ticket_close_intent.is_some());
+        let intent = session.gate.ticket_close_intent.as_ref().unwrap();
+        assert_eq!(intent.ticket_id, "issue-456");
+
+        // 3. Post-tool-use: close confirmed
+        let post_input = r#"{
+            "session_id": "beads-close-test",
+            "transcript_path": "/tmp/transcript.jsonl",
+            "cwd": "/tmp/project",
+            "tool_name": "Bash",
+            "tool_input": {"command": "beads close issue-456"},
+            "tool_response": "Closed issue-456"
+        }"#;
+        runner
+            .run_with_input(HookType::PostToolUse, post_input)
+            .unwrap();
+
+        // Verify gate is now Pending
+        let session = runner.store.get("beads-close-test").unwrap().unwrap();
+        assert_eq!(session.gate.status, GateStatus::Pending);
+    }
+
+    #[test]
+    fn test_beads_complete_triggers_gate_transition() {
+        let runner = test_runner();
+
+        // 1. Session start
+        let start_input = r#"{
+            "session_id": "beads-complete-test",
+            "transcript_path": "/tmp/transcript.jsonl",
+            "cwd": "/tmp/project"
+        }"#;
+        runner
+            .run_with_input(HookType::SessionStart, start_input)
+            .unwrap();
+
+        // 2. Pre-tool-use: beads complete detected
+        let pre_input = r#"{
+            "session_id": "beads-complete-test",
+            "transcript_path": "/tmp/transcript.jsonl",
+            "cwd": "/tmp/project",
+            "tool_name": "Bash",
+            "tool_input": {"command": "beads complete task-789"}
+        }"#;
+        runner
+            .run_with_input(HookType::PreToolUse, pre_input)
+            .unwrap();
+
+        // Verify intent recorded
+        let session = runner.store.get("beads-complete-test").unwrap().unwrap();
+        assert!(session.gate.ticket_close_intent.is_some());
+
+        // 3. Post-tool-use: close confirmed
+        let post_input = r#"{
+            "session_id": "beads-complete-test",
+            "transcript_path": "/tmp/transcript.jsonl",
+            "cwd": "/tmp/project",
+            "tool_name": "Bash",
+            "tool_input": {"command": "beads complete task-789"},
+            "tool_response": "task-789"
+        }"#;
+        runner
+            .run_with_input(HookType::PostToolUse, post_input)
+            .unwrap();
+
+        // Verify gate is now Pending
+        let session = runner.store.get("beads-complete-test").unwrap().unwrap();
+        assert_eq!(session.gate.status, GateStatus::Pending);
+    }
+
+    #[test]
+    fn test_non_close_command_does_not_trigger_gate() {
+        let runner = test_runner();
+
+        // 1. Session start
+        let start_input = r#"{
+            "session_id": "no-gate-test",
+            "transcript_path": "/tmp/transcript.jsonl",
+            "cwd": "/tmp/project"
+        }"#;
+        runner
+            .run_with_input(HookType::SessionStart, start_input)
+            .unwrap();
+
+        // 2. Pre-tool-use: regular git command
+        let pre_input = r#"{
+            "session_id": "no-gate-test",
+            "transcript_path": "/tmp/transcript.jsonl",
+            "cwd": "/tmp/project",
+            "tool_name": "Bash",
+            "tool_input": {"command": "git status"}
+        }"#;
+        runner
+            .run_with_input(HookType::PreToolUse, pre_input)
+            .unwrap();
+
+        // Verify no intent recorded
+        let session = runner.store.get("no-gate-test").unwrap().unwrap();
+        assert!(session.gate.ticket_close_intent.is_none());
+        assert_eq!(session.gate.status, GateStatus::Idle);
+
+        // 3. Post-tool-use: git status response
+        let post_input = r#"{
+            "session_id": "no-gate-test",
+            "transcript_path": "/tmp/transcript.jsonl",
+            "cwd": "/tmp/project",
+            "tool_name": "Bash",
+            "tool_input": {"command": "git status"},
+            "tool_response": "On branch main"
+        }"#;
+        runner
+            .run_with_input(HookType::PostToolUse, post_input)
+            .unwrap();
+
+        // Verify gate is still Idle
+        let session = runner.store.get("no-gate-test").unwrap().unwrap();
+        assert_eq!(session.gate.status, GateStatus::Idle);
+    }
 }

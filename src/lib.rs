@@ -20,8 +20,9 @@ pub use backends::{
 pub use config::Config;
 pub use core::{GateState, GateStatus, SessionState};
 pub use discovery::{
-    detect_backends, detect_ticketing_system, match_close_command, probe_beads, probe_markdown,
-    probe_tissue, BackendInfo, BackendType, ClosePattern, TicketingInfo, TicketingSystem,
+    create_primary_backend, detect_backends, detect_ticketing_system, match_close_command,
+    probe_beads, probe_markdown, probe_tissue, BackendInfo, BackendType, ClosePattern,
+    TicketingInfo, TicketingSystem,
 };
 pub use error::{GroveError, Result};
 pub use stats::{

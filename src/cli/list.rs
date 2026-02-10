@@ -5,9 +5,9 @@
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 
-use crate::backends::markdown::MarkdownBackend;
+use crate::backends::{MemoryBackend, SearchFilters, SearchQuery};
 use crate::config::{Config, DecayConfig};
-use crate::core::{CompoundLearning, LearningStatus};
+use crate::core::CompoundLearning;
 
 /// Options for the list command.
 #[derive(Debug, Clone, Default)]
@@ -139,28 +139,30 @@ impl ListOutput {
 }
 
 /// The list command implementation.
-pub struct ListCommand {
-    backend: MarkdownBackend,
+pub struct ListCommand<B: MemoryBackend> {
+    backend: B,
     config: Config,
 }
 
-impl ListCommand {
+impl<B: MemoryBackend> ListCommand<B> {
     /// Create a new list command.
-    pub fn new(backend: MarkdownBackend, config: Config) -> Self {
+    pub fn new(backend: B, config: Config) -> Self {
         Self { backend, config }
     }
 
     /// Run the list command.
     pub fn run(&self, options: &ListOptions) -> ListOutput {
-        // Parse all learnings from backend
-        match self.backend.parse_all_learnings() {
-            Ok(mut learnings) => {
-                // Filter by status
-                if !options.include_archived {
-                    learnings.retain(|l| l.status == LearningStatus::Active);
-                }
+        // Use search with empty query to get all learnings
+        let filters = if options.include_archived {
+            SearchFilters::all()
+        } else {
+            SearchFilters::active_only()
+        };
 
-                // Sort by timestamp (most recent first)
+        match self.backend.search(&SearchQuery::new(), &filters) {
+            Ok(results) => {
+                // Extract learnings and sort by timestamp (most recent first)
+                let mut learnings: Vec<_> = results.into_iter().map(|r| r.learning).collect();
                 learnings.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
 
                 let decay_config = &self.config.decay;
@@ -282,6 +284,7 @@ impl ListCommand {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::backends::MarkdownBackend;
     use chrono::Duration;
     use std::fs;
     use tempfile::TempDir;

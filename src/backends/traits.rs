@@ -40,6 +40,65 @@ pub trait MemoryBackend: Send + Sync {
 
     /// Get the backend name for logging and stats.
     fn name(&self) -> &'static str;
+
+    /// Archive a learning by ID.
+    ///
+    /// Default implementation returns an error indicating archiving is not supported.
+    fn archive(&self, _learning_id: &str) -> Result<()> {
+        Err(crate::error::GroveError::backend(
+            "Archive not supported by this backend",
+        ))
+    }
+
+    /// Restore an archived learning by ID.
+    ///
+    /// Default implementation returns an error indicating restore is not supported.
+    fn restore(&self, _learning_id: &str) -> Result<()> {
+        Err(crate::error::GroveError::backend(
+            "Restore not supported by this backend",
+        ))
+    }
+
+    /// List all learnings (for backends that support it).
+    ///
+    /// Default implementation uses search with an empty query.
+    fn list_all(&self) -> Result<Vec<crate::core::CompoundLearning>> {
+        let results = self.search(&SearchQuery::new(), &SearchFilters::all())?;
+        Ok(results.into_iter().map(|r| r.learning).collect())
+    }
+}
+
+/// Blanket implementation for boxed trait objects.
+///
+/// This allows `Box<dyn MemoryBackend>` to be used wherever `MemoryBackend` is expected.
+impl MemoryBackend for Box<dyn MemoryBackend> {
+    fn write(&self, learning: &CompoundLearning) -> Result<WriteResult> {
+        (**self).write(learning)
+    }
+
+    fn search(&self, query: &SearchQuery, filters: &SearchFilters) -> Result<Vec<SearchResult>> {
+        (**self).search(query, filters)
+    }
+
+    fn ping(&self) -> bool {
+        (**self).ping()
+    }
+
+    fn name(&self) -> &'static str {
+        (**self).name()
+    }
+
+    fn archive(&self, learning_id: &str) -> Result<()> {
+        (**self).archive(learning_id)
+    }
+
+    fn restore(&self, learning_id: &str) -> Result<()> {
+        (**self).restore(learning_id)
+    }
+
+    fn list_all(&self) -> Result<Vec<crate::core::CompoundLearning>> {
+        (**self).list_all()
+    }
 }
 
 /// Result of writing a learning to a backend.
@@ -502,5 +561,143 @@ mod tests {
 
         assert_eq!(result.learning.id, deserialized.learning.id);
         assert!((result.relevance - deserialized.relevance).abs() < f64::EPSILON);
+    }
+
+    // Box<dyn MemoryBackend> delegation tests
+
+    mod boxed_backend_tests {
+        use super::*;
+        use crate::backends::MarkdownBackend;
+        use std::fs;
+        use tempfile::TempDir;
+
+        fn setup_markdown_backend() -> (TempDir, MarkdownBackend) {
+            let temp = TempDir::new().unwrap();
+            let learnings_path = temp.path().join(".grove").join("learnings.md");
+            fs::create_dir_all(learnings_path.parent().unwrap()).unwrap();
+            let backend = MarkdownBackend::new(&learnings_path);
+            (temp, backend)
+        }
+
+        #[test]
+        fn test_boxed_backend_name_delegates() {
+            let (_temp, backend) = setup_markdown_backend();
+            let boxed: Box<dyn MemoryBackend> = Box::new(backend);
+
+            assert_eq!(boxed.name(), "markdown");
+        }
+
+        #[test]
+        fn test_boxed_backend_ping_delegates() {
+            let (_temp, backend) = setup_markdown_backend();
+            let boxed: Box<dyn MemoryBackend> = Box::new(backend);
+
+            // Markdown backend always returns true for ping
+            assert!(boxed.ping());
+        }
+
+        #[test]
+        fn test_boxed_backend_write_delegates() {
+            let (_temp, backend) = setup_markdown_backend();
+            let boxed: Box<dyn MemoryBackend> = Box::new(backend);
+
+            let learning = sample_learning();
+            let result = boxed.write(&learning).unwrap();
+
+            assert!(result.success);
+            assert!(!result.learning_id.is_empty());
+        }
+
+        #[test]
+        fn test_boxed_backend_search_delegates() {
+            let (_temp, backend) = setup_markdown_backend();
+            let boxed: Box<dyn MemoryBackend> = Box::new(backend);
+
+            // Write a learning first
+            let learning = sample_learning();
+            boxed.write(&learning).unwrap();
+
+            // Search with empty query returns all
+            let results = boxed
+                .search(&SearchQuery::new(), &SearchFilters::default())
+                .unwrap();
+
+            assert_eq!(results.len(), 1);
+            assert_eq!(results[0].learning.summary, learning.summary);
+        }
+
+        #[test]
+        fn test_boxed_backend_list_all_delegates() {
+            let (_temp, backend) = setup_markdown_backend();
+            let boxed: Box<dyn MemoryBackend> = Box::new(backend);
+
+            // Write a learning first
+            let learning = sample_learning();
+            boxed.write(&learning).unwrap();
+
+            // list_all returns all learnings
+            let learnings = boxed.list_all().unwrap();
+
+            assert_eq!(learnings.len(), 1);
+            assert_eq!(learnings[0].summary, learning.summary);
+        }
+
+        #[test]
+        fn test_boxed_backend_archive_delegates() {
+            let (_temp, backend) = setup_markdown_backend();
+            let boxed: Box<dyn MemoryBackend> = Box::new(backend);
+
+            // Write a learning first
+            let learning = sample_learning();
+            let write_result = boxed.write(&learning).unwrap();
+            assert!(write_result.success, "Write should succeed");
+
+            // Use the ID from the write result (may differ from input)
+            let learning_id = write_result.learning_id;
+
+            // Verify the learning was written
+            let learnings_before = boxed.list_all().unwrap();
+            assert_eq!(
+                learnings_before.len(),
+                1,
+                "Should have 1 learning after write"
+            );
+            assert_eq!(learnings_before[0].id, learning_id, "ID should match");
+
+            // Archive should work via delegation
+            let result = boxed.archive(&learning_id);
+            assert!(result.is_ok(), "Archive failed: {:?}", result.err());
+
+            // Verify it's archived
+            let learnings = boxed.list_all().unwrap();
+            assert_eq!(learnings[0].status, LearningStatus::Archived);
+        }
+
+        #[test]
+        fn test_boxed_backend_restore_delegates() {
+            let (_temp, backend) = setup_markdown_backend();
+            let boxed: Box<dyn MemoryBackend> = Box::new(backend);
+
+            // Write a learning first
+            let learning = sample_learning();
+            let write_result = boxed.write(&learning).unwrap();
+
+            // Use the ID from the write result
+            let learning_id = write_result.learning_id;
+
+            // Archive it
+            boxed.archive(&learning_id).unwrap();
+
+            // Restore should work via delegation
+            let result = boxed.restore(&learning_id);
+            assert!(result.is_ok());
+
+            // Verify it's active again
+            let results = boxed
+                .search(&SearchQuery::new(), &SearchFilters::active_only())
+                .unwrap();
+            assert_eq!(results.len(), 1);
+            assert_eq!(results[0].learning.status, LearningStatus::Active);
+        }
     }
 }

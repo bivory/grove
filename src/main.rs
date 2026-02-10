@@ -8,7 +8,7 @@ use std::process::ExitCode;
 
 use clap::{Parser, Subcommand, ValueEnum};
 
-use grove::config::{grove_home, project_learnings_path, Config};
+use grove::config::{grove_home, Config};
 use grove::error::exit_codes;
 use grove::hooks::{HookRunner, HookType};
 use grove::storage::FileSessionStore;
@@ -466,14 +466,13 @@ fn run_reflect(
     cwd: &Path,
 ) -> Result<ExitCode, Box<dyn std::error::Error>> {
     use grove::cli::reflect::{ReflectCommand, ReflectOptions};
-    use grove::MarkdownBackend;
+    use grove::create_primary_backend;
 
     let config = Config::load();
     let store = FileSessionStore::new()?;
 
-    // Set up backend
-    let learnings_path = project_learnings_path(cwd);
-    let backend = MarkdownBackend::new(&learnings_path);
+    // Set up backend using discovery
+    let backend = create_primary_backend(cwd, Some(&config));
 
     let cmd = ReflectCommand::new(store, backend, config);
     let options = ReflectOptions {
@@ -563,11 +562,10 @@ fn run_search(
     cwd: &Path,
 ) -> Result<ExitCode, Box<dyn std::error::Error>> {
     use grove::cli::search::{SearchCommand, SearchOptions};
-    use grove::MarkdownBackend;
+    use grove::create_primary_backend;
 
     let config = Config::load();
-    let learnings_path = project_learnings_path(cwd);
-    let backend = MarkdownBackend::new(&learnings_path);
+    let backend = create_primary_backend(cwd, Some(&config));
 
     let cmd = SearchCommand::new(backend, config);
     let options = SearchOptions {
@@ -597,11 +595,10 @@ fn run_list(
     cwd: &Path,
 ) -> Result<ExitCode, Box<dyn std::error::Error>> {
     use grove::cli::list::{ListCommand, ListOptions};
-    use grove::MarkdownBackend;
+    use grove::create_primary_backend;
 
     let config = Config::load();
-    let learnings_path = project_learnings_path(cwd);
-    let backend = MarkdownBackend::new(&learnings_path);
+    let backend = create_primary_backend(cwd, Some(&config));
 
     let cmd = ListCommand::new(backend, config);
     let options = ListOptions {
@@ -664,11 +661,10 @@ fn run_maintain(
     use grove::cli::maintain::{
         MaintainAction as MaintainActionLib, MaintainCommand, MaintainInput, MaintainOptions,
     };
-    use grove::MarkdownBackend;
+    use grove::create_primary_backend;
 
     let config = Config::load();
-    let learnings_path = project_learnings_path(cwd);
-    let backend = MarkdownBackend::new(&learnings_path);
+    let backend = create_primary_backend(cwd, Some(&config));
 
     let cmd = MaintainCommand::new(backend, config);
     let options = MaintainOptions {

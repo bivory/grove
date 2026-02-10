@@ -265,12 +265,18 @@ impl StatsCommand {
         let cache = if options.rebuild {
             match cache_manager.force_rebuild() {
                 Ok(c) => c,
-                Err(_) => return StatsOutput::empty(warnings),
+                Err(e) => {
+                    warnings.push(format!("Failed to rebuild stats cache: {}", e));
+                    return StatsOutput::empty(warnings);
+                }
             }
         } else {
             match cache_manager.load_or_rebuild() {
                 Ok(c) => c,
-                Err(_) => return StatsOutput::empty(warnings),
+                Err(e) => {
+                    warnings.push(format!("Failed to load stats cache: {}", e));
+                    return StatsOutput::empty(warnings);
+                }
             }
         };
 

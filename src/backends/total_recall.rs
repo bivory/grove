@@ -318,6 +318,75 @@ impl TotalRecallBackend {
             new_content
         }
     }
+    /// List all grove learnings from Total Recall's memory files.
+    ///
+    /// Unlike search_memory_files, this returns all grove entries without query filtering.
+    /// Used when search is called with an empty query (e.g., for `grove list`).
+    fn list_all_grove_learnings(&self) -> std::result::Result<String, String> {
+        let mut results = String::new();
+
+        // Search daily logs (most recent first)
+        let daily_dir = self.memory_dir.join("daily");
+        if daily_dir.is_dir() {
+            let mut daily_files: Vec<_> = fs::read_dir(&daily_dir)
+                .map_err(|e| format!("Failed to read daily dir: {}", e))?
+                .filter_map(|e| e.ok())
+                .filter(|e| e.path().extension().is_some_and(|ext| ext == "md"))
+                .collect();
+
+            // Sort by name descending (most recent first)
+            daily_files.sort_by_key(|b| std::cmp::Reverse(b.file_name()));
+
+            // Search last 14 days of logs
+            for entry in daily_files.into_iter().take(14) {
+                if let Ok(content) = fs::read_to_string(entry.path()) {
+                    // Only include if it has grove entries
+                    if content.contains(GROVE_ID_PREFIX) {
+                        results.push_str(&format!("[{}]\n", entry.path().display()));
+                        // Extract grove entries
+                        for line in content.lines() {
+                            if line.contains(GROVE_ID_PREFIX)
+                                || line.starts_with("> ")
+                                || line.starts_with("Tags:")
+                            {
+                                results.push_str(line);
+                                results.push('\n');
+                            }
+                        }
+                        results.push_str("\n---\n\n");
+                    }
+                }
+            }
+        }
+
+        // Also check registers for any promoted grove learnings
+        let registers_dir = self.memory_dir.join("registers");
+        if registers_dir.is_dir() {
+            if let Ok(entries) = fs::read_dir(&registers_dir) {
+                for entry in entries.filter_map(|e| e.ok()) {
+                    if entry.path().extension().is_some_and(|ext| ext == "md") {
+                        if let Ok(content) = fs::read_to_string(entry.path()) {
+                            if content.contains(GROVE_ID_PREFIX) {
+                                results.push_str(&format!("[{}]\n", entry.path().display()));
+                                for line in content.lines() {
+                                    if line.contains(GROVE_ID_PREFIX)
+                                        || line.starts_with("> ")
+                                        || line.starts_with("Tags:")
+                                    {
+                                        results.push_str(line);
+                                        results.push('\n');
+                                    }
+                                }
+                                results.push_str("\n---\n\n");
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(results)
+    }
 
     /// Search for grove learnings in Total Recall's memory files.
     ///
@@ -518,14 +587,16 @@ impl TotalRecallBackend {
         };
 
         // Extract summary (text after the category/ID header, before newline)
+        // Extract summary (text after the category/ID header, before newline)
+        // Find the line containing the grove ID, which has the summary
         let summary = entry
             .lines()
-            .next()
-            .and_then(|first_line| {
+            .find(|line| line.contains(GROVE_ID_PREFIX))
+            .and_then(|header_line| {
                 // Find the colon after the ID pattern, take text after it
-                first_line
+                header_line
                     .rfind("):")
-                    .map(|i| first_line[i + 2..].trim().to_string())
+                    .map(|i| header_line[i + 2..].trim().to_string())
             })
             .unwrap_or_default();
 
@@ -599,21 +670,27 @@ impl MemoryBackend for TotalRecallBackend {
     }
 
     fn search(&self, query: &SearchQuery, filters: &SearchFilters) -> Result<Vec<SearchResult>> {
-        // If query is empty, we can't search Total Recall meaningfully
-        if query.is_empty() {
-            return Ok(Vec::new());
-        }
-
-        let search_term = self.build_search_term(query);
-
-        match self.search_memory_files(&search_term) {
-            Ok(output) => Ok(self.parse_search_results(&output, filters)),
-            Err(err) => {
-                // Fail-open: log warning, return empty results
-                warn!("Total Recall search failed: {}", err);
-                Ok(Vec::new())
+        // If query is empty, list all grove learnings (used by `grove list`)
+        let output = if query.is_empty() {
+            match self.list_all_grove_learnings() {
+                Ok(output) => output,
+                Err(err) => {
+                    warn!("Total Recall list failed: {}", err);
+                    return Ok(Vec::new());
+                }
             }
-        }
+        } else {
+            let search_term = self.build_search_term(query);
+            match self.search_memory_files(&search_term) {
+                Ok(output) => output,
+                Err(err) => {
+                    warn!("Total Recall search failed: {}", err);
+                    return Ok(Vec::new());
+                }
+            }
+        };
+
+        Ok(self.parse_search_results(&output, filters))
     }
 
     fn ping(&self) -> bool {
@@ -788,6 +865,27 @@ Another non-grove entry
         assert_eq!(entries.len(), 2);
         assert!(entries[0].contains("grove:cl_001"));
         assert!(entries[1].contains("grove:cl_002"));
+    }
+
+    #[test]
+    fn test_parse_grove_entry_with_timestamp() {
+        let temp = TempDir::new().unwrap();
+        let memory_dir = temp.path().join("memory");
+        fs::create_dir_all(&memory_dir).unwrap();
+
+        let backend = TotalRecallBackend::new(&memory_dir, temp.path());
+
+        // Format used by format_learning includes timestamp
+        let entry = "[16:30] **Pitfall** (grove:cl_20260101_001): Avoid N+1 queries
+> The dashboard was loading users separately.
+> Use eager loading instead.
+
+Tags: #performance #database | Confidence: High | Ticket: T001";
+
+        let learning = backend.parse_grove_entry(entry).unwrap();
+
+        assert_eq!(learning.id, "cl_20260101_001");
+        assert_eq!(learning.summary, "Avoid N+1 queries");
     }
 
     #[test]
@@ -1014,6 +1112,28 @@ Another non-grove entry
         let results = backend.search(&query, &SearchFilters::default()).unwrap();
 
         assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_search_empty_query_returns_all_when_learnings_exist() {
+        let temp = TempDir::new().unwrap();
+        let memory_dir = temp.path().join("memory");
+        fs::create_dir_all(&memory_dir).unwrap();
+
+        let backend = TotalRecallBackend::new(&memory_dir, temp.path());
+
+        // Write a learning first
+        let learning = sample_learning();
+        let result = backend.write(&learning);
+        assert!(result.is_ok());
+        assert!(result.unwrap().success);
+
+        // Now search with empty query - should return the learning
+        let query = SearchQuery::new();
+        let results = backend.search(&query, &SearchFilters::default()).unwrap();
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].learning.summary, learning.summary);
     }
 
     // Parse search results with filters

@@ -336,11 +336,13 @@ impl StatsLogger {
             })?;
         }
 
-        // Serialize event to JSON
-        let json = serde_json::to_string(event)
+        // Serialize event to JSON with newline for atomic append
+        let mut line = serde_json::to_string(event)
             .map_err(|e| GroveError::serde(format!("Failed to serialize stats event: {}", e)))?;
+        line.push('\n');
 
-        // Append to file with newline
+        // Append to file with a single write_all call for atomicity
+        // Using O_APPEND + single write_all ensures the entire line is written atomically
         let mut file = OpenOptions::new()
             .create(true)
             .append(true)
@@ -353,7 +355,7 @@ impl StatsLogger {
                 ))
             })?;
 
-        writeln!(file, "{}", json).map_err(|e| {
+        file.write_all(line.as_bytes()).map_err(|e| {
             GroveError::backend(format!(
                 "Failed to write to stats log {}: {}",
                 self.path.display(),

@@ -79,21 +79,23 @@ RUN mkdir -p ~/.local/bin \
     && rm /tmp/tissue.tar.gz
 RUN tissue version
 
+# Force HTTPS for GitHub clones (no SSH keys in container)
+RUN git config --global url."https://github.com/".insteadOf "git@github.com:"
+
 RUN claude plugin marketplace add bivory/claude-plugin-marketplace
 # Install roz
-RUN curl -fsSL https://raw.githubusercontent.com/bivory/roz/main/.claude-plugin/install.sh | bash
+RUN curl -fsSL https://raw.githubusercontent.com/bivory/roz/main/.claude-plugin/install.sh | bash -s -- v0.1.4
 RUN roz --version
 RUN claude plugin install roz@bivory
 RUN claude plugin list | grep -q roz
 
 # Install grove
-RUN curl -fsSL https://raw.githubusercontent.com/bivory/grove/main/.claude-plugin/install.sh | bash
+RUN curl -fsSL https://raw.githubusercontent.com/bivory/grove/main/.claude-plugin/install.sh | bash -s -- v0.3.0
 RUN grove --version
 RUN claude plugin install grove@bivory
 RUN claude plugin list | grep -q grove
 
 # Install Total Recall for grove
-RUN git config --global url."https://github.com/".insteadOf "git@github.com:"
 RUN claude plugin marketplace add davegoldblatt/recall-marketplace
 RUN claude plugin install recall@recall-marketplace
 

@@ -59,7 +59,7 @@ impl InitOutput {
 const DEFAULT_CONFIG: &str = r#"# Grove Configuration
 #
 # This file configures the Grove compound learning gate.
-# See https://github.com/anthropics/grove for documentation.
+# See https://github.com/bivory/grove for documentation.
 
 # Ticketing system discovery order
 # Options: tissue, beads, tasks, session
@@ -67,9 +67,9 @@ const DEFAULT_CONFIG: &str = r#"# Grove Configuration
 discovery = ["tissue", "beads", "tasks", "session"]
 
 # Memory backend discovery order
-# Options: config, total-recall, mcp, markdown
+# Options: total-recall, mcp, markdown
 [backends]
-discovery = ["config", "total-recall", "mcp", "markdown"]
+discovery = ["total-recall", "mcp", "markdown"]
 
 # Gate behavior
 [gate]

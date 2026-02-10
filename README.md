@@ -42,6 +42,9 @@ Download from [Releases](https://github.com/bivory/grove/releases):
 
 ### 1. Initialize in your project
 
+This is only required if you want to set configuration settings or use a backend
+other than the builtin markdown learnings storage.
+
 ```bash
 grove init
 ```
@@ -108,14 +111,29 @@ Grove uses layered TOML configuration:
 ```toml
 [gate]
 enabled = true
-auto_approve_threshold = 5
+
+[gate.auto_skip]
+enabled = true
+line_threshold = 5
 
 [backends]
-preference = ["markdown", "total_recall"]
+discovery = ["total-recall", "mcp", "markdown"]
 
-[stats]
-passive_decay_days = 90
+[decay]
+passive_duration_days = 90
 ```
+
+### Forcing a Specific Backend
+
+By default, Grove auto-detects backends in discovery order. To bypass detection
+and force a specific backend:
+
+```toml
+[backends]
+primary = "total-recall"  # or "markdown"
+```
+
+When `primary` is set, Grove skips auto-detection and uses that backend directly.
 
 ## Learning Categories
 
@@ -135,7 +153,23 @@ passive_decay_days = 90
 |---------|-------------|
 | **Markdown** | Default. Append-only `.grove/learnings.md` |
 | **Total Recall** | Integration with Total Recall memory |
-| **MCP** | Route through MCP memory servers |
+| **MCP** | Route through MCP memory servers (planned) |
+
+### Total Recall Users
+
+Grove auto-detects Total Recall when both exist:
+
+- `memory/` directory
+- `.claude/rules/total-recall.md`
+
+The Total Recall skill (`/recall:recall-init`) creates the `memory/` structure but
+not the rules file. After running the skill, prompt Claude to create the rules
+file:
+
+> "Create `.claude/rules/total-recall.md` with the Total Recall protocol"
+
+Once detected, Grove routes learnings to Total Recall's daily logs and registers
+instead of `.grove/learnings.md`.
 
 ## Fail-Open Philosophy
 

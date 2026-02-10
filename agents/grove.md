@@ -22,19 +22,23 @@ The gate activates when you close a ticket via a supported ticketing system
 ### /reflect
 
 Run when you've completed meaningful work and want to capture learnings.
-Provide structured reflection output following this format:
+Provide JSON input via stdin:
 
-```markdown
-## Learnings
-
-### Pattern: [Summary]
-[Detailed explanation of what you learned]
-
-Category: Pattern | Pitfall | Convention | Dependency | Process | Domain | Debugging
-Scope: project | team | personal | ephemeral
-Confidence: high | medium | low
-Tags: tag1, tag2
-Files: file1.rs, file2.rs
+```bash
+grove reflect --session-id <ID> <<'EOF'
+{
+  "session_id": "<ID>",
+  "candidates": [
+    {
+      "category": "pattern",
+      "summary": "Brief one-line description",
+      "detail": "Detailed explanation with context",
+      "scope": "project",
+      "criteria_met": ["behavior-changing"]
+    }
+  ]
+}
+EOF
 ```
 
 ### /skip
@@ -115,19 +119,18 @@ grove reflect --session-id <SESSION_ID> <<'EOF'
   "session_id": "<SESSION_ID>",
   "candidates": [
     {
-      "category": "Pattern",
+      "category": "pattern",
       "summary": "Brief description of the learning",
       "detail": "Detailed explanation that would help future sessions",
       "scope": "project",
-      "ticket_id": "TICKET-123",
-      "claims": ["behavior-changing"]
+      "criteria_met": ["behavior-changing"]
     }
   ]
 }
 EOF
 ```
 
-Required claims (at least one must be true):
+Required criteria (at least one must be true):
 
 - `behavior-changing` - Changes how I work in the future
 - `decision-rationale` - Records why a decision was made

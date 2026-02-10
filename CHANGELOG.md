@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-02-10
+
+### Added
+
+- Agent instructions file (`agents/grove.md`) with complete Grove protocol
+- `hooks.json` for automatic Claude Code hook configuration
+- Session ID included in block messages for reflect/skip commands
+
+### Changed
+
+- Removed "config" from default backend discovery list (use discovery array directly)
+- Simplified hooks configuration to only match Bash commands
+
+### Fixed
+
+- Fixed user config path in documentation (`~/.grove/config.toml` not `~/.config/grove`)
+- Removed invalid `gate.enabled` field from config template (use `gate.auto_skip.enabled`)
+- Fixed `/skip` examples in agent instructions to use CLI with `--session-id` flag
+- Fixed reflect input format to use JSON with `criteria_met` field
+- Added missing `[ticketing]`, `[retrieval]`, `[circuit_breaker]` config sections
+  to README
+- Added inline documentation for valid `decider` and `strategy` option values
+
 ## [0.2.2] - 2026-02-09
 
 ### Fixed
@@ -107,8 +130,9 @@ Initial release of Grove, a compound learning gate for Claude Code.
 - Architecture design documents
 - Implementation task roadmap
 
-[Unreleased]: https://github.com/anthropics/grove/compare/v0.2.2...HEAD
-[0.2.2]: https://github.com/anthropics/grove/compare/v0.2.1...v0.2.2
-[0.2.1]: https://github.com/anthropics/grove/compare/v0.2.0...v0.2.1
-[0.2.0]: https://github.com/anthropics/grove/compare/v0.1.0...v0.2.0
-[0.1.0]: https://github.com/anthropics/grove/releases/tag/v0.1.0
+[Unreleased]: https://github.com/bivory/grove/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/bivory/grove/compare/v0.2.2...v0.3.0
+[0.2.2]: https://github.com/bivory/grove/compare/v0.2.1...v0.2.2
+[0.2.1]: https://github.com/bivory/grove/compare/v0.2.0...v0.2.1
+[0.2.0]: https://github.com/bivory/grove/compare/v0.1.0...v0.2.0
+[0.1.0]: https://github.com/bivory/grove/releases/tag/v0.1.0

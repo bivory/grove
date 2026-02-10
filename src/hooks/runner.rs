@@ -357,7 +357,10 @@ impl<S: SessionStore> HookRunner<S> {
                     session.add_trace(EventType::GateBlocked, None);
                     let _ = self.store.put(&session);
 
-                    let message = "Reflection required. Run `grove reflect` to capture learnings or `grove skip <reason>` to skip.";
+                    let message = format!(
+                        "Reflection required. Run `grove reflect --session-id {}` or `grove skip <reason> --session-id {}`",
+                        session.id, session.id
+                    );
                     let output = StopOutput::block_with_message(message);
                     return crate::hooks::output::to_json(&output);
                 }
@@ -465,7 +468,10 @@ impl<S: SessionStore> HookRunner<S> {
 
         // Block task completion until reflection/skip
         // Return exit code 2 via StopOutput::block
-        let message = "Task completed. Reflection required. Run `grove reflect` to capture learnings or `grove skip <reason>` to skip.";
+        let message = format!(
+            "Task completed. Reflection required. Run `grove reflect --session-id {}` or `grove skip <reason> --session-id {}`",
+            session.id, session.id
+        );
         let output = StopOutput::block_with_message(message);
         crate::hooks::output::to_json(&output)
     }

@@ -96,3 +96,54 @@ Check Grove status including gate state, backends, and quality stats.
 
 If you try to exit without reflecting, Grove will block with instructions.
 After 3 blocks, the circuit breaker allows exit with a warning.
+
+## When Blocked by Grove
+
+When you see a message like:
+
+```text
+Reflection required. Run `grove reflect --session-id <ID>` or `grove skip <reason> --session-id <ID>`
+```
+
+You must respond with one of these CLI commands using the provided session ID:
+
+### Capture Learnings
+
+```bash
+grove reflect --session-id <SESSION_ID> <<'EOF'
+{
+  "session_id": "<SESSION_ID>",
+  "candidates": [
+    {
+      "category": "Pattern",
+      "summary": "Brief description of the learning",
+      "detail": "Detailed explanation that would help future sessions",
+      "scope": "project",
+      "ticket_id": "TICKET-123",
+      "claims": ["behavior-changing"]
+    }
+  ]
+}
+EOF
+```
+
+Required claims (at least one must be true):
+
+- `behavior-changing` - Changes how I work in the future
+- `decision-rationale` - Records why a decision was made
+- `stable-fact` - A fact that won't change frequently
+- `explicit-request` - User explicitly asked to remember this
+
+### Skip Reflection
+
+```bash
+grove skip "No significant learnings" --session-id <SESSION_ID>
+```
+
+## Debugging
+
+```bash
+grove sessions              # List recent sessions
+grove trace <SESSION_ID>    # View session events
+grove debug                 # Show current gate state
+```

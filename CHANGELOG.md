@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-02-10
+
+### Fixed
+
+- CLI commands now respect configured backend discovery instead of hardcoding
+  MarkdownBackend (`grove reflect`, `grove search`, `grove list`, `grove maintain`)
+- Excluded `.grove/` from markdown linting (generated content)
+
+### Added
+
+- `create_primary_backend` exported from library for backend discovery
+- `archive()`, `restore()`, `list_all()` methods to MemoryBackend trait
+- Blanket implementation of MemoryBackend for `Box<dyn MemoryBackend>`
+- Integration tests for backend routing and gate transitions
+
+### Changed
+
+- `ListCommand` and `MaintainCommand` are now generic over MemoryBackend
+
 ## [0.3.0] - 2026-02-10
 
 ### Added
@@ -130,7 +149,8 @@ Initial release of Grove, a compound learning gate for Claude Code.
 - Architecture design documents
 - Implementation task roadmap
 
-[Unreleased]: https://github.com/bivory/grove/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/bivory/grove/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/bivory/grove/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/bivory/grove/compare/v0.2.2...v0.3.0
 [0.2.2]: https://github.com/bivory/grove/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/bivory/grove/compare/v0.2.0...v0.2.1

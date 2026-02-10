@@ -71,10 +71,8 @@ discovery = ["tissue", "beads", "tasks", "session"]
 [backends]
 discovery = ["total-recall", "mcp", "markdown"]
 
-# Gate behavior
-[gate]
-enabled = true
-
+# Auto-skip settings for trivial changes
+# decider: "agent" (default), "always", or "never"
 [gate.auto_skip]
 enabled = true
 line_threshold = 5
@@ -85,6 +83,7 @@ decider = "agent"
 passive_duration_days = 90
 
 # Retrieval settings
+# strategy: "conservative", "moderate" (default), or "aggressive"
 [retrieval]
 max_injections = 5
 strategy = "moderate"

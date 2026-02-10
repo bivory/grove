@@ -109,19 +109,23 @@ Grove uses layered TOML configuration:
 3. Built-in defaults
 
 ```toml
-[gate.auto_skip]
-enabled = true
-line_threshold = 5
+[ticketing]
+discovery = ["tissue", "beads", "tasks", "session"]
 
 [backends]
 discovery = ["total-recall", "mcp", "markdown"]
+
+[gate.auto_skip]
+enabled = true
+line_threshold = 5
+decider = "agent"  # agent, always, or never
 
 [decay]
 passive_duration_days = 90
 
 [retrieval]
 max_injections = 5
-strategy = "moderate"  # conservative, moderate, aggressive
+strategy = "moderate"  # conservative, moderate, or aggressive
 
 [circuit_breaker]
 max_blocks = 3

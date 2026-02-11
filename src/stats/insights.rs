@@ -226,12 +226,8 @@ pub fn generate_stale_top_learning_insight(
     let top_learning = cache
         .learnings
         .iter()
-        .filter(|(_, stats)| !stats.archived && stats.surfaced > 0)
-        .max_by(|(_, a), (_, b)| {
-            a.hit_rate
-                .partial_cmp(&b.hit_rate)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
+        .filter(|(_, stats)| !stats.archived && stats.surfaced > 0 && !stats.hit_rate.is_nan())
+        .max_by(|(_, a), (_, b)| a.hit_rate.total_cmp(&b.hit_rate));
 
     let (learning_id, stats) = top_learning?;
 
@@ -288,6 +284,11 @@ pub fn generate_low_hit_category_insight(
             continue;
         }
 
+        // Skip NaN hit rates (invalid data)
+        if stats.hit_rate.is_nan() {
+            continue;
+        }
+
         // Get category for this learning
         if let Some(category) = learning_categories.get(learning_id) {
             let entry = category_stats.entry(*category).or_insert((0, 0.0));
@@ -313,7 +314,7 @@ pub fn generate_low_hit_category_insight(
     }
 
     // Sort by hit rate (lowest first)
-    low_hit_categories.sort_by(|a, b| a.2.partial_cmp(&b.2).unwrap_or(std::cmp::Ordering::Equal));
+    low_hit_categories.sort_by(|a, b| a.2.total_cmp(&b.2));
 
     // Take the worst performing category
     let (category, count, avg_hit_rate) = &low_hit_categories[0];
@@ -357,6 +358,11 @@ pub fn generate_high_value_rare_insight(
             continue;
         }
 
+        // Skip NaN hit rates (invalid data)
+        if stats.hit_rate.is_nan() {
+            continue;
+        }
+
         // Get category for this learning
         if let Some(category) = learning_categories.get(learning_id) {
             let entry = category_stats.entry(*category).or_insert((0, 0.0));
@@ -383,8 +389,7 @@ pub fn generate_high_value_rare_insight(
     }
 
     // Sort by hit rate (highest first)
-    high_value_categories
-        .sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
+    high_value_categories.sort_by(|a, b| b.2.total_cmp(&a.2));
 
     // Take the best performing rare category
     let (category, count, avg_hit_rate) = &high_value_categories[0];
@@ -1240,6 +1245,46 @@ mod tests {
         assert!(insight.is_some());
         let insight = insight.unwrap();
         // Should pick L002 because it has higher hit rate
+        assert!(insight.message.contains("L002"));
+        assert!(insight.message.contains("80%"));
+    }
+
+    #[test]
+    fn test_stale_top_learning_with_nan_hit_rate() {
+        let now = Utc::now();
+        let mut cache = StatsCache::new();
+
+        // Learning with NaN hit rate (edge case)
+        let mut stats1 = make_learning_stats();
+        stats1.surfaced = 10;
+        stats1.referenced = 8;
+        stats1.hit_rate = f64::NAN;
+        stats1.last_referenced = Some(now - Duration::days(90));
+        cache.learnings.insert("L001".to_string(), stats1);
+
+        // Learning with valid high hit rate
+        let mut stats2 = make_learning_stats();
+        stats2.surfaced = 10;
+        stats2.referenced = 8;
+        stats2.hit_rate = 0.8;
+        stats2.last_referenced = Some(now - Duration::days(70));
+        cache.learnings.insert("L002".to_string(), stats2);
+
+        // Learning with valid low hit rate
+        let mut stats3 = make_learning_stats();
+        stats3.surfaced = 10;
+        stats3.referenced = 6;
+        stats3.hit_rate = 0.6;
+        stats3.last_referenced = Some(now - Duration::days(80));
+        cache.learnings.insert("L003".to_string(), stats3);
+
+        let insight = generate_stale_top_learning_insight(&cache, 60, now);
+
+        // Should still find the highest valid hit rate learning
+        assert!(insight.is_some());
+        let insight = insight.unwrap();
+        // Should pick L002 because it has the highest valid hit rate
+        // NaN values are sorted to the end by total_cmp
         assert!(insight.message.contains("L002"));
         assert!(insight.message.contains("80%"));
     }

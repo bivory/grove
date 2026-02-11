@@ -78,6 +78,47 @@ pub trait MemoryBackend: Send + Sync {
         // Backends should override to scan existing entries
         crate::core::generate_learning_id()
     }
+
+    /// Generate multiple unique IDs for a batch of learnings.
+    ///
+    /// This prevents race conditions when creating multiple learnings at once,
+    /// since a single scan finds the starting counter and subsequent IDs are
+    /// incremented without re-scanning.
+    ///
+    /// Format: `cl_YYYYMMDD_NNN` where NNN is incremented for each ID.
+    fn next_ids(&self, count: usize) -> Vec<String> {
+        // Default implementation: get first ID, then increment counter for rest
+        if count == 0 {
+            return Vec::new();
+        }
+
+        let first_id = self.next_id();
+        if count == 1 {
+            return vec![first_id];
+        }
+
+        // Parse the counter from the first ID and generate the rest
+        // Expected format: cl_YYYYMMDD_NNN
+        let mut ids = Vec::with_capacity(count);
+        ids.push(first_id.clone());
+
+        // Extract date and counter parts
+        if let Some(underscore_pos) = first_id.rfind('_') {
+            let prefix = &first_id[..=underscore_pos];
+            if let Ok(counter) = first_id[underscore_pos + 1..].parse::<u32>() {
+                for i in 1..count {
+                    ids.push(format!("{}{:03}", prefix, (counter + i as u32) % 1000));
+                }
+                return ids;
+            }
+        }
+
+        // Fallback: generate each ID separately (shouldn't happen with valid format)
+        for _ in 1..count {
+            ids.push(self.next_id());
+        }
+        ids
+    }
 }
 
 /// Blanket implementation for boxed trait objects.
@@ -114,6 +155,10 @@ impl MemoryBackend for Box<dyn MemoryBackend> {
 
     fn next_id(&self) -> String {
         (**self).next_id()
+    }
+
+    fn next_ids(&self, count: usize) -> Vec<String> {
+        (**self).next_ids(count)
     }
 }
 
@@ -714,6 +759,57 @@ mod tests {
                 .unwrap();
             assert_eq!(results.len(), 1);
             assert_eq!(results[0].learning.status, LearningStatus::Active);
+        }
+
+        #[test]
+        fn test_boxed_backend_next_ids_delegates() {
+            let (_temp, backend) = setup_markdown_backend();
+            let boxed: Box<dyn MemoryBackend> = Box::new(backend);
+
+            // Get multiple IDs at once
+            let ids = boxed.next_ids(3);
+
+            // Should return 3 unique IDs
+            assert_eq!(ids.len(), 3, "Should return requested number of IDs");
+
+            // All IDs should be unique
+            let mut unique_ids = ids.clone();
+            unique_ids.sort();
+            unique_ids.dedup();
+            assert_eq!(unique_ids.len(), 3, "All IDs should be unique: {:?}", ids);
+
+            // IDs should follow expected pattern with incrementing counters
+            // Expected format: cl_YYYYMMDD_NNN
+            for (i, id) in ids.iter().enumerate() {
+                assert!(id.starts_with("cl_"), "ID should start with 'cl_': {}", id);
+                // Extract counter from ID
+                if let Some(underscore_pos) = id.rfind('_') {
+                    let counter_str = &id[underscore_pos + 1..];
+                    let counter: u32 = counter_str.parse().expect("Counter should be numeric");
+                    assert_eq!(counter, i as u32, "Counter should increment from 0: {}", id);
+                }
+            }
+        }
+
+        #[test]
+        fn test_next_ids_empty() {
+            let (_temp, backend) = setup_markdown_backend();
+            let boxed: Box<dyn MemoryBackend> = Box::new(backend);
+
+            // Empty request should return empty vector
+            let ids = boxed.next_ids(0);
+            assert!(ids.is_empty());
+        }
+
+        #[test]
+        fn test_next_ids_single() {
+            let (_temp, backend) = setup_markdown_backend();
+            let boxed: Box<dyn MemoryBackend> = Box::new(backend);
+
+            // Single ID should be same as next_id()
+            let ids = boxed.next_ids(1);
+            assert_eq!(ids.len(), 1);
+            assert!(ids[0].starts_with("cl_"));
         }
     }
 }

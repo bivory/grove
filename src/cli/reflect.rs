@@ -169,9 +169,10 @@ impl<S: SessionStore, B: MemoryBackend> ReflectCommand<S, B> {
         let candidates_submitted = input.candidates.len();
         let learnings_accepted = valid_learnings.len();
 
-        // Assign unique IDs from backend (avoids counter collisions across sessions)
-        for learning in &mut valid_learnings {
-            learning.id = self.backend.next_id();
+        // Assign unique IDs from backend atomically (prevents race within batch)
+        let ids = self.backend.next_ids(valid_learnings.len());
+        for (learning, id) in valid_learnings.iter_mut().zip(ids) {
+            learning.id = id;
         }
 
         // Write valid learnings to backend

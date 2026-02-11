@@ -267,9 +267,26 @@ impl TotalRecallBackend {
         // Find or create Learnings section and append
         content = self.append_to_learnings_section(&content, note);
 
-        // Write back atomically (write to temp then rename would be better, but this is simpler)
-        fs::write(&daily_path, &content)
-            .map_err(|e| format!("Failed to write daily log {}: {}", daily_path.display(), e))?;
+        // Write atomically using temp file + rename pattern for durability
+        let temp_path = daily_path.with_extension("md.tmp");
+        {
+            use std::io::Write;
+            let mut file = fs::File::create(&temp_path).map_err(|e| {
+                format!("Failed to create temp file {}: {}", temp_path.display(), e)
+            })?;
+            file.write_all(content.as_bytes())
+                .map_err(|e| format!("Failed to write temp file {}: {}", temp_path.display(), e))?;
+            file.sync_all()
+                .map_err(|e| format!("Failed to sync temp file {}: {}", temp_path.display(), e))?;
+        }
+        fs::rename(&temp_path, &daily_path).map_err(|e| {
+            format!(
+                "Failed to rename {} to {}: {}",
+                temp_path.display(),
+                daily_path.display(),
+                e
+            )
+        })?;
 
         Ok(format!("memory/daily/{}.md", today))
     }
@@ -1120,6 +1137,34 @@ Tags: #performance #database | Confidence: High | Ticket: T001";
         assert!(write_result.success);
         assert!(!write_result.learning_id.is_empty());
         assert!(write_result.location.contains("memory/daily/"));
+    }
+
+    #[test]
+    fn test_daily_log_write_atomic_no_temp_file_left() {
+        let temp = TempDir::new().unwrap();
+        let memory_dir = temp.path().join("memory");
+        fs::create_dir_all(&memory_dir).unwrap();
+
+        let backend = TotalRecallBackend::new(&memory_dir, temp.path());
+
+        let mut learning = sample_learning();
+        learning.scope = LearningScope::Project;
+
+        // Write to daily log
+        let result = backend.write(&learning).unwrap();
+        assert!(result.success);
+
+        // Check no temp file (.md.tmp) is left in daily directory
+        let daily_dir = memory_dir.join("daily");
+        for entry in fs::read_dir(&daily_dir).unwrap() {
+            let entry = entry.unwrap();
+            let path = entry.path();
+            assert!(
+                path.extension().is_none_or(|e| e != "tmp"),
+                "Temp file should not be left after write: {}",
+                path.display()
+            );
+        }
     }
 
     #[test]

@@ -19,7 +19,7 @@ use std::fs::{self, OpenOptions};
 use std::io::Write as IoWrite;
 use std::path::{Path, PathBuf};
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Datelike, Utc};
 use tracing::warn;
 
 use crate::backends::total_recall_format::{
@@ -722,7 +722,7 @@ impl TotalRecallBackend {
         let year: i32 = date_str
             .get(0..4)
             .and_then(|s| s.parse().ok())
-            .unwrap_or(2026);
+            .unwrap_or_else(|| Utc::now().year());
         let month: u32 = date_str.get(4..6).and_then(|s| s.parse().ok()).unwrap_or(1);
         let day: u32 = date_str.get(6..8).and_then(|s| s.parse().ok()).unwrap_or(1);
 
@@ -1514,6 +1514,45 @@ Tags: #test | Confidence: High";
 
         // Should still parse date from ID, time defaults to 00:00
         assert_eq!(timestamp.format("%Y-%m-%d").to_string(), "2026-02-10");
+    }
+
+    #[test]
+    fn test_parse_entry_timestamp_uses_current_year_for_invalid_id() {
+        let temp = TempDir::new().unwrap();
+        let memory_dir = temp.path().join("memory");
+        fs::create_dir_all(&memory_dir).unwrap();
+
+        let backend = TotalRecallBackend::new(&memory_dir, temp.path());
+
+        // Entry with invalid ID (not in cl_YYYYMMDD_NNN format)
+        let entry = "**Pattern** (grove:invalid_id): Test summary";
+
+        let timestamp = backend.parse_entry_timestamp(entry, "invalid_id");
+
+        // Should use current year instead of hardcoded value
+        let current_year = Utc::now().year();
+        assert_eq!(timestamp.year(), current_year);
+        // Month and day default to 1 when not parseable
+        assert_eq!(timestamp.format("%m-%d").to_string(), "01-01");
+    }
+
+    #[test]
+    fn test_parse_entry_timestamp_uses_current_year_for_malformed_date() {
+        let temp = TempDir::new().unwrap();
+        let memory_dir = temp.path().join("memory");
+        fs::create_dir_all(&memory_dir).unwrap();
+
+        let backend = TotalRecallBackend::new(&memory_dir, temp.path());
+
+        // Entry with ID that has invalid year portion
+        let entry = "**Pattern** (grove:cl_XXXX0210_001): Test summary";
+
+        let timestamp = backend.parse_entry_timestamp(entry, "cl_XXXX0210_001");
+
+        // Should use current year for invalid year, but parse valid month/day
+        let current_year = Utc::now().year();
+        assert_eq!(timestamp.year(), current_year);
+        assert_eq!(timestamp.format("%m-%d").to_string(), "02-10");
     }
 
     #[test]

@@ -194,6 +194,9 @@ pub mod exit_codes {
     /// Exit code indicating approval (allow action to proceed).
     pub const APPROVE: i32 = 0;
 
+    /// Exit code indicating general application error.
+    pub const ERROR: i32 = 1;
+
     /// Exit code indicating block (prevent action, require reflection).
     pub const BLOCK: i32 = 2;
 
@@ -318,6 +321,7 @@ mod tests {
     #[test]
     fn test_exit_codes() {
         assert_eq!(exit_codes::APPROVE, 0);
+        assert_eq!(exit_codes::ERROR, 1);
         assert_eq!(exit_codes::BLOCK, 2);
         assert_eq!(exit_codes::CRASH, 3);
     }

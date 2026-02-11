@@ -459,6 +459,15 @@ fn run_hook(hook_type: HookType) -> Result<ExitCode, Box<dyn std::error::Error>>
     Ok(ExitCode::from(exit_codes::APPROVE as u8))
 }
 
+/// Convert a success boolean to an exit code.
+fn success_to_exit_code(success: bool) -> ExitCode {
+    if success {
+        ExitCode::from(exit_codes::APPROVE as u8)
+    } else {
+        ExitCode::from(exit_codes::ERROR as u8)
+    }
+}
+
 fn run_reflect(
     json: bool,
     quiet: bool,
@@ -488,7 +497,7 @@ fn run_reflect(
         println!("{}", formatted);
     }
 
-    Ok(ExitCode::from(exit_codes::APPROVE as u8))
+    Ok(success_to_exit_code(output.success))
 }
 
 fn run_skip(
@@ -526,7 +535,7 @@ fn run_skip(
         println!("{}", formatted);
     }
 
-    Ok(ExitCode::from(exit_codes::APPROVE as u8))
+    Ok(success_to_exit_code(output.success))
 }
 
 fn run_observe(
@@ -550,7 +559,7 @@ fn run_observe(
         println!("{}", formatted);
     }
 
-    Ok(ExitCode::from(exit_codes::APPROVE as u8))
+    Ok(success_to_exit_code(output.success))
 }
 
 fn run_search(
@@ -582,7 +591,7 @@ fn run_search(
         println!("{}", formatted);
     }
 
-    Ok(ExitCode::from(exit_codes::APPROVE as u8))
+    Ok(success_to_exit_code(output.success))
 }
 
 fn run_list(
@@ -617,7 +626,7 @@ fn run_list(
         println!("{}", formatted);
     }
 
-    Ok(ExitCode::from(exit_codes::APPROVE as u8))
+    Ok(success_to_exit_code(output.success))
 }
 
 fn run_stats(
@@ -646,7 +655,7 @@ fn run_stats(
         println!("{}", formatted);
     }
 
-    Ok(ExitCode::from(exit_codes::APPROVE as u8))
+    Ok(success_to_exit_code(output.success))
 }
 
 fn run_maintain(
@@ -693,7 +702,7 @@ fn run_maintain(
         println!("{}", formatted);
     }
 
-    Ok(ExitCode::from(exit_codes::APPROVE as u8))
+    Ok(success_to_exit_code(output.success))
 }
 
 fn run_init(
@@ -714,7 +723,7 @@ fn run_init(
         println!("{}", formatted);
     }
 
-    Ok(ExitCode::from(exit_codes::APPROVE as u8))
+    Ok(success_to_exit_code(output.success))
 }
 
 fn run_backends(
@@ -736,7 +745,7 @@ fn run_backends(
         println!("{}", formatted);
     }
 
-    Ok(ExitCode::from(exit_codes::APPROVE as u8))
+    Ok(success_to_exit_code(output.success))
 }
 
 fn run_tickets(
@@ -758,7 +767,7 @@ fn run_tickets(
         println!("{}", formatted);
     }
 
-    Ok(ExitCode::from(exit_codes::APPROVE as u8))
+    Ok(success_to_exit_code(output.success))
 }
 
 fn run_sessions(
@@ -783,7 +792,7 @@ fn run_sessions(
         }
     }
 
-    Ok(ExitCode::from(exit_codes::APPROVE as u8))
+    Ok(success_to_exit_code(output.success))
 }
 
 fn run_debug(
@@ -809,7 +818,7 @@ fn run_debug(
         println!("{}", formatted);
     }
 
-    Ok(ExitCode::from(exit_codes::APPROVE as u8))
+    Ok(success_to_exit_code(output.success))
 }
 
 fn run_trace(
@@ -838,7 +847,7 @@ fn run_trace(
         println!("{}", formatted);
     }
 
-    Ok(ExitCode::from(exit_codes::APPROVE as u8))
+    Ok(success_to_exit_code(output.success))
 }
 
 fn run_clean(
@@ -873,7 +882,7 @@ fn run_clean(
         println!("{}", formatted);
     }
 
-    Ok(ExitCode::from(exit_codes::APPROVE as u8))
+    Ok(success_to_exit_code(output.success))
 }
 
 // =============================================================================
@@ -887,8 +896,21 @@ mod tests {
     #[test]
     fn test_exit_codes() {
         assert_eq!(exit_codes::APPROVE, 0);
+        assert_eq!(exit_codes::ERROR, 1);
         assert_eq!(exit_codes::BLOCK, 2);
         assert_eq!(exit_codes::CRASH, 3);
+    }
+
+    #[test]
+    fn test_success_to_exit_code() {
+        assert_eq!(
+            success_to_exit_code(true),
+            ExitCode::from(exit_codes::APPROVE as u8)
+        );
+        assert_eq!(
+            success_to_exit_code(false),
+            ExitCode::from(exit_codes::ERROR as u8)
+        );
     }
 
     #[test]

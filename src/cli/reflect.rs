@@ -3,7 +3,7 @@
 //! Reads reflection output from stdin, validates against schema and write gate,
 //! checks for near-duplicates, writes to backend, logs stats, and updates gate state.
 
-use std::io::{self, BufRead};
+use std::io;
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
@@ -241,13 +241,20 @@ impl<S: SessionStore, B: MemoryBackend> ReflectCommand<S, B> {
 
     /// Read reflection input from stdin.
     fn read_stdin(&self) -> Result<ReflectInput> {
+        use std::io::Read;
+
         let stdin = io::stdin();
         let mut input = String::new();
 
-        for line in stdin.lock().lines() {
-            let line = line.map_err(|e| crate::error::GroveError::storage("stdin", e))?;
-            input.push_str(&line);
-            input.push('\n');
+        stdin
+            .lock()
+            .read_to_string(&mut input)
+            .map_err(|e| crate::error::GroveError::storage("stdin", e))?;
+
+        if input.trim().is_empty() {
+            return Err(crate::error::GroveError::serde(
+                "No input provided on stdin".to_string(),
+            ));
         }
 
         serde_json::from_str(&input)

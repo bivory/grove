@@ -17,6 +17,7 @@ use crate::core::{
     WriteGateCriterion,
 };
 use crate::error::{GroveError, Result};
+use crate::util::read_to_string_limited;
 
 /// Relevance score weights for search matching.
 mod scores {
@@ -85,11 +86,7 @@ impl MarkdownBackend {
         if !path.exists() {
             return Ok(Vec::new());
         }
-
-        let content = fs::read_to_string(path).map_err(|e| {
-            GroveError::backend(format!("Failed to read {}: {}", path.display(), e))
-        })?;
-
+        let content = read_to_string_limited(path)?;
         parse_learnings_from_markdown(&content)
     }
 
@@ -149,9 +146,7 @@ impl MarkdownBackend {
             return Ok(false);
         }
 
-        let content = fs::read_to_string(path).map_err(|e| {
-            GroveError::backend(format!("Failed to read {}: {}", path.display(), e))
-        })?;
+        let content = read_to_string_limited(path)?;
 
         let header = format!("## {}", learning_id);
         if !content.contains(&header) {
@@ -1415,5 +1410,54 @@ Detail text.
         // Next ID should be _008 (highest was 007)
         let id = backend.next_id();
         assert!(id.ends_with("_008"), "Expected _008, got {}", id);
+    }
+
+    // File size limit tests
+
+    #[test]
+    fn test_parse_file_rejects_oversized_file() {
+        use crate::util::MAX_FILE_SIZE;
+        use std::io::Write;
+
+        let temp = TempDir::new().unwrap();
+        let path = temp.path().join("large_learnings.md");
+
+        // Create a file larger than MAX_FILE_SIZE
+        let mut file = fs::File::create(&path).unwrap();
+        // Write more than MAX_FILE_SIZE bytes
+        let chunk = vec![b'x'; 1024 * 1024]; // 1 MB chunk
+        for _ in 0..(MAX_FILE_SIZE / (1024 * 1024) + 1) {
+            file.write_all(&chunk).unwrap();
+        }
+        file.sync_all().unwrap();
+
+        let backend = MarkdownBackend::new(&path);
+        let result = backend.parse_file(&path);
+
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("too large"),
+            "Error should mention file is too large: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_parse_file_accepts_normal_sized_file() {
+        let temp = TempDir::new().unwrap();
+        let path = temp.path().join(".grove").join("learnings.md");
+        let backend = MarkdownBackend::new(&path);
+
+        // Write several learnings (still well under limit)
+        for i in 0..10 {
+            let mut learning = sample_learning();
+            learning.summary = format!("Learning number {} with some content", i);
+            backend.write(&learning).unwrap();
+        }
+
+        // Should successfully parse
+        let learnings = backend.parse_learnings().unwrap();
+        assert_eq!(learnings.len(), 10);
     }
 }

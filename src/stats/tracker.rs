@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::core::{LearningCategory, SkipDecider};
 use crate::error::{GroveError, Result};
+use crate::util::read_to_string_limited;
 
 /// Schema version for stats events.
 ///
@@ -488,13 +489,7 @@ impl StatsLogger {
             return Ok(Vec::new());
         }
 
-        let content = fs::read_to_string(&self.path).map_err(|e| {
-            GroveError::backend(format!(
-                "Failed to read stats log {}: {}",
-                self.path.display(),
-                e
-            ))
-        })?;
+        let content = read_to_string_limited(&self.path)?;
 
         let mut events = Vec::new();
         for (line_num, line) in content.lines().enumerate() {
@@ -521,13 +516,7 @@ impl StatsLogger {
             return Ok(0);
         }
 
-        let content = fs::read_to_string(&self.path).map_err(|e| {
-            GroveError::backend(format!(
-                "Failed to read stats log {}: {}",
-                self.path.display(),
-                e
-            ))
-        })?;
+        let content = read_to_string_limited(&self.path)?;
 
         Ok(content.lines().filter(|l| !l.trim().is_empty()).count())
     }
@@ -1032,5 +1021,80 @@ mod tests {
 
         let json = serde_json::to_string(&event).unwrap();
         assert!(json.contains(r#""v":1"#));
+    }
+
+    // File size limit tests
+
+    #[test]
+    fn test_read_all_rejects_oversized_file() {
+        use crate::util::MAX_FILE_SIZE;
+        use std::io::Write;
+
+        let temp = TempDir::new().unwrap();
+        let path = temp.path().join("large_stats.log");
+
+        // Create a file larger than MAX_FILE_SIZE
+        let mut file = std::fs::File::create(&path).unwrap();
+        // Write more than MAX_FILE_SIZE bytes
+        let chunk = vec![b'x'; 1024 * 1024]; // 1 MB chunk
+        for _ in 0..(MAX_FILE_SIZE / (1024 * 1024) + 1) {
+            file.write_all(&chunk).unwrap();
+        }
+        file.sync_all().unwrap();
+
+        let logger = StatsLogger::new(&path);
+        let result = logger.read_all();
+
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("too large"),
+            "Error should mention file is too large: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_count_rejects_oversized_file() {
+        use crate::util::MAX_FILE_SIZE;
+        use std::io::Write;
+
+        let temp = TempDir::new().unwrap();
+        let path = temp.path().join("large_stats.log");
+
+        // Create a file larger than MAX_FILE_SIZE
+        let mut file = std::fs::File::create(&path).unwrap();
+        let chunk = vec![b'x'; 1024 * 1024];
+        for _ in 0..(MAX_FILE_SIZE / (1024 * 1024) + 1) {
+            file.write_all(&chunk).unwrap();
+        }
+        file.sync_all().unwrap();
+
+        let logger = StatsLogger::new(&path);
+        let result = logger.count();
+
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("too large"),
+            "Error should mention file is too large: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_read_all_accepts_normal_sized_file() {
+        let temp = TempDir::new().unwrap();
+        let path = temp.path().join("stats.log");
+        let logger = StatsLogger::new(&path);
+
+        // Write several events (well under limit)
+        for _ in 0..100 {
+            logger.append_surfaced("L001", "s1").unwrap();
+        }
+
+        // Should successfully read
+        let events = logger.read_all().unwrap();
+        assert_eq!(events.len(), 100);
     }
 }

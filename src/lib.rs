@@ -13,6 +13,7 @@ pub mod error;
 pub mod hooks;
 pub mod stats;
 pub mod storage;
+pub mod util;
 
 pub use backends::{
     MarkdownBackend, MemoryBackend, SearchFilters, SearchQuery, SearchResult, WriteResult,
@@ -31,6 +32,7 @@ pub use stats::{
     WriteGateStats, STATS_SCHEMA_VERSION,
 };
 pub use storage::{FileSessionStore, SessionStore};
+pub use util::{read_to_string_limited, read_to_string_with_limit, MAX_FILE_SIZE};
 
 // CLI commands
 pub use cli::{

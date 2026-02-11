@@ -270,6 +270,23 @@ impl<S: SessionStore> HookRunner<S> {
                         let _ = gate.confirm_ticket_close();
                         session.add_trace(EventType::TicketClosed, None);
                     }
+                } else if current_status.is_terminal() {
+                    // If in terminal state (Reflected/Skipped), reset for new ticket
+                    // This allows multiple ticket closures in the same session to each trigger reflection
+                    let intent = session.gate.ticket_close_intent.take();
+                    if let Some(intent) = intent {
+                        let mut gate = Gate::new(&mut session.gate, &self.config, &session.id);
+                        let _ = gate.reset_for_new_ticket();
+                        let ticket =
+                            TicketContext::new(&intent.ticket_id, "detected", "Ticket closed");
+                        let _ = gate.detect_ticket(ticket);
+                        let _ = gate.confirm_ticket_close();
+                        session.add_trace(
+                            EventType::GateStatusChanged,
+                            Some("reset from terminal state for new ticket".to_string()),
+                        );
+                        session.add_trace(EventType::TicketClosed, None);
+                    }
                 }
             } else {
                 let mut gate = Gate::new(&mut session.gate, &self.config, &session.id);
@@ -1352,5 +1369,155 @@ mod tests {
         // Verify gate is still Idle
         let session = runner.store.get("no-gate-test").unwrap().unwrap();
         assert_eq!(session.gate.status, GateStatus::Idle);
+    }
+
+    #[test]
+    fn test_second_ticket_close_resets_from_reflected() {
+        let runner = test_runner();
+
+        // 1. Session start
+        let start_input = r#"{
+            "session_id": "multi-ticket-test",
+            "transcript_path": "/tmp/transcript.jsonl",
+            "cwd": "/tmp/project"
+        }"#;
+        runner
+            .run_with_input(HookType::SessionStart, start_input)
+            .unwrap();
+
+        // 2. First ticket close: pre-tool-use
+        let pre_input1 = r#"{
+            "session_id": "multi-ticket-test",
+            "transcript_path": "/tmp/transcript.jsonl",
+            "cwd": "/tmp/project",
+            "tool_name": "Bash",
+            "tool_input": {"command": "tissue status grove-001 closed"}
+        }"#;
+        runner
+            .run_with_input(HookType::PreToolUse, pre_input1)
+            .unwrap();
+
+        // 3. First ticket close: post-tool-use
+        let post_input1 = r#"{
+            "session_id": "multi-ticket-test",
+            "transcript_path": "/tmp/transcript.jsonl",
+            "cwd": "/tmp/project",
+            "tool_name": "Bash",
+            "tool_input": {"command": "tissue status grove-001 closed"},
+            "tool_response": "grove-001"
+        }"#;
+        runner
+            .run_with_input(HookType::PostToolUse, post_input1)
+            .unwrap();
+
+        // Verify gate is Pending
+        let session = runner.store.get("multi-ticket-test").unwrap().unwrap();
+        assert_eq!(session.gate.status, GateStatus::Pending);
+
+        // 4. Simulate reflection by setting gate to Reflected manually
+        let mut session = runner.store.get("multi-ticket-test").unwrap().unwrap();
+        session.gate.status = GateStatus::Reflected;
+        session.gate.reflection = Some(crate::core::ReflectionResult::new(
+            vec!["l1".to_string()],
+            3,
+            1,
+        ));
+        runner.store.put(&session).unwrap();
+
+        // 5. Second ticket close: pre-tool-use
+        let pre_input2 = r#"{
+            "session_id": "multi-ticket-test",
+            "transcript_path": "/tmp/transcript.jsonl",
+            "cwd": "/tmp/project",
+            "tool_name": "Bash",
+            "tool_input": {"command": "tissue status grove-002 closed"}
+        }"#;
+        runner
+            .run_with_input(HookType::PreToolUse, pre_input2)
+            .unwrap();
+
+        // Verify intent was recorded even in Reflected state
+        let session = runner.store.get("multi-ticket-test").unwrap().unwrap();
+        assert!(session.gate.ticket_close_intent.is_some());
+
+        // 6. Second ticket close: post-tool-use
+        let post_input2 = r#"{
+            "session_id": "multi-ticket-test",
+            "transcript_path": "/tmp/transcript.jsonl",
+            "cwd": "/tmp/project",
+            "tool_name": "Bash",
+            "tool_input": {"command": "tissue status grove-002 closed"},
+            "tool_response": "grove-002"
+        }"#;
+        runner
+            .run_with_input(HookType::PostToolUse, post_input2)
+            .unwrap();
+
+        // Verify gate is now Pending again (reset from Reflected)
+        let session = runner.store.get("multi-ticket-test").unwrap().unwrap();
+        assert_eq!(session.gate.status, GateStatus::Pending);
+        assert!(session.gate.reflection.is_none()); // Previous reflection cleared
+        assert!(session.gate.ticket.is_some());
+        assert_eq!(session.gate.ticket.as_ref().unwrap().ticket_id, "grove-002");
+
+        // Verify trace shows the reset event
+        assert!(session
+            .trace
+            .iter()
+            .any(|t| t.event_type == EventType::GateStatusChanged));
+    }
+
+    #[test]
+    fn test_second_ticket_close_resets_from_skipped() {
+        let runner = test_runner();
+
+        // 1. Session start
+        let start_input = r#"{
+            "session_id": "skip-then-close-test",
+            "transcript_path": "/tmp/transcript.jsonl",
+            "cwd": "/tmp/project"
+        }"#;
+        runner
+            .run_with_input(HookType::SessionStart, start_input)
+            .unwrap();
+
+        // Simulate skipped state
+        let mut session = runner.store.get("skip-then-close-test").unwrap().unwrap();
+        session.gate.status = GateStatus::Skipped;
+        session.gate.skip = Some(crate::core::SkipDecision::new(
+            "trivial",
+            crate::core::SkipDecider::User,
+        ));
+        runner.store.put(&session).unwrap();
+
+        // 2. Ticket close: pre-tool-use
+        let pre_input = r#"{
+            "session_id": "skip-then-close-test",
+            "transcript_path": "/tmp/transcript.jsonl",
+            "cwd": "/tmp/project",
+            "tool_name": "Bash",
+            "tool_input": {"command": "tissue status grove-003 closed"}
+        }"#;
+        runner
+            .run_with_input(HookType::PreToolUse, pre_input)
+            .unwrap();
+
+        // 3. Ticket close: post-tool-use
+        let post_input = r#"{
+            "session_id": "skip-then-close-test",
+            "transcript_path": "/tmp/transcript.jsonl",
+            "cwd": "/tmp/project",
+            "tool_name": "Bash",
+            "tool_input": {"command": "tissue status grove-003 closed"},
+            "tool_response": "grove-003"
+        }"#;
+        runner
+            .run_with_input(HookType::PostToolUse, post_input)
+            .unwrap();
+
+        // Verify gate is now Pending (reset from Skipped)
+        let session = runner.store.get("skip-then-close-test").unwrap().unwrap();
+        assert_eq!(session.gate.status, GateStatus::Pending);
+        assert!(session.gate.skip.is_none()); // Previous skip cleared
     }
 }

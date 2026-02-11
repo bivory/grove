@@ -203,6 +203,28 @@ impl<'a> Gate<'a> {
         self.state.ticket_close_intent = Some(intent);
     }
 
+    /// Reset from a terminal state to Idle for a new ticket.
+    ///
+    /// Called when a new ticket close is detected after a previous reflection/skip.
+    /// This allows multiple ticket closures in the same session to each trigger reflection.
+    pub fn reset_for_new_ticket(&mut self) -> Result<()> {
+        if !self.state.status.is_terminal() {
+            return Err(GroveError::invalid_state(format!(
+                "Cannot reset for new ticket in {} state (only from terminal states)",
+                self.status_name()
+            )));
+        }
+
+        // Clear previous reflection/skip data
+        self.state.reflection = None;
+        self.state.skip = None;
+        self.state.ticket = None;
+        self.state.ticket_close_intent = None;
+        self.state.status = GateStatus::Idle;
+
+        Ok(())
+    }
+
     /// Clear the ticket close intent (e.g., on failure).
     pub fn clear_close_intent(&mut self) {
         self.state.ticket_close_intent = None;
@@ -1025,6 +1047,134 @@ mod tests {
 
                 prop_assert_eq!(result.is_ok(), status == GateStatus::Idle);
             }
+        }
+    }
+
+    // =========================================================================
+    // Reset for new ticket tests
+    // =========================================================================
+
+    #[test]
+    fn test_reset_for_new_ticket_from_reflected() {
+        let mut state = GateState {
+            status: GateStatus::Reflected,
+            reflection: Some(ReflectionResult::new(vec!["l1".to_string()], 5, 1)),
+            ticket: Some(TicketContext::new("OLD-1", "tissue", "Old ticket")),
+            ..Default::default()
+        };
+        let config = default_config();
+        let mut gate = Gate::new(&mut state, &config, "session-1");
+
+        gate.reset_for_new_ticket().unwrap();
+
+        assert_eq!(gate.status(), GateStatus::Idle);
+        assert!(state.reflection.is_none());
+        assert!(state.ticket.is_none());
+    }
+
+    #[test]
+    fn test_reset_for_new_ticket_from_skipped() {
+        let mut state = GateState {
+            status: GateStatus::Skipped,
+            skip: Some(SkipDecision::new("trivial", SkipDecider::User)),
+            ..Default::default()
+        };
+        let config = default_config();
+        let mut gate = Gate::new(&mut state, &config, "session-1");
+
+        gate.reset_for_new_ticket().unwrap();
+
+        assert_eq!(gate.status(), GateStatus::Idle);
+        assert!(state.skip.is_none());
+    }
+
+    #[test]
+    fn test_reset_for_new_ticket_fails_from_idle() {
+        let mut state = GateState::default();
+        let config = default_config();
+        let mut gate = Gate::new(&mut state, &config, "session-1");
+
+        let result = gate.reset_for_new_ticket();
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_reset_for_new_ticket_fails_from_pending() {
+        let mut state = GateState {
+            status: GateStatus::Pending,
+            ..Default::default()
+        };
+        let config = default_config();
+        let mut gate = Gate::new(&mut state, &config, "session-1");
+
+        let result = gate.reset_for_new_ticket();
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_full_multi_ticket_flow() {
+        let mut state = GateState::default();
+        let config = default_config();
+
+        // First ticket: Idle -> Active -> Pending -> Blocked -> Reflected
+        {
+            let mut gate = Gate::new(&mut state, &config, "session-1");
+            let ticket1 = TicketContext::new("TICKET-1", "tissue", "First ticket");
+            gate.detect_ticket(ticket1).unwrap();
+            assert_eq!(gate.status(), GateStatus::Active);
+        }
+
+        state.ticket_close_intent = Some(TicketCloseIntent::new(
+            "TICKET-1",
+            "tissue status TICKET-1 closed",
+        ));
+        {
+            let mut gate = Gate::new(&mut state, &config, "session-1");
+            gate.confirm_ticket_close().unwrap();
+            assert_eq!(gate.status(), GateStatus::Pending);
+        }
+
+        {
+            let mut gate = Gate::new(&mut state, &config, "session-1");
+            gate.block().unwrap();
+            assert_eq!(gate.status(), GateStatus::Blocked);
+        }
+
+        {
+            let mut gate = Gate::new(&mut state, &config, "session-1");
+            let result = ReflectionResult::new(vec!["l1".to_string()], 3, 1);
+            gate.complete_reflection(result).unwrap();
+            assert_eq!(gate.status(), GateStatus::Reflected);
+        }
+
+        // Second ticket: Reset -> Idle -> Active -> Pending -> Blocked -> Reflected
+        {
+            let mut gate = Gate::new(&mut state, &config, "session-1");
+            gate.reset_for_new_ticket().unwrap();
+            assert_eq!(gate.status(), GateStatus::Idle);
+
+            let ticket2 = TicketContext::new("TICKET-2", "tissue", "Second ticket");
+            gate.detect_ticket(ticket2).unwrap();
+            assert_eq!(gate.status(), GateStatus::Active);
+        }
+
+        {
+            let mut gate = Gate::new(&mut state, &config, "session-1");
+            gate.confirm_ticket_close().unwrap();
+            assert_eq!(gate.status(), GateStatus::Pending);
+        }
+
+        {
+            let mut gate = Gate::new(&mut state, &config, "session-1");
+            gate.block().unwrap();
+            assert_eq!(gate.status(), GateStatus::Blocked);
+        }
+
+        {
+            let mut gate = Gate::new(&mut state, &config, "session-1");
+            let result = ReflectionResult::new(vec!["l2".to_string()], 2, 1);
+            gate.complete_reflection(result).unwrap();
+            assert_eq!(gate.status(), GateStatus::Reflected);
         }
     }
 }

@@ -305,6 +305,19 @@ impl Config {
     /// are applied to `self`, enabling proper layering of the precedence chain.
     /// This is field-by-field merging, not section-by-section, which ensures
     /// that explicit defaults in one config do not block overrides from another.
+    ///
+    /// # Limitation
+    ///
+    /// A config cannot explicitly set a value back to the default to override a
+    /// non-default value from a lower-precedence config. For example:
+    /// - User config sets `max_blocks = 10`
+    /// - Project config sets `max_blocks = 3` (the default)
+    /// - Result: `max_blocks = 10` because the project value equals default
+    ///
+    /// This limitation exists because we cannot distinguish between "not set in
+    /// file" and "explicitly set to default value" without using `Option<T>` for
+    /// all config fields. The current approach enables additive config layering
+    /// where each layer only needs to specify its customizations.
     fn merge(mut self, other: Config) -> Self {
         // Ticketing: merge discovery list and overrides
         // Discovery list: take from other if it was customized

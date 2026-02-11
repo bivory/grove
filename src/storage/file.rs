@@ -45,20 +45,54 @@ impl FileSessionStore {
         Ok(Self { sessions_dir })
     }
 
+    /// Validate a session ID for safety.
+    ///
+    /// Session IDs must contain only safe characters to prevent path traversal attacks.
+    /// Allowed characters: alphanumeric, dash, underscore.
+    /// Disallowed: path separators (/\), parent directory (..), any other special chars.
+    fn validate_session_id(id: &str) -> Result<()> {
+        if id.is_empty() {
+            return Err(GroveError::config("Session ID cannot be empty"));
+        }
+
+        // Check for path traversal patterns
+        if id.contains("..") || id.contains('/') || id.contains('\\') {
+            return Err(GroveError::config(format!(
+                "Session ID contains invalid characters (path traversal attempt): {}",
+                id
+            )));
+        }
+
+        // Only allow alphanumeric, dash, underscore
+        if !id
+            .chars()
+            .all(|c| c.is_alphanumeric() || c == '-' || c == '_')
+        {
+            return Err(GroveError::config(format!(
+                "Session ID contains invalid characters (only alphanumeric, dash, underscore allowed): {}",
+                id
+            )));
+        }
+
+        Ok(())
+    }
+
     /// Get the path for a session file.
-    fn session_path(&self, id: &str) -> PathBuf {
-        self.sessions_dir.join(format!("{}.json", id))
+    fn session_path(&self, id: &str) -> Result<PathBuf> {
+        Self::validate_session_id(id)?;
+        Ok(self.sessions_dir.join(format!("{}.json", id)))
     }
 
     /// Get the path for a temp file used during atomic writes.
-    fn temp_path(&self, id: &str) -> PathBuf {
-        self.sessions_dir.join(format!(".{}.json.tmp", id))
+    fn temp_path(&self, id: &str) -> Result<PathBuf> {
+        Self::validate_session_id(id)?;
+        Ok(self.sessions_dir.join(format!(".{}.json.tmp", id)))
     }
 
     /// Write a session atomically using temp file + rename.
     fn atomic_write(&self, session: &SessionState) -> Result<()> {
-        let final_path = self.session_path(&session.id);
-        let temp_path = self.temp_path(&session.id);
+        let final_path = self.session_path(&session.id)?;
+        let temp_path = self.temp_path(&session.id)?;
 
         // Serialize to JSON
         let json = serde_json::to_string_pretty(session)?;
@@ -93,7 +127,7 @@ impl Default for FileSessionStore {
 
 impl SessionStore for FileSessionStore {
     fn get(&self, id: &str) -> Result<Option<SessionState>> {
-        let path = self.session_path(id);
+        let path = self.session_path(id)?;
 
         if !path.exists() {
             return Ok(None);
@@ -160,14 +194,14 @@ impl SessionStore for FileSessionStore {
     }
 
     fn delete(&self, id: &str) -> Result<()> {
-        let path = self.session_path(id);
+        let path = self.session_path(id)?;
 
         if path.exists() {
             fs::remove_file(&path).map_err(|e| GroveError::storage(&path, e))?;
         }
 
         // Also clean up any temp file
-        let temp_path = self.temp_path(id);
+        let temp_path = self.temp_path(id)?;
         if temp_path.exists() {
             let _ = fs::remove_file(&temp_path);
         }
@@ -211,7 +245,7 @@ mod tests {
     fn test_session_path() {
         let (store, _dir) = create_test_store();
 
-        let path = store.session_path("test-session");
+        let path = store.session_path("test-session").unwrap();
         assert!(path.ends_with("test-session.json"));
     }
 
@@ -335,7 +369,7 @@ mod tests {
         let session = SessionState::new("test-atomic", "/tmp", "/tmp/t.json");
         store.put(&session).unwrap();
 
-        let path = store.session_path("test-atomic");
+        let path = store.session_path("test-atomic").unwrap();
         let content = fs::read_to_string(&path).unwrap();
 
         // Verify it's valid JSON
@@ -350,7 +384,7 @@ mod tests {
         let session = SessionState::new("test-temp", "/tmp", "/tmp/t.json");
         store.put(&session).unwrap();
 
-        let temp_path = store.temp_path("test-temp");
+        let temp_path = store.temp_path("test-temp").unwrap();
         assert!(!temp_path.exists());
     }
 
@@ -398,5 +432,141 @@ mod tests {
         store.put(&session).unwrap();
 
         assert!(store.exists("test").unwrap());
+    }
+
+    // ==========================================================================
+    // Security tests for path traversal prevention
+    // ==========================================================================
+
+    #[test]
+    fn test_validate_session_id_valid() {
+        // Valid session IDs
+        assert!(FileSessionStore::validate_session_id("abc123").is_ok());
+        assert!(FileSessionStore::validate_session_id("test-session").is_ok());
+        assert!(FileSessionStore::validate_session_id("test_session").is_ok());
+        assert!(FileSessionStore::validate_session_id("Test-Session_123").is_ok());
+        assert!(FileSessionStore::validate_session_id("01JKV4AGXRWZ1C7PT7HPXJNN51").is_ok());
+    }
+
+    #[test]
+    fn test_validate_session_id_empty() {
+        let result = FileSessionStore::validate_session_id("");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("empty"));
+    }
+
+    #[test]
+    fn test_validate_session_id_path_traversal_dotdot() {
+        let result = FileSessionStore::validate_session_id("../etc/passwd");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("path traversal"));
+    }
+
+    #[test]
+    fn test_validate_session_id_path_traversal_forward_slash() {
+        let result = FileSessionStore::validate_session_id("foo/bar");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("path traversal"));
+    }
+
+    #[test]
+    fn test_validate_session_id_path_traversal_backslash() {
+        let result = FileSessionStore::validate_session_id("foo\\bar");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("path traversal"));
+    }
+
+    #[test]
+    fn test_validate_session_id_special_chars() {
+        // Various special characters that should be rejected
+        let invalid_ids = [
+            "test.session",
+            "test session",
+            "test:session",
+            "test;session",
+            "test<session",
+            "test>session",
+            "test|session",
+            "test\"session",
+            "test'session",
+            "test`session",
+            "test$session",
+            "test&session",
+            "test*session",
+            "test?session",
+            "test!session",
+            "test@session",
+            "test#session",
+            "test%session",
+            "test^session",
+            "test(session",
+            "test)session",
+            "test[session",
+            "test]session",
+            "test{session",
+            "test}session",
+            "test=session",
+            "test+session",
+        ];
+
+        for id in invalid_ids {
+            let result = FileSessionStore::validate_session_id(id);
+            assert!(
+                result.is_err(),
+                "Should reject ID with special chars: {}",
+                id
+            );
+        }
+    }
+
+    #[test]
+    fn test_get_rejects_path_traversal() {
+        let (store, _dir) = create_test_store();
+
+        let result = store.get("../../../etc/passwd");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("path traversal"));
+    }
+
+    #[test]
+    fn test_put_rejects_path_traversal() {
+        let (store, _dir) = create_test_store();
+
+        let mut session = SessionState::new("valid", "/tmp", "/tmp/t.json");
+        session.id = "../../../etc/passwd".to_string();
+
+        let result = store.put(&session);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("path traversal"));
+    }
+
+    #[test]
+    fn test_delete_rejects_path_traversal() {
+        let (store, _dir) = create_test_store();
+
+        let result = store.delete("../../../etc/passwd");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("path traversal"));
+    }
+
+    #[test]
+    fn test_complex_path_traversal_attacks() {
+        let (store, _dir) = create_test_store();
+
+        // Various sophisticated path traversal attempts
+        let attacks = [
+            "....//....//etc/passwd",
+            "..%2f..%2fetc/passwd",
+            "..%252f..%252fetc/passwd",
+            "%2e%2e%2f%2e%2e%2f",
+            "..\\..\\..\\etc\\passwd",
+            "foo/../../../etc/passwd",
+            "foo/../../bar",
+        ];
+
+        for attack in attacks {
+            let result = store.get(attack);
+            assert!(result.is_err(), "Should reject attack: {}", attack);
+        }
     }
 }

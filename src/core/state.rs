@@ -24,7 +24,8 @@ pub struct SessionState {
     pub updated_at: DateTime<Utc>,
     /// Gate state for this session.
     pub gate: GateState,
-    /// Detected ticket context, if any.
+    /// DEPRECATED: Use session.gate.ticket instead. This field is kept for
+    /// backwards compatibility during serialization but should not be accessed directly.
     pub ticket: Option<TicketContext>,
     /// Trace events for debugging.
     pub trace: Vec<TraceEvent>,
@@ -286,7 +287,9 @@ impl CircuitBreakerState {
     pub fn reset(&mut self) {
         self.block_count = 0;
         self.tripped = false;
-        // Keep last_blocked_session_id and last_blocked_at for reference
+        self.last_blocked_at = None;
+        self.last_blocked_session_id = None;
+        // Clear all circuit breaker state for a fresh start
     }
 }
 
@@ -644,8 +647,9 @@ mod tests {
 
         assert!(!cb.tripped);
         assert_eq!(cb.block_count, 0);
-        // last_blocked_session_id and last_blocked_at are preserved
-        assert_eq!(cb.last_blocked_session_id, Some("session-1".to_string()));
+        // All circuit breaker state is cleared
+        assert!(cb.last_blocked_session_id.is_none());
+        assert!(cb.last_blocked_at.is_none());
     }
 
     #[test]

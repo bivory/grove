@@ -153,7 +153,10 @@ impl TicketsCommand {
             return "No ticketing system detected.\n\nGrove will operate in session-based mode (gate triggers at end of session).\n".to_string();
         }
 
-        let ticketing = output.ticketing.as_ref().unwrap();
+        // Defensive: handle case where detected=true but ticketing is None
+        let Some(ticketing) = output.ticketing.as_ref() else {
+            return "Error: ticketing system detected but details unavailable.\n".to_string();
+        };
 
         let mut lines = Vec::new();
         lines.push(format!("Ticketing system detected: {}\n", ticketing.system));
@@ -330,5 +333,26 @@ mod tests {
         assert!(detail.system_type.contains("Tissue"));
         assert!(detail.close_command.contains("tissue status"));
         assert!(detail.path.is_some());
+    }
+
+    #[test]
+    fn test_format_human_readable_detected_none_ticketing() {
+        // Test defensive handling when detected=true but ticketing=None
+        let temp = TempDir::new().unwrap();
+        let config = Config::default();
+        let cmd = TicketsCommand::new(temp.path().to_string_lossy().to_string(), config);
+
+        // Manually construct an inconsistent state
+        let output = TicketsOutput {
+            success: true,
+            detected: true,
+            ticketing: None, // Inconsistent: detected but no ticketing detail
+            error: None,
+        };
+        let options = TicketsOptions::default();
+
+        let formatted = cmd.format_output(&output, &options);
+        // Should not panic, should return error message
+        assert!(formatted.contains("Error:") || formatted.contains("unavailable"));
     }
 }

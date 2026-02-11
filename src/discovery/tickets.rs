@@ -733,4 +733,64 @@ mod tests {
         let result = match_close_command("Bash", "Beads close issue-456");
         assert!(result.is_none());
     }
+
+    // =========================================================================
+    // Compound command security tests (grove-2zw7d3hz)
+    // =========================================================================
+
+    #[test]
+    fn test_compound_command_and_operator() {
+        // Commands joined with && should not match
+        let result = match_close_command("Bash", "tissue status ticket closed && echo done");
+        assert!(result.is_none(), "&& operator should prevent match");
+    }
+
+    #[test]
+    fn test_compound_command_or_operator() {
+        // Commands joined with || should not match
+        let result = match_close_command("Bash", "tissue status ticket closed || echo failed");
+        assert!(result.is_none(), "|| operator should prevent match");
+    }
+
+    #[test]
+    fn test_compound_command_semicolon() {
+        // Commands joined with ; should not match (closed is not last token)
+        let result = match_close_command("Bash", "tissue status ticket closed; echo done");
+        // Note: split_whitespace treats "closed;" as one token, so closed != "closed;"
+        assert!(result.is_none(), "; operator should prevent match");
+    }
+
+    #[test]
+    fn test_compound_command_pipe() {
+        // Commands joined with | should not match
+        let result = match_close_command("Bash", "tissue status ticket closed | tee log.txt");
+        assert!(result.is_none(), "| operator should prevent match");
+    }
+
+    #[test]
+    fn test_compound_command_prefix() {
+        // Command prefixed with another command should not match
+        let result = match_close_command("Bash", "echo hello && tissue status ticket closed");
+        assert!(
+            result.is_none(),
+            "prefixed compound command should not match"
+        );
+    }
+
+    #[test]
+    fn test_subshell_command() {
+        // Commands in subshell should not match (parentheses become part of token)
+        let result = match_close_command("Bash", "(tissue status ticket closed)");
+        assert!(
+            result.is_none(),
+            "subshell command should not match due to parentheses"
+        );
+    }
+
+    #[test]
+    fn test_simple_command_still_matches() {
+        // Verify simple command still works after security checks
+        let result = match_close_command("Bash", "tissue status grove-123 closed");
+        assert_eq!(result, Some(ClosePattern::TissueClose));
+    }
 }

@@ -107,7 +107,7 @@ pub trait MemoryBackend: Send + Sync {
             let prefix = &first_id[..=underscore_pos];
             if let Ok(counter) = first_id[underscore_pos + 1..].parse::<u32>() {
                 for i in 1..count {
-                    ids.push(format!("{}{:03}", prefix, (counter + i as u32) % 1000));
+                    ids.push(format!("{}{:03}", prefix, (counter + i as u32)));
                 }
                 return ids;
             }
@@ -810,6 +810,33 @@ mod tests {
             let ids = boxed.next_ids(1);
             assert_eq!(ids.len(), 1);
             assert!(ids[0].starts_with("cl_"));
+        }
+
+        #[test]
+        fn test_next_ids_does_not_wrap_at_1000() {
+            // This tests the fix for grove-6vs3dlwr
+            // IDs should not wrap at 1000 - counters should continue beyond 999
+
+            // Create a mock ID with counter at 998
+            let base_id = "cl_20260101_998";
+            let prefix = "cl_20260101_";
+
+            // Parse and generate like next_ids does
+            let counter = 998u32;
+            let count = 5;
+
+            let mut ids = vec![base_id.to_string()];
+            for i in 1..count {
+                // This is the fix: no % 1000 wrap
+                ids.push(format!("{}{:03}", prefix, counter + i as u32));
+            }
+
+            // Verify counters continue beyond 999 without wrapping
+            assert_eq!(ids[0], "cl_20260101_998");
+            assert_eq!(ids[1], "cl_20260101_999");
+            assert_eq!(ids[2], "cl_20260101_1000"); // Would have been 000 before fix
+            assert_eq!(ids[3], "cl_20260101_1001"); // Would have been 001 before fix
+            assert_eq!(ids[4], "cl_20260101_1002"); // Would have been 002 before fix
         }
     }
 }

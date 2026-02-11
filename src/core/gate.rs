@@ -299,7 +299,9 @@ impl<'a> Gate<'a> {
     fn reset_circuit_breaker(&mut self) {
         self.state.block_count = 0;
         self.state.circuit_breaker_tripped = false;
-        // Keep last_blocked_session_id and last_blocked_at for reference
+        self.state.last_blocked_at = None;
+        self.state.last_blocked_session_id = None;
+        // Clear all circuit breaker state for a fresh start
     }
 
     /// Get a human-readable name for the current status.

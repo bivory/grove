@@ -43,7 +43,7 @@ impl From<&SessionState> for SessionSummary {
             gate_status: format!("{:?}", session.gate.status),
             project_dir: session.cwd.clone(),
             updated_at: session.updated_at.to_rfc3339(),
-            ticket_id: session.ticket.as_ref().map(|t| t.ticket_id.clone()),
+            ticket_id: session.gate.ticket.as_ref().map(|t| t.ticket_id.clone()),
         }
     }
 }

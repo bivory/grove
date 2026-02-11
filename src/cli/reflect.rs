@@ -195,7 +195,7 @@ impl<S: SessionStore, B: MemoryBackend> ReflectCommand<S, B> {
         let stats_path = project_stats_log_path(Path::new(&session.cwd));
         let stats_logger = StatsLogger::new(&stats_path);
 
-        let ticket_id = session.ticket.as_ref().map(|t| t.ticket_id.clone());
+        let ticket_id = session.gate.ticket.as_ref().map(|t| t.ticket_id.clone());
 
         stats_logger
             .append_reflection(

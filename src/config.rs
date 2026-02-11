@@ -102,6 +102,16 @@ pub struct AutoSkipConfig {
     pub decider: String,
 }
 
+/// Valid values for the auto-skip decider field.
+pub const VALID_DECIDERS: &[&str] = &["agent", "always", "never"];
+
+impl AutoSkipConfig {
+    /// Check if a decider value is valid.
+    pub fn is_valid_decider(value: &str) -> bool {
+        VALID_DECIDERS.contains(&value)
+    }
+}
+
 impl Default for AutoSkipConfig {
     fn default() -> Self {
         Self {
@@ -263,7 +273,15 @@ impl Config {
 
         // GROVE_AUTO_SKIP_DECIDER
         if let Ok(val) = env::var("GROVE_AUTO_SKIP_DECIDER") {
-            self.gate.auto_skip.decider = val;
+            if AutoSkipConfig::is_valid_decider(&val) {
+                self.gate.auto_skip.decider = val;
+            } else {
+                eprintln!(
+                    "Warning: Invalid GROVE_AUTO_SKIP_DECIDER value '{}'. \
+                    Valid values: {:?}. Using default '{}'.",
+                    val, VALID_DECIDERS, self.gate.auto_skip.decider
+                );
+            }
         }
 
         // GROVE_DECAY_DAYS
@@ -895,5 +913,50 @@ max_blocks = 10
         // Other defaults should remain
         assert!(config.gate.auto_skip.enabled);
         assert_eq!(config.gate.auto_skip.decider, "agent");
+    }
+
+    #[test]
+    fn test_is_valid_decider_accepts_valid_values() {
+        assert!(AutoSkipConfig::is_valid_decider("agent"));
+        assert!(AutoSkipConfig::is_valid_decider("always"));
+        assert!(AutoSkipConfig::is_valid_decider("never"));
+    }
+
+    #[test]
+    fn test_is_valid_decider_rejects_invalid_values() {
+        assert!(!AutoSkipConfig::is_valid_decider("invalid"));
+        assert!(!AutoSkipConfig::is_valid_decider(""));
+        assert!(!AutoSkipConfig::is_valid_decider("AGENT")); // Case sensitive
+        assert!(!AutoSkipConfig::is_valid_decider("Agent"));
+        assert!(!AutoSkipConfig::is_valid_decider("sometimes"));
+    }
+
+    #[test]
+    fn test_env_var_invalid_decider_ignored() {
+        // Set an invalid decider value
+        env::set_var("GROVE_AUTO_SKIP_DECIDER", "invalid_value");
+
+        let mut config = Config::default();
+        config.apply_env_overrides();
+
+        // Should keep the default value, not the invalid one
+        assert_eq!(config.gate.auto_skip.decider, "agent");
+
+        env::remove_var("GROVE_AUTO_SKIP_DECIDER");
+    }
+
+    #[test]
+    fn test_env_var_valid_decider_applied() {
+        // Set valid decider values
+        for valid in VALID_DECIDERS {
+            env::set_var("GROVE_AUTO_SKIP_DECIDER", valid);
+
+            let mut config = Config::default();
+            config.apply_env_overrides();
+
+            assert_eq!(config.gate.auto_skip.decider, *valid);
+
+            env::remove_var("GROVE_AUTO_SKIP_DECIDER");
+        }
     }
 }

@@ -44,12 +44,15 @@ impl InitOutput {
         }
     }
 
-    /// Create a failed output.
-    pub fn failure(error: impl Into<String>) -> Self {
+    /// Create a failed output with partial success information.
+    ///
+    /// This reports what was created before the failure occurred, so the user
+    /// knows what partial state may have been left behind.
+    pub fn failure(error: impl Into<String>, created: Vec<String>, skipped: Vec<String>) -> Self {
         Self {
             success: false,
-            created: Vec::new(),
-            skipped: Vec::new(),
+            created,
+            skipped,
             error: Some(error.into()),
         }
     }
@@ -125,7 +128,7 @@ impl InitCommand {
         match self.ensure_dir(&grove_dir, options.force) {
             Ok(true) => created.push(grove_dir.display().to_string()),
             Ok(false) => skipped.push(grove_dir.display().to_string()),
-            Err(e) => return InitOutput::failure(e),
+            Err(e) => return InitOutput::failure(e, created, skipped),
         }
 
         // Create project config.toml
@@ -133,7 +136,7 @@ impl InitCommand {
         match self.ensure_file(&config_path, DEFAULT_CONFIG, options.force) {
             Ok(true) => created.push(config_path.display().to_string()),
             Ok(false) => skipped.push(config_path.display().to_string()),
-            Err(e) => return InitOutput::failure(e),
+            Err(e) => return InitOutput::failure(e, created, skipped),
         }
 
         // Create project learnings.md
@@ -141,7 +144,7 @@ impl InitCommand {
         match self.ensure_file(&learnings_path, DEFAULT_LEARNINGS, options.force) {
             Ok(true) => created.push(learnings_path.display().to_string()),
             Ok(false) => skipped.push(learnings_path.display().to_string()),
-            Err(e) => return InitOutput::failure(e),
+            Err(e) => return InitOutput::failure(e, created, skipped),
         }
 
         // Create user-level ~/.grove directory
@@ -149,7 +152,7 @@ impl InitCommand {
             match self.ensure_dir(&home, options.force) {
                 Ok(true) => created.push(home.display().to_string()),
                 Ok(false) => skipped.push(home.display().to_string()),
-                Err(e) => return InitOutput::failure(e),
+                Err(e) => return InitOutput::failure(e, created, skipped),
             }
         }
 
@@ -158,7 +161,7 @@ impl InitCommand {
             match self.ensure_dir(&sessions, options.force) {
                 Ok(true) => created.push(sessions.display().to_string()),
                 Ok(false) => skipped.push(sessions.display().to_string()),
-                Err(e) => return InitOutput::failure(e),
+                Err(e) => return InitOutput::failure(e, created, skipped),
             }
         }
 
@@ -211,10 +214,30 @@ impl InitCommand {
     /// Format output as human-readable text.
     fn format_human_readable(&self, output: &InitOutput) -> String {
         if !output.success {
-            return format!(
-                "Init failed: {}\n",
+            let mut lines = Vec::new();
+            lines.push(format!(
+                "Init failed: {}",
                 output.error.as_deref().unwrap_or("unknown error")
-            );
+            ));
+
+            // Report what was partially created before the failure
+            if !output.created.is_empty() {
+                lines.push(String::new());
+                lines.push("Partially created before failure:".to_string());
+                for path in &output.created {
+                    lines.push(format!("  {}", path));
+                }
+            }
+
+            if !output.skipped.is_empty() {
+                lines.push(String::new());
+                lines.push("Already existed (skipped):".to_string());
+                for path in &output.skipped {
+                    lines.push(format!("  {}", path));
+                }
+            }
+
+            return lines.join("\n") + "\n";
         }
 
         let mut lines = Vec::new();
@@ -261,12 +284,28 @@ mod tests {
 
     #[test]
     fn test_init_output_failure() {
-        let output = InitOutput::failure("test error");
+        let output = InitOutput::failure("test error", vec![], vec![]);
 
         assert!(!output.success);
         assert!(output.created.is_empty());
         assert!(output.skipped.is_empty());
         assert_eq!(output.error, Some("test error".to_string()));
+    }
+
+    #[test]
+    fn test_init_output_failure_with_partial_state() {
+        let output = InitOutput::failure(
+            "permission denied",
+            vec!["created_dir".to_string()],
+            vec!["skipped_file".to_string()],
+        );
+
+        assert!(!output.success);
+        assert_eq!(output.created.len(), 1);
+        assert_eq!(output.created[0], "created_dir");
+        assert_eq!(output.skipped.len(), 1);
+        assert_eq!(output.skipped[0], "skipped_file");
+        assert_eq!(output.error, Some("permission denied".to_string()));
     }
 
     #[test]
@@ -396,5 +435,45 @@ mod tests {
 
         let content = fs::read_to_string(cwd.join(".grove").join("learnings.md")).unwrap();
         assert!(content.contains("# Project Learnings"));
+    }
+
+    #[test]
+    fn test_format_output_partial_failure() {
+        let temp = TempDir::new().unwrap();
+        let cmd = InitCommand::new(temp.path().to_string_lossy().to_string());
+
+        let output = InitOutput::failure(
+            "permission denied",
+            vec!["created_dir".to_string()],
+            vec!["skipped_file".to_string()],
+        );
+        let options = InitOptions::default();
+
+        let formatted = cmd.format_output(&output, &options);
+        assert!(formatted.contains("Init failed: permission denied"));
+        assert!(formatted.contains("Partially created before failure:"));
+        assert!(formatted.contains("created_dir"));
+        assert!(formatted.contains("Already existed (skipped):"));
+        assert!(formatted.contains("skipped_file"));
+    }
+
+    #[test]
+    fn test_format_output_failure_json_includes_partial_state() {
+        let temp = TempDir::new().unwrap();
+        let cmd = InitCommand::new(temp.path().to_string_lossy().to_string());
+
+        let output =
+            InitOutput::failure("permission denied", vec!["created_dir".to_string()], vec![]);
+        let options = InitOptions {
+            json: true,
+            ..Default::default()
+        };
+
+        let formatted = cmd.format_output(&output, &options);
+        assert!(formatted.contains("\"success\": false"));
+        assert!(formatted.contains("\"created\""));
+        assert!(formatted.contains("created_dir"));
+        assert!(formatted.contains("\"error\""));
+        assert!(formatted.contains("permission denied"));
     }
 }

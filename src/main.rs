@@ -447,11 +447,33 @@ fn run_hook(hook_type: HookType) -> Result<ExitCode, Box<dyn std::error::Error>>
     // Determine exit code based on hook output
     if hook_type == HookType::Stop {
         // Parse output to check decision
-        if let Ok(stop_output) = serde_json::from_str::<serde_json::Value>(&output) {
-            if let Some(decision) = stop_output.get("decision").and_then(|d| d.as_str()) {
-                if decision == "block" {
-                    return Ok(ExitCode::from(exit_codes::BLOCK as u8));
+        match serde_json::from_str::<serde_json::Value>(&output) {
+            Ok(stop_output) => {
+                match stop_output.get("decision").and_then(|d| d.as_str()) {
+                    Some("block") => {
+                        return Ok(ExitCode::from(exit_codes::BLOCK as u8));
+                    }
+                    Some("approve") => {
+                        // Expected value, fall through to APPROVE
+                    }
+                    Some(unexpected) => {
+                        tracing::warn!(
+                            decision = unexpected,
+                            "stop hook returned unexpected decision, defaulting to approve"
+                        );
+                    }
+                    None => {
+                        tracing::warn!(
+                            "stop hook output missing 'decision' field, defaulting to approve"
+                        );
+                    }
                 }
+            }
+            Err(e) => {
+                tracing::warn!(
+                    error = %e,
+                    "failed to parse stop hook output as JSON, defaulting to approve"
+                );
             }
         }
     }

@@ -853,12 +853,17 @@ fn parse_criteria(value: &str) -> Vec<WriteGateCriterion> {
     value
         .split(',')
         .filter_map(|c| match c.trim() {
-            "Behavior-Changing" | "BehaviorChanging" => Some(WriteGateCriterion::BehaviorChanging),
-            "Decision-Rationale" | "DecisionRationale" => {
+            // Accept hyphenated, camelCase, and space-separated variants
+            "Behavior-Changing" | "BehaviorChanging" | "Behavior Changing" => {
+                Some(WriteGateCriterion::BehaviorChanging)
+            }
+            "Decision-Rationale" | "DecisionRationale" | "Decision Rationale" => {
                 Some(WriteGateCriterion::DecisionRationale)
             }
-            "Stable-Fact" | "StableFact" => Some(WriteGateCriterion::StableFact),
-            "Explicit-Request" | "ExplicitRequest" => Some(WriteGateCriterion::ExplicitRequest),
+            "Stable-Fact" | "StableFact" | "Stable Fact" => Some(WriteGateCriterion::StableFact),
+            "Explicit-Request" | "ExplicitRequest" | "Explicit Request" => {
+                Some(WriteGateCriterion::ExplicitRequest)
+            }
             _ => None,
         })
         .collect()
@@ -1488,6 +1493,44 @@ Detail text.
         // Next ID should be 10000
         let id = backend.next_id();
         assert!(id.ends_with("_10000"), "Expected _10000, got {}", id);
+    }
+
+    // parse_criteria tests
+
+    #[test]
+    fn test_parse_criteria_hyphenated() {
+        let criteria = parse_criteria("Behavior-Changing, Decision-Rationale");
+        assert_eq!(criteria.len(), 2);
+        assert!(criteria.contains(&WriteGateCriterion::BehaviorChanging));
+        assert!(criteria.contains(&WriteGateCriterion::DecisionRationale));
+    }
+
+    #[test]
+    fn test_parse_criteria_camel_case() {
+        let criteria = parse_criteria("StableFact, ExplicitRequest");
+        assert_eq!(criteria.len(), 2);
+        assert!(criteria.contains(&WriteGateCriterion::StableFact));
+        assert!(criteria.contains(&WriteGateCriterion::ExplicitRequest));
+    }
+
+    #[test]
+    fn test_parse_criteria_space_separated() {
+        // This is the format output by display_name()
+        let criteria =
+            parse_criteria("Behavior Changing, Decision Rationale, Stable Fact, Explicit Request");
+        assert_eq!(criteria.len(), 4);
+        assert!(criteria.contains(&WriteGateCriterion::BehaviorChanging));
+        assert!(criteria.contains(&WriteGateCriterion::DecisionRationale));
+        assert!(criteria.contains(&WriteGateCriterion::StableFact));
+        assert!(criteria.contains(&WriteGateCriterion::ExplicitRequest));
+    }
+
+    #[test]
+    fn test_parse_criteria_ignores_unknown() {
+        let criteria = parse_criteria("Behavior-Changing, Unknown, StableFact");
+        assert_eq!(criteria.len(), 2);
+        assert!(criteria.contains(&WriteGateCriterion::BehaviorChanging));
+        assert!(criteria.contains(&WriteGateCriterion::StableFact));
     }
 
     // File size limit tests

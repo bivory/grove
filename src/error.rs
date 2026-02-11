@@ -157,7 +157,12 @@ impl<T> FailOpen<T> for Result<T> {
         match self {
             Ok(value) => value,
             Err(err) => {
-                tracing::warn!("{}: {} (fail-open: using default)", context, err);
+                let msg = format!(
+                    "grove warning: {} failed: {} (continuing with default)",
+                    context, err
+                );
+                tracing::warn!("{}", msg);
+                eprintln!("{}", msg);
                 T::default()
             }
         }
@@ -167,7 +172,12 @@ impl<T> FailOpen<T> for Result<T> {
         match self {
             Ok(value) => value,
             Err(err) => {
-                tracing::warn!("{}: {} (fail-open: using fallback)", context, err);
+                let msg = format!(
+                    "grove warning: {} failed: {} (continuing with fallback)",
+                    context, err
+                );
+                tracing::warn!("{}", msg);
+                eprintln!("{}", msg);
                 fallback
             }
         }

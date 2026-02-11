@@ -235,10 +235,38 @@ pub fn match_close_command(tool_name: &str, command: &str) -> Option<ClosePatter
     None
 }
 
+/// Shell operators that indicate compound commands.
+/// These should prevent matching to avoid security issues.
+const SHELL_OPERATORS: [&str; 5] = ["&&", "||", "|", ";", "&"];
+
+/// Check if a command contains shell operators that make it a compound command.
+fn contains_shell_operator(command: &str) -> bool {
+    // Check for operators as separate tokens
+    for part in command.split_whitespace() {
+        if SHELL_OPERATORS.contains(&part) {
+            return true;
+        }
+    }
+
+    // Check for operators attached to tokens (e.g., "closed;")
+    for op in SHELL_OPERATORS {
+        if command.contains(op) {
+            return true;
+        }
+    }
+
+    false
+}
+
 /// Check if a command matches the tissue close pattern.
 ///
-/// Pattern: `tissue status <id> closed`
+/// Pattern: `tissue status <id> closed [extra args...]`
 fn is_tissue_close_command(command: &str) -> bool {
+    // Reject compound commands for security
+    if contains_shell_operator(command) {
+        return false;
+    }
+
     let parts: Vec<&str> = command.split_whitespace().collect();
 
     // Need at least 4 parts: tissue status <id> closed
@@ -246,14 +274,20 @@ fn is_tissue_close_command(command: &str) -> bool {
         return false;
     }
 
-    // Check structure: tissue status <anything> closed
-    parts[0] == "tissue" && parts[1] == "status" && parts.last() == Some(&"closed")
+    // Check structure: tissue status <anything> closed [extra args...]
+    // Note: "closed" must be at position 3, extra args after are ignored
+    parts[0] == "tissue" && parts[1] == "status" && parts[3] == "closed"
 }
 
 /// Check if a command matches the beads close pattern.
 ///
-/// Pattern: `beads close <id>`
+/// Pattern: `beads close <id> [extra args...]`
 fn is_beads_close_command(command: &str) -> bool {
+    // Reject compound commands for security
+    if contains_shell_operator(command) {
+        return false;
+    }
+
     let parts: Vec<&str> = command.split_whitespace().collect();
 
     // Need at least 3 parts: beads close <id>
@@ -266,8 +300,13 @@ fn is_beads_close_command(command: &str) -> bool {
 
 /// Check if a command matches the beads complete pattern.
 ///
-/// Pattern: `beads complete <id>`
+/// Pattern: `beads complete <id> [extra args...]`
 fn is_beads_complete_command(command: &str) -> bool {
+    // Reject compound commands for security
+    if contains_shell_operator(command) {
+        return false;
+    }
+
     let parts: Vec<&str> = command.split_whitespace().collect();
 
     // Need at least 3 parts: beads complete <id>
@@ -716,10 +755,10 @@ mod tests {
 
     #[test]
     fn test_match_tissue_with_extra_args() {
-        // Extra arguments after "closed" - still matches
+        // Extra arguments after "closed" - should now match (consistent with beads)
         let result = match_close_command("Bash", "tissue status grove-123 closed --verbose");
-        // The pattern checks that "closed" is the last word, so this should NOT match
-        assert!(result.is_none());
+        // The pattern now checks that "closed" is at position 3, extra args are ignored
+        assert_eq!(result, Some(ClosePattern::TissueClose));
     }
 
     #[test]
@@ -797,5 +836,25 @@ mod tests {
         // Verify simple command still works after security checks
         let result = match_close_command("Bash", "tissue status grove-123 closed");
         assert_eq!(result, Some(ClosePattern::TissueClose));
+    }
+
+    // Beads compound command tests (consistency with tissue security checks)
+
+    #[test]
+    fn test_beads_compound_command_and_operator() {
+        let result = match_close_command("Bash", "beads close issue-456 && echo done");
+        assert!(result.is_none(), "&& operator should prevent beads match");
+    }
+
+    #[test]
+    fn test_beads_compound_command_or_operator() {
+        let result = match_close_command("Bash", "beads complete task-789 || echo failed");
+        assert!(result.is_none(), "|| operator should prevent beads match");
+    }
+
+    #[test]
+    fn test_beads_compound_command_pipe() {
+        let result = match_close_command("Bash", "beads close issue-456 | tee log.txt");
+        assert!(result.is_none(), "| operator should prevent beads match");
     }
 }

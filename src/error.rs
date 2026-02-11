@@ -157,12 +157,13 @@ impl<T> FailOpen<T> for Result<T> {
         match self {
             Ok(value) => value,
             Err(err) => {
-                let msg = format!(
+                // Only use tracing, not eprintln!, to avoid polluting JSON output
+                tracing::warn!(
+                    context = context,
+                    error = %err,
                     "grove warning: {} failed: {} (continuing with default)",
                     context, err
                 );
-                tracing::warn!("{}", msg);
-                eprintln!("{}", msg);
                 T::default()
             }
         }
@@ -172,12 +173,13 @@ impl<T> FailOpen<T> for Result<T> {
         match self {
             Ok(value) => value,
             Err(err) => {
-                let msg = format!(
+                // Only use tracing, not eprintln!, to avoid polluting JSON output
+                tracing::warn!(
+                    context = context,
+                    error = %err,
                     "grove warning: {} failed: {} (continuing with fallback)",
                     context, err
                 );
-                tracing::warn!("{}", msg);
-                eprintln!("{}", msg);
                 fallback
             }
         }

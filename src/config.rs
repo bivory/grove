@@ -283,50 +283,67 @@ impl Config {
 
     /// Merge another config into this one.
     ///
-    /// The `other` config takes precedence for any fields that are set.
+    /// The `other` config takes precedence. All non-default fields from `other`
+    /// are applied to `self`, enabling proper layering of the precedence chain.
+    /// This is field-by-field merging, not section-by-section, which ensures
+    /// that explicit defaults in one config do not block overrides from another.
     fn merge(mut self, other: Config) -> Self {
-        // Ticketing: override if other has non-default values
-        if other.ticketing != TicketingConfig::default() {
-            if !other.ticketing.discovery.is_empty()
-                && other.ticketing.discovery != TicketingConfig::default().discovery
-            {
-                self.ticketing.discovery = other.ticketing.discovery;
-            }
-            for (k, v) in other.ticketing.overrides {
-                self.ticketing.overrides.insert(k, v);
-            }
+        // Ticketing: merge discovery list and overrides
+        // Discovery list: take from other if it was customized
+        if other.ticketing.discovery != TicketingConfig::default().discovery {
+            self.ticketing.discovery = other.ticketing.discovery;
+        }
+        // Overrides: always merge (additively)
+        for (k, v) in other.ticketing.overrides {
+            self.ticketing.overrides.insert(k, v);
         }
 
-        // Backends: override if other has non-default values
-        if other.backends != BackendsConfig::default() {
-            if !other.backends.discovery.is_empty()
-                && other.backends.discovery != BackendsConfig::default().discovery
-            {
-                self.backends.discovery = other.backends.discovery;
-            }
-            for (k, v) in other.backends.overrides {
-                self.backends.overrides.insert(k, v);
-            }
+        // Backends: merge discovery list and overrides
+        if other.backends.discovery != BackendsConfig::default().discovery {
+            self.backends.discovery = other.backends.discovery;
+        }
+        for (k, v) in other.backends.overrides {
+            self.backends.overrides.insert(k, v);
         }
 
-        // Gate: merge auto_skip settings
-        if other.gate.auto_skip != AutoSkipConfig::default() {
-            self.gate.auto_skip = other.gate.auto_skip;
+        // Gate: merge auto_skip settings field by field
+        // Take each non-default value from other
+        let default_auto_skip = AutoSkipConfig::default();
+        if other.gate.auto_skip.enabled != default_auto_skip.enabled {
+            self.gate.auto_skip.enabled = other.gate.auto_skip.enabled;
+        }
+        if other.gate.auto_skip.line_threshold != default_auto_skip.line_threshold {
+            self.gate.auto_skip.line_threshold = other.gate.auto_skip.line_threshold;
+        }
+        if other.gate.auto_skip.decider != default_auto_skip.decider {
+            self.gate.auto_skip.decider = other.gate.auto_skip.decider;
         }
 
-        // Decay: merge if different from default
-        if other.decay != DecayConfig::default() {
-            self.decay = other.decay;
+        // Decay: merge field by field
+        let default_decay = DecayConfig::default();
+        if other.decay.passive_duration_days != default_decay.passive_duration_days {
+            self.decay.passive_duration_days = other.decay.passive_duration_days;
+        }
+        if other.decay.immunity_hit_rate != default_decay.immunity_hit_rate {
+            self.decay.immunity_hit_rate = other.decay.immunity_hit_rate;
         }
 
-        // Retrieval: merge if different from default
-        if other.retrieval != RetrievalConfig::default() {
-            self.retrieval = other.retrieval;
+        // Retrieval: merge field by field
+        let default_retrieval = RetrievalConfig::default();
+        if other.retrieval.max_injections != default_retrieval.max_injections {
+            self.retrieval.max_injections = other.retrieval.max_injections;
+        }
+        if other.retrieval.strategy != default_retrieval.strategy {
+            self.retrieval.strategy = other.retrieval.strategy;
         }
 
-        // Circuit breaker: merge if different from default
-        if other.circuit_breaker != CircuitBreakerConfig::default() {
-            self.circuit_breaker = other.circuit_breaker;
+        // Circuit breaker: merge field by field
+        let default_cb = CircuitBreakerConfig::default();
+        if other.circuit_breaker.max_blocks != default_cb.max_blocks {
+            self.circuit_breaker.max_blocks = other.circuit_breaker.max_blocks;
+        }
+        if other.circuit_breaker.cooldown_seconds != default_cb.cooldown_seconds {
+            self.circuit_breaker.cooldown_seconds = other.circuit_breaker.cooldown_seconds;
         }
 
         self
@@ -786,5 +803,97 @@ max_blocks = 10
         config.apply_env_overrides();
         assert!(!config.gate.auto_skip.enabled);
         env::remove_var("GROVE_AUTO_SKIP_ENABLED");
+    }
+
+    #[test]
+    fn test_merge_field_by_field_preserves_non_default_values() {
+        // This test verifies that the merge function properly merges field-by-field,
+        // ensuring that non-default values from either config are preserved.
+
+        // Create a "base" config with some non-default values
+        let base = Config {
+            gate: GateConfig {
+                auto_skip: AutoSkipConfig {
+                    enabled: true,                // same as default
+                    line_threshold: 20,           // different from default (5)
+                    decider: "agent".to_string(), // same as default
+                },
+            },
+            decay: DecayConfig {
+                passive_duration_days: 90, // same as default
+                immunity_hit_rate: 0.8,    // same as default
+            },
+            ..Config::default()
+        };
+
+        // Create an "override" config with different non-default values
+        let override_config = Config {
+            gate: GateConfig {
+                auto_skip: AutoSkipConfig {
+                    enabled: false,               // different from default
+                    line_threshold: 5,            // same as default
+                    decider: "never".to_string(), // different from default
+                },
+            },
+            decay: DecayConfig {
+                passive_duration_days: 180, // different from default
+                immunity_hit_rate: 0.8,     // same as default
+            },
+            ..Config::default()
+        };
+
+        let merged = base.merge(override_config);
+
+        // enabled: override_config has false (non-default), should take precedence
+        assert!(!merged.gate.auto_skip.enabled);
+
+        // line_threshold: override_config has default (5), so base's 20 should be preserved
+        assert_eq!(merged.gate.auto_skip.line_threshold, 20);
+
+        // decider: override_config has "never" (non-default), should take precedence
+        assert_eq!(merged.gate.auto_skip.decider, "never");
+
+        // passive_duration_days: override_config has 180 (non-default), should take precedence
+        assert_eq!(merged.decay.passive_duration_days, 180);
+
+        // immunity_hit_rate: both have default, base's value should remain
+        assert!((merged.decay.immunity_hit_rate - 0.8).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_merge_with_explicit_defaults_does_not_block_overrides() {
+        // This tests the specific bug: if user config sets values to defaults,
+        // project config overrides should still apply.
+
+        // Simulate user config that explicitly sets everything to defaults
+        let user_config = Config {
+            gate: GateConfig {
+                auto_skip: AutoSkipConfig::default(),
+            },
+            ..Config::default()
+        };
+
+        // Simulate project config that only sets line_threshold
+        let project_config = Config {
+            gate: GateConfig {
+                auto_skip: AutoSkipConfig {
+                    enabled: true,                // same as default
+                    line_threshold: 10,           // different from default
+                    decider: "agent".to_string(), // same as default
+                },
+            },
+            ..Config::default()
+        };
+
+        // Start with defaults, merge user, then project
+        let mut config = Config::default();
+        config = config.merge(user_config);
+        config = config.merge(project_config);
+
+        // Project's line_threshold should have been applied
+        assert_eq!(config.gate.auto_skip.line_threshold, 10);
+        // Other defaults should remain
+        assert!(config.gate.auto_skip.enabled);
+        assert_eq!(config.gate.auto_skip.decider, "agent");
     }
 }

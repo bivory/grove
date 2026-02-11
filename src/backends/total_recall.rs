@@ -527,13 +527,13 @@ impl TotalRecallBackend {
 
     /// Split raw output into individual entries.
     fn split_entries(&self, output: &str) -> Vec<String> {
-        // Total Recall output typically uses --- or blank lines as separators
-        // We'll try to split on common patterns
+        // Total Recall output uses --- as separators between entries.
+        // We must NOT split on empty lines because details can be multi-paragraph.
         let mut entries = Vec::new();
         let mut current = String::new();
 
         for line in output.lines() {
-            if line.trim() == ENTRY_SEPARATOR || (line.is_empty() && !current.is_empty()) {
+            if line.trim() == ENTRY_SEPARATOR {
                 if !current.trim().is_empty() && current.contains(GROVE_ID_PREFIX) {
                     entries.push(current.trim().to_string());
                 }
@@ -962,6 +962,50 @@ Another non-grove entry
         assert_eq!(entries.len(), 2);
         assert!(entries[0].contains("grove:cl_001"));
         assert!(entries[1].contains("grove:cl_002"));
+    }
+
+    #[test]
+    fn test_split_entries_preserves_multi_paragraph_details() {
+        let temp = TempDir::new().unwrap();
+        let memory_dir = temp.path().join("memory");
+        fs::create_dir_all(&memory_dir).unwrap();
+
+        let backend = TotalRecallBackend::new(&memory_dir, temp.path());
+
+        // Entry with blank lines in the detail (multi-paragraph)
+        let output = "**Pattern** (grove:cl_001): Multi-paragraph learning
+> First paragraph explains the pattern.
+> It spans multiple lines.
+
+> Second paragraph after a blank line.
+> This should NOT cause a split.
+
+> Third paragraph with more context.
+
+Tags: #test | Confidence: High
+
+---
+
+**Pitfall** (grove:cl_002): Second entry
+> Simple detail here";
+
+        let entries = backend.split_entries(output);
+
+        // Should have exactly 2 entries, not split on blank lines
+        assert_eq!(
+            entries.len(),
+            2,
+            "Should not split on blank lines within entries"
+        );
+
+        // First entry should contain all paragraphs
+        assert!(entries[0].contains("First paragraph"));
+        assert!(entries[0].contains("Second paragraph after a blank line"));
+        assert!(entries[0].contains("Third paragraph with more context"));
+
+        // Second entry should be intact
+        assert!(entries[1].contains("grove:cl_002"));
+        assert!(entries[1].contains("Simple detail here"));
     }
 
     #[test]

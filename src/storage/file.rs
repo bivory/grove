@@ -82,7 +82,12 @@ impl FileSessionStore {
 
 impl Default for FileSessionStore {
     fn default() -> Self {
-        Self::new().expect("Failed to create default FileSessionStore")
+        // Default::default() should not panic per Rust conventions.
+        // Fall back to /tmp/grove/sessions if home directory unavailable.
+        Self::new().unwrap_or_else(|_| {
+            let fallback = std::path::PathBuf::from("/tmp/grove/sessions");
+            Self::with_dir(fallback).expect("Failed to create fallback session store in /tmp")
+        })
     }
 }
 
@@ -208,6 +213,20 @@ mod tests {
 
         let path = store.session_path("test-session");
         assert!(path.ends_with("test-session.json"));
+    }
+
+    #[test]
+    fn test_default_does_not_panic() {
+        // Default::default() should not panic per Rust conventions
+        // In a normal environment, this will use ~/.grove/sessions
+        // If home is unavailable, it falls back to /tmp/grove/sessions
+        let store = FileSessionStore::default();
+
+        // Verify the store is functional by checking its dir exists
+        assert!(
+            store.sessions_dir.exists() || store.sessions_dir.to_string_lossy().contains("/tmp"),
+            "Default store should have a valid sessions directory"
+        );
     }
 
     #[test]

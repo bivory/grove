@@ -136,7 +136,12 @@ fn detect_with_config(cwd: &Path, config: &TicketingConfig) -> TicketingInfo {
         }
     }
 
-    // Fallback to session if nothing else detected
+    // Fallback to session if nothing else detected, unless explicitly disabled
+    if config.overrides.get("session") == Some(&false) {
+        tracing::warn!(
+            "no ticketing system detected and session fallback is disabled; using session anyway"
+        );
+    }
     TicketingInfo::new(TicketingSystem::Session, None)
 }
 

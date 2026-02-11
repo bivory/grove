@@ -380,10 +380,34 @@ impl Config {
 ///
 /// Checks `GROVE_HOME` environment variable first, then falls back to
 /// `~/.grove`.
+///
+/// # Validation
+///
+/// If `GROVE_HOME` is set, it must be:
+/// - Non-empty
+/// - An absolute path (or we canonicalize it)
+///
+/// Invalid values are ignored and we fall back to the default.
 pub fn grove_home() -> Option<PathBuf> {
     // Check GROVE_HOME env var first
     if let Ok(home) = env::var("GROVE_HOME") {
-        return Some(PathBuf::from(home));
+        // Validate: must be non-empty
+        if home.is_empty() {
+            tracing::warn!("GROVE_HOME is empty, using default");
+        } else {
+            let path = PathBuf::from(&home);
+            // If it's an absolute path, use it directly
+            if path.is_absolute() {
+                return Some(path);
+            }
+            // For relative paths, try to canonicalize it
+            if let Ok(canonical) = path.canonicalize() {
+                return Some(canonical);
+            }
+            // If canonicalization fails (path doesn't exist), use as-is but warn
+            tracing::warn!("GROVE_HOME is relative and doesn't exist, using as-is");
+            return Some(path);
+        }
     }
 
     // Fall back to ~/.grove
@@ -684,6 +708,20 @@ mcp = false
         // Should return Some(~/.grove) in most environments
         assert!(home.is_some());
         assert!(home.unwrap().ends_with(".grove"));
+    }
+
+    #[test]
+    #[serial]
+    fn test_grove_home_empty_env() {
+        // Empty GROVE_HOME should fall back to default
+        env::set_var("GROVE_HOME", "");
+
+        let home = grove_home();
+        // Should fall back to ~/.grove
+        assert!(home.is_some());
+        assert!(home.unwrap().ends_with(".grove"));
+
+        env::remove_var("GROVE_HOME");
     }
 
     #[test]

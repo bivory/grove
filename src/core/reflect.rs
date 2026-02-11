@@ -657,11 +657,17 @@ impl DuplicateCheckResult {
     }
 }
 
+/// Minimum ratio of overlap for substring match to be considered a duplicate.
+/// A value of 0.8 means the shorter string must be at least 80% the length of
+/// the longer string for a substring match to count as duplicate.
+const SUBSTRING_OVERLAP_THRESHOLD: f64 = 0.8;
+
 /// Check if a summary matches an existing active learning.
 ///
 /// Checks for near-duplicates using case-insensitive comparison:
 /// 1. Exact match (summaries are identical)
-/// 2. Substring match (one summary contains the other)
+/// 2. Significant substring match (one summary contains the other AND
+///    the shorter one is at least 80% the length of the longer one)
 ///
 /// Only checks against active learnings (archived/superseded are ignored).
 fn check_duplicate_by_summary(
@@ -683,12 +689,28 @@ fn check_duplicate_by_summary(
             return DuplicateCheckResult::duplicate(&learning.id, &learning.summary);
         }
 
-        // Substring match: candidate contains existing summary
+        // Check for significant substring overlap
+        // Only flag as duplicate if the shorter string is >= 80% of the longer one
+        let longer_len = normalized.len().max(existing_normalized.len());
+        let shorter_len = normalized.len().min(existing_normalized.len());
+
+        // Avoid division by zero and skip very short strings
+        if longer_len == 0 || shorter_len < 10 {
+            continue;
+        }
+
+        let overlap_ratio = shorter_len as f64 / longer_len as f64;
+        if overlap_ratio < SUBSTRING_OVERLAP_THRESHOLD {
+            // Strings are too different in length to be duplicates
+            continue;
+        }
+
+        // Substring match: candidate contains existing summary (with significant overlap)
         if normalized.contains(&existing_normalized) {
             return DuplicateCheckResult::duplicate(&learning.id, &learning.summary);
         }
 
-        // Substring match: existing summary contains candidate
+        // Substring match: existing summary contains candidate (with significant overlap)
         if existing_normalized.contains(&normalized) {
             return DuplicateCheckResult::duplicate(&learning.id, &learning.summary);
         }
@@ -701,7 +723,8 @@ fn check_duplicate_by_summary(
 ///
 /// Detects near-duplicates via case-insensitive comparison:
 /// - Exact match (identical summaries)
-/// - Substring match (one summary contains the other)
+/// - Significant substring match (one summary contains the other AND
+///   the shorter one is at least 80% the length of the longer one)
 ///
 /// Only checks against active learnings (archived/superseded are ignored).
 pub fn check_near_duplicate(
@@ -1834,17 +1857,19 @@ mod tests {
     // =========================================================================
 
     #[test]
-    fn test_detects_substring_candidate_contains_existing() {
+    fn test_detects_significant_substring_candidate_contains_existing() {
         // Candidate summary contains the existing summary as a substring
+        // With strings of similar length (>80% ratio)
         let existing = vec![existing_learning(
             "L001",
-            "validate user input",
+            "validate user input in API endpoints",
             LearningStatus::Active,
         )];
 
+        // 36 chars existing, 44 chars candidate = 82% ratio
         let candidate = CandidateLearning {
             category: "pattern".to_string(),
-            summary: "Always validate user input before processing".to_string(),
+            summary: "Always validate user input in API endpoints".to_string(),
             detail: "Some detail that is long enough to be valid for testing.".to_string(),
             scope: "project".to_string(),
             confidence: "high".to_string(),
@@ -1859,17 +1884,19 @@ mod tests {
     }
 
     #[test]
-    fn test_detects_substring_existing_contains_candidate() {
+    fn test_detects_significant_substring_existing_contains_candidate() {
         // Existing summary contains the candidate summary as a substring
+        // With strings of similar length (>80% ratio)
         let existing = vec![existing_learning(
             "L001",
-            "Always validate user input before processing",
+            "Always validate user input in API endpoints",
             LearningStatus::Active,
         )];
 
+        // 44 chars existing, 36 chars candidate = 82% ratio
         let candidate = CandidateLearning {
             category: "pattern".to_string(),
-            summary: "validate user input".to_string(),
+            summary: "validate user input in API endpoints".to_string(),
             detail: "Some detail that is long enough to be valid for testing.".to_string(),
             scope: "project".to_string(),
             confidence: "high".to_string(),
@@ -1884,16 +1911,47 @@ mod tests {
     }
 
     #[test]
-    fn test_substring_match_is_case_insensitive() {
+    fn test_no_duplicate_for_short_substring() {
+        // Short substring should NOT be considered duplicate
+        // "Use caching" should NOT match "Use caching for API responses"
         let existing = vec![existing_learning(
             "L001",
-            "VALIDATE USER INPUT",
+            "Use caching",
             LearningStatus::Active,
         )];
 
+        // 11 chars existing, 33 chars candidate = 33% ratio (< 80%)
         let candidate = CandidateLearning {
             category: "pattern".to_string(),
-            summary: "always validate user input before processing".to_string(),
+            summary: "Use caching for API response data".to_string(),
+            detail: "Some detail that is long enough to be valid for testing.".to_string(),
+            scope: "project".to_string(),
+            confidence: "high".to_string(),
+            criteria_met: vec!["behavior_changing".to_string()],
+            tags: vec!["test".to_string()],
+            context_files: None,
+        };
+
+        let result = check_near_duplicate(&candidate, &existing);
+        assert!(
+            !result.is_duplicate,
+            "Short substring should not be considered duplicate"
+        );
+    }
+
+    #[test]
+    fn test_significant_substring_match_is_case_insensitive() {
+        // Strings of similar length, different case
+        let existing = vec![existing_learning(
+            "L001",
+            "VALIDATE USER INPUT IN ENDPOINTS",
+            LearningStatus::Active,
+        )];
+
+        // 32 chars existing, 38 chars candidate = 84% ratio
+        let candidate = CandidateLearning {
+            category: "pattern".to_string(),
+            summary: "always validate user input in endpoints".to_string(),
             detail: "Some detail that is long enough to be valid for testing.".to_string(),
             scope: "project".to_string(),
             confidence: "high".to_string(),
@@ -1932,16 +1990,16 @@ mod tests {
 
     #[test]
     fn test_substring_match_ignores_archived() {
-        // Substring match but learning is archived
+        // Significant substring match but learning is archived
         let existing = vec![existing_learning(
             "L001",
-            "validate user input",
+            "validate user input in API endpoints",
             LearningStatus::Archived,
         )];
 
         let candidate = CandidateLearning {
             category: "pattern".to_string(),
-            summary: "Always validate user input before processing".to_string(),
+            summary: "Always validate user input in API endpoints".to_string(),
             detail: "Some detail that is long enough to be valid for testing.".to_string(),
             scope: "project".to_string(),
             confidence: "high".to_string(),
@@ -1951,6 +2009,31 @@ mod tests {
         };
 
         let result = check_near_duplicate(&candidate, &existing);
+        assert!(!result.is_duplicate);
+    }
+
+    #[test]
+    fn test_no_duplicate_for_very_short_strings() {
+        // Very short strings (< 10 chars) should not be checked
+        let existing = vec![existing_learning(
+            "L001",
+            "Use cache",
+            LearningStatus::Active,
+        )];
+
+        let candidate = CandidateLearning {
+            category: "pattern".to_string(),
+            summary: "Use cacheX".to_string(), // Slightly different
+            detail: "Some detail that is long enough to be valid for testing.".to_string(),
+            scope: "project".to_string(),
+            confidence: "high".to_string(),
+            criteria_met: vec!["behavior_changing".to_string()],
+            tags: vec!["test".to_string()],
+            context_files: None,
+        };
+
+        let result = check_near_duplicate(&candidate, &existing);
+        // Not duplicate because it's not exact match and strings are too short
         assert!(!result.is_duplicate);
     }
 

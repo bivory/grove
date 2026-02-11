@@ -1208,17 +1208,20 @@ mod tests {
     fn test_composite_rank_uses_stats() {
         let query = SearchQuery::with_tags(vec!["rust".to_string()]);
 
-        // Same age learnings
-        let learnings = vec![
-            make_learning("High hit rate", vec!["rust"], None),
-            make_learning("Low hit rate", vec!["rust"], None),
-        ];
+        // Same age learnings with unique IDs
+        let mut learning1 = make_learning("High hit rate", vec!["rust"], None);
+        learning1.id = "cl_20260101_001".to_string();
+
+        let mut learning2 = make_learning("Low hit rate", vec!["rust"], None);
+        learning2.id = "cl_20260101_002".to_string();
+
+        let learnings = vec![learning1, learning2];
 
         let now = Utc::now();
 
-        // Different stats for each
+        // Different stats for each (lookup by ID)
         let stats = |id: &str| {
-            if id == learnings[0].id {
+            if id == "cl_20260101_001" {
                 LearningStats::new(10, 10) // 100% hit rate
             } else {
                 LearningStats::new(10, 1) // 10% hit rate

@@ -11,7 +11,7 @@ pub mod state;
 pub use gate::Gate;
 pub use learning::{
     generate_learning_id, CompoundLearning, Confidence, LearningCategory, LearningScope,
-    LearningStatus, WriteGateCriterion, LEARNING_SCHEMA_VERSION,
+    LearningStatus, WriteGateCriterion, LEARNING_SCHEMA_VERSION, PENDING_LEARNING_ID,
 };
 pub use reflect::{
     validate_with_duplicates, CandidateLearning, CriterionPlausibility, DuplicateCheckResult,

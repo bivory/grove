@@ -1311,8 +1311,9 @@ Tags: #performance #database | Confidence: High | Ticket: T001";
 
         let backend = TotalRecallBackend::new(&memory_dir, temp.path());
 
-        // Write a learning
-        let learning = sample_learning();
+        // Get an ID and assign it to the learning before writing
+        let mut learning = sample_learning();
+        learning.id = backend.next_id(); // Should be _000
         backend.write(&learning).unwrap();
 
         // Next ID should be _001

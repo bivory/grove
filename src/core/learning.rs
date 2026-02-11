@@ -8,7 +8,15 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicU32, Ordering};
 
+/// Placeholder ID used before the backend assigns a real ID.
+///
+/// Learnings created with `CompoundLearning::new()` use this placeholder.
+/// The backend's `next_id()` method must be called to assign a unique ID
+/// before persisting the learning.
+pub const PENDING_LEARNING_ID: &str = "pending";
+
 /// Counter for generating unique learning IDs within the same day.
+/// Used only for backward compatibility and testing.
 static LEARNING_COUNTER: AtomicU32 = AtomicU32::new(0);
 
 /// Schema version for learning serialization.
@@ -54,6 +62,10 @@ pub struct CompoundLearning {
 
 impl CompoundLearning {
     /// Create a new learning with the given category and content.
+    ///
+    /// The learning is created with a placeholder ID (`PENDING_LEARNING_ID`).
+    /// Before persisting, use `with_id()` or set `.id` directly using the
+    /// backend's `next_id()` method to assign a unique identifier.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         category: LearningCategory,
@@ -66,7 +78,7 @@ impl CompoundLearning {
         session_id: impl Into<String>,
     ) -> Self {
         Self {
-            id: generate_learning_id(),
+            id: PENDING_LEARNING_ID.to_string(),
             schema_version: LEARNING_SCHEMA_VERSION,
             category,
             summary: summary.into(),
@@ -81,6 +93,15 @@ impl CompoundLearning {
             context_files: None,
             status: LearningStatus::Active,
         }
+    }
+
+    /// Set the learning ID.
+    ///
+    /// Use this with the backend's `next_id()` method to assign a unique ID
+    /// before persisting the learning.
+    pub fn with_id(mut self, id: impl Into<String>) -> Self {
+        self.id = id.into();
+        self
     }
 
     /// Set the ticket ID.
@@ -116,9 +137,15 @@ impl CompoundLearning {
     }
 }
 
-/// Generate a unique learning ID.
+/// Generate a learning ID using a process-local counter.
 ///
 /// Format: cl_YYYYMMDD_NNN where NNN is a counter that resets daily.
+///
+/// **Warning**: This function uses a process-local counter that is NOT
+/// safe across multiple processes. Use the backend's `next_id()` method
+/// instead for production code to avoid ID collisions.
+///
+/// This function is primarily retained for backward compatibility and testing.
 pub fn generate_learning_id() -> String {
     let now = Utc::now();
     let counter = LEARNING_COUNTER.fetch_add(1, Ordering::SeqCst);
@@ -317,8 +344,6 @@ mod tests {
 
     #[test]
     fn test_compound_learning_new() {
-        reset_learning_counter();
-
         let learning = CompoundLearning::new(
             LearningCategory::Pattern,
             "Use builder pattern for complex objects",
@@ -330,7 +355,8 @@ mod tests {
             "session-123",
         );
 
-        assert!(learning.id.starts_with("cl_"));
+        // New learnings get a placeholder ID that must be set before persisting
+        assert_eq!(learning.id, PENDING_LEARNING_ID);
         assert_eq!(learning.schema_version, LEARNING_SCHEMA_VERSION);
         assert_eq!(learning.category, LearningCategory::Pattern);
         assert_eq!(learning.summary, "Use builder pattern for complex objects");
@@ -342,6 +368,23 @@ mod tests {
         assert!(learning.ticket_id.is_none());
         assert!(learning.context_files.is_none());
         assert_eq!(learning.status, LearningStatus::Active);
+    }
+
+    #[test]
+    fn test_compound_learning_with_id() {
+        let learning = CompoundLearning::new(
+            LearningCategory::Pattern,
+            "Test learning",
+            "Test detail that is long enough to pass validation requirements.",
+            LearningScope::Project,
+            Confidence::High,
+            vec![WriteGateCriterion::BehaviorChanging],
+            vec!["test".to_string()],
+            "session-123",
+        )
+        .with_id("cl_20260101_042");
+
+        assert_eq!(learning.id, "cl_20260101_042");
     }
 
     #[test]

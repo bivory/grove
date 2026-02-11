@@ -53,6 +53,18 @@ pub struct TotalRecallBackend {
     personal_path: PathBuf,
 }
 
+/// Check if a line is part of a Grove entry.
+///
+/// Matches lines that contain Grove IDs, blockquote content, or any metadata fields.
+fn is_grove_entry_line(line: &str) -> bool {
+    line.contains(GROVE_ID_PREFIX)
+        || line.starts_with(BLOCKQUOTE_PREFIX)
+        || line.starts_with(LABEL_TAGS)
+        || line.starts_with(LABEL_CONFIDENCE)
+        || line.starts_with(LABEL_TICKET)
+        || line.starts_with(LABEL_FILES)
+}
+
 impl TotalRecallBackend {
     /// Create a new Total Recall backend with the given memory directory.
     ///
@@ -324,6 +336,7 @@ impl TotalRecallBackend {
             new_content
         }
     }
+
     /// List all grove learnings from Total Recall's memory files.
     ///
     /// Unlike search_memory_files, this returns all grove entries without query filtering.
@@ -352,10 +365,7 @@ impl TotalRecallBackend {
                         // Extract grove entries - add separator after each Tags: line
                         // to properly delimit multiple entries within the same file
                         for line in content.lines() {
-                            if line.contains(GROVE_ID_PREFIX)
-                                || line.starts_with(BLOCKQUOTE_PREFIX)
-                                || line.starts_with(LABEL_TAGS)
-                            {
+                            if is_grove_entry_line(line) {
                                 results.push_str(line);
                                 results.push('\n');
                                 // Tags: line marks end of an entry, add separator
@@ -379,10 +389,7 @@ impl TotalRecallBackend {
                             if content.contains(GROVE_ID_PREFIX) {
                                 results.push_str(&format!("[{}]\n", entry.path().display()));
                                 for line in content.lines() {
-                                    if line.contains(GROVE_ID_PREFIX)
-                                        || line.starts_with(BLOCKQUOTE_PREFIX)
-                                        || line.starts_with(LABEL_TAGS)
-                                    {
+                                    if is_grove_entry_line(line) {
                                         results.push_str(line);
                                         results.push('\n');
                                         // Tags: line marks end of an entry, add separator
@@ -871,6 +878,38 @@ mod tests {
         )
         .with_ticket_id("grove-abc123")
         .with_context_files(vec!["src/dashboard.rs".to_string()])
+    }
+
+    // is_grove_entry_line tests
+
+    #[test]
+    fn test_is_grove_entry_line_matches_grove_id() {
+        assert!(is_grove_entry_line(
+            "[10:30] **Pattern** (grove:abc123): Summary"
+        ));
+        assert!(is_grove_entry_line("grove:xyz789"));
+    }
+
+    #[test]
+    fn test_is_grove_entry_line_matches_blockquote() {
+        assert!(is_grove_entry_line("> This is a detail line"));
+        assert!(is_grove_entry_line("> Multiple lines"));
+    }
+
+    #[test]
+    fn test_is_grove_entry_line_matches_all_metadata_fields() {
+        assert!(is_grove_entry_line("Tags: #pattern, #architecture"));
+        assert!(is_grove_entry_line("Confidence: High"));
+        assert!(is_grove_entry_line("Ticket: grove-123"));
+        assert!(is_grove_entry_line("Files: src/foo.rs, src/bar.rs"));
+    }
+
+    #[test]
+    fn test_is_grove_entry_line_rejects_non_entry_lines() {
+        assert!(!is_grove_entry_line("## Learnings"));
+        assert!(!is_grove_entry_line(""));
+        assert!(!is_grove_entry_line("Some random text"));
+        assert!(!is_grove_entry_line("# 2026-02-11"));
     }
 
     // Format tests

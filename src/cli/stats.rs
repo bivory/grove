@@ -258,7 +258,13 @@ impl StatsCommand {
         let log_path = project_stats_log_path(&self.project_path);
         let cache_path = match stats_cache_path() {
             Some(p) => p,
-            None => return StatsOutput::empty(warnings),
+            None => {
+                warnings.push(
+                    "Stats cache unavailable - HOME directory not found or ~/.grove not accessible"
+                        .to_string(),
+                );
+                return StatsOutput::empty(warnings);
+            }
         };
         let cache_manager = StatsCacheManager::new(&cache_path, &log_path);
 

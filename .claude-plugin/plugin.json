@@ -16,5 +16,6 @@
   ],
   "agents": [
     "./agents/grove.md"
-  ]
+  ],
+  "hooks": "./hooks/hooks.json"
 }

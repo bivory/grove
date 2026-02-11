@@ -810,7 +810,7 @@ impl MemoryBackend for TotalRecallBackend {
                 for line in content.lines() {
                     if let Some(id) = self.extract_grove_id(line) {
                         if id.starts_with(&today_prefix) {
-                            // Parse the counter from the ID (last 3 digits)
+                            // Parse the counter suffix from the ID
                             if let Some(counter_str) = id.strip_prefix(&today_prefix) {
                                 if let Ok(counter) = counter_str.parse::<u32>() {
                                     max_counter = max_counter.max(counter + 1);
@@ -822,7 +822,7 @@ impl MemoryBackend for TotalRecallBackend {
             }
         }
 
-        format!("cl_{}_{:03}", today.replace('-', ""), max_counter % 1000)
+        format!("cl_{}_{:03}", today.replace('-', ""), max_counter)
     }
 }
 
@@ -1473,6 +1473,76 @@ Tags: #test | Confidence: High
         // Next ID should be _006 (highest was 005)
         let id = backend.next_id();
         assert!(id.ends_with("_006"), "Expected _006, got {}", id);
+    }
+
+    #[test]
+    fn test_next_id_handles_counter_above_999() {
+        let temp = TempDir::new().unwrap();
+        let memory_dir = temp.path().join("memory");
+        let daily_dir = memory_dir.join("daily");
+        fs::create_dir_all(&daily_dir).unwrap();
+
+        // Create a daily log with entry at counter 999
+        let today = Utc::now().format(DATE_FORMAT).to_string();
+        let today_ymd = today.replace('-', "");
+        let daily_path = daily_dir.join(format!("{}.md", today));
+
+        let content = format!(
+            r#"# {}
+
+## Learnings
+
+[10:00] **Pattern** (grove:cl_{}_999): Entry at 999
+> Detail
+
+Tags: #test | Confidence: High
+"#,
+            today, today_ymd
+        );
+        fs::write(&daily_path, content).unwrap();
+
+        let backend = TotalRecallBackend::new(&memory_dir, temp.path());
+
+        // Next ID should be 1000, not 000 (no modulo wrap)
+        let id = backend.next_id();
+        assert!(
+            id.ends_with("_1000"),
+            "Expected _1000 (no wrap), got {}",
+            id
+        );
+    }
+
+    #[test]
+    fn test_next_id_handles_counter_above_9999() {
+        let temp = TempDir::new().unwrap();
+        let memory_dir = temp.path().join("memory");
+        let daily_dir = memory_dir.join("daily");
+        fs::create_dir_all(&daily_dir).unwrap();
+
+        // Create a daily log with entry at counter 9999
+        let today = Utc::now().format(DATE_FORMAT).to_string();
+        let today_ymd = today.replace('-', "");
+        let daily_path = daily_dir.join(format!("{}.md", today));
+
+        let content = format!(
+            r#"# {}
+
+## Learnings
+
+[10:00] **Pattern** (grove:cl_{}_9999): Entry at 9999
+> Detail
+
+Tags: #test | Confidence: High
+"#,
+            today, today_ymd
+        );
+        fs::write(&daily_path, content).unwrap();
+
+        let backend = TotalRecallBackend::new(&memory_dir, temp.path());
+
+        // Next ID should be 10000
+        let id = backend.next_id();
+        assert!(id.ends_with("_10000"), "Expected _10000, got {}", id);
     }
 
     // Timestamp parsing tests

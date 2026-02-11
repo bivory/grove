@@ -438,7 +438,7 @@ impl MemoryBackend for MarkdownBackend {
             if let Ok(learnings) = self.parse_file(path) {
                 for learning in learnings {
                     if learning.id.starts_with(&today_prefix) {
-                        // Parse the counter from the ID (last 3 digits)
+                        // Parse the counter suffix from the ID
                         if let Some(counter_str) = learning.id.strip_prefix(&today_prefix) {
                             if let Ok(counter) = counter_str.parse::<u32>() {
                                 max_counter = max_counter.max(counter + 1);
@@ -449,7 +449,7 @@ impl MemoryBackend for MarkdownBackend {
             }
         }
 
-        format!("cl_{}_{:03}", today, max_counter % 1000)
+        format!("cl_{}_{:03}", today, max_counter)
     }
 }
 
@@ -1410,6 +1410,84 @@ Detail text.
         // Next ID should be _008 (highest was 007)
         let id = backend.next_id();
         assert!(id.ends_with("_008"), "Expected _008, got {}", id);
+    }
+
+    #[test]
+    fn test_next_id_handles_counter_above_999() {
+        let temp = TempDir::new().unwrap();
+        let grove_dir = temp.path().join(".grove");
+        fs::create_dir_all(&grove_dir).unwrap();
+        let path = grove_dir.join("learnings.md");
+
+        // Create a learnings file with entry at counter 999
+        let today = chrono::Utc::now().format("%Y%m%d").to_string();
+        let content = format!(
+            r#"# Grove Learnings
+
+## cl_{}_999
+
+**Category:** Pattern
+**Summary:** Entry at 999
+**Scope:** Project | **Confidence:** High | **Status:** Active
+**Tags:** #test
+**Session:** test
+**Criteria:** Behavior-Changing
+**Created:** 2026-02-10T10:00:00Z
+
+Detail text.
+
+---
+"#,
+            today
+        );
+        fs::write(&path, content).unwrap();
+
+        let backend = MarkdownBackend::new(&path);
+
+        // Next ID should be 1000, not 000 (no modulo wrap)
+        let id = backend.next_id();
+        assert!(
+            id.ends_with("_1000"),
+            "Expected _1000 (no wrap), got {}",
+            id
+        );
+    }
+
+    #[test]
+    fn test_next_id_handles_counter_above_9999() {
+        let temp = TempDir::new().unwrap();
+        let grove_dir = temp.path().join(".grove");
+        fs::create_dir_all(&grove_dir).unwrap();
+        let path = grove_dir.join("learnings.md");
+
+        // Create a learnings file with entry at counter 9999
+        let today = chrono::Utc::now().format("%Y%m%d").to_string();
+        let content = format!(
+            r#"# Grove Learnings
+
+## cl_{}_9999
+
+**Category:** Pattern
+**Summary:** Entry at 9999
+**Scope:** Project | **Confidence:** High | **Status:** Active
+**Tags:** #test
+**Session:** test
+**Criteria:** Behavior-Changing
+**Created:** 2026-02-10T10:00:00Z
+
+Detail text.
+
+---
+"#,
+            today
+        );
+        fs::write(&path, content).unwrap();
+
+        let backend = MarkdownBackend::new(&path);
+
+        // Next ID should be 10000
+        let id = backend.next_id();
+        assert!(id.ends_with("_10000"), "Expected _10000, got {}", id);
     }
 
     // File size limit tests

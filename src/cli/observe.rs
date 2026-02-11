@@ -148,12 +148,18 @@ impl<S: SessionStore> ObserveCommand<S> {
     }
 }
 
-/// Truncate a string with ellipsis.
+/// Truncate a string with ellipsis, handling Unicode correctly.
+///
+/// This function counts characters (not bytes) to avoid panicking on
+/// multi-byte UTF-8 sequences like emojis or non-ASCII text.
 fn truncate(s: &str, max_len: usize) -> String {
-    if s.len() <= max_len {
+    let char_count = s.chars().count();
+    if char_count <= max_len {
         s.to_string()
     } else {
-        format!("{}...", &s[..max_len.saturating_sub(3)])
+        let truncate_at = max_len.saturating_sub(3);
+        let truncated: String = s.chars().take(truncate_at).collect();
+        format!("{}...", truncated)
     }
 }
 
@@ -426,10 +432,26 @@ mod tests {
     }
 
     #[test]
-    fn test_truncate() {
+    fn test_truncate_ascii() {
         assert_eq!(truncate("short", 10), "short");
         assert_eq!(truncate("this is a very long string", 10), "this is...");
         assert_eq!(truncate("exactly10!", 10), "exactly10!");
+    }
+
+    #[test]
+    fn test_truncate_unicode() {
+        // Japanese text (3 bytes per char) - should not panic
+        let japanese = "日本語テスト";
+        assert_eq!(japanese.chars().count(), 6);
+        assert_eq!(truncate(japanese, 5), "日本...");
+
+        // Emoji (4 bytes per char) - should not panic
+        let emoji = "🎉🎊🎁🎈🎂";
+        assert_eq!(truncate(emoji, 4), "🎉...");
+
+        // Mixed ASCII and multi-byte
+        let mixed = "Hello 世界!";
+        assert_eq!(truncate(mixed, 8), "Hello...");
     }
 
     #[test]

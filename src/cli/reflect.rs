@@ -301,12 +301,18 @@ impl<S: SessionStore, B: MemoryBackend> ReflectCommand<S, B> {
     }
 }
 
-/// Truncate a string with ellipsis.
+/// Truncate a string with ellipsis, handling Unicode correctly.
+///
+/// This function counts characters (not bytes) to avoid panicking on
+/// multi-byte UTF-8 sequences like emojis or non-ASCII text.
 fn truncate(s: &str, max_len: usize) -> String {
-    if s.len() <= max_len {
+    let char_count = s.chars().count();
+    if char_count <= max_len {
         s.to_string()
     } else {
-        format!("{}...", &s[..max_len.saturating_sub(3)])
+        let truncate_at = max_len.saturating_sub(3);
+        let truncated: String = s.chars().take(truncate_at).collect();
+        format!("{}...", truncated)
     }
 }
 
@@ -574,10 +580,77 @@ mod tests {
     }
 
     #[test]
-    fn test_truncate() {
+    fn test_truncate_ascii() {
+        // String shorter than max_len
         assert_eq!(truncate("short", 10), "short");
-        assert_eq!(truncate("this is a very long string", 10), "this is...");
+        // String exactly at max_len
         assert_eq!(truncate("exactly10!", 10), "exactly10!");
+        // String longer than max_len
+        assert_eq!(truncate("this is a very long string", 10), "this is...");
+        // Edge case: max_len of 3 leaves no room for content
+        assert_eq!(truncate("hello", 3), "...");
+        // Edge case: max_len of 4 leaves room for 1 char
+        assert_eq!(truncate("hello", 4), "h...");
+        // Empty string
+        assert_eq!(truncate("", 10), "");
+    }
+
+    #[test]
+    fn test_truncate_unicode_no_panic() {
+        // Japanese text (3 bytes per char in UTF-8)
+        let japanese = "日本語テスト";
+        assert_eq!(japanese.chars().count(), 6);
+        // Should not panic - truncate at 5 chars
+        let result = truncate(japanese, 5);
+        assert_eq!(result, "日本...");
+
+        // Emoji (4 bytes per char in UTF-8)
+        let emoji = "🎉🎊🎁🎈🎂";
+        assert_eq!(emoji.chars().count(), 5);
+        // Truncate at 4 chars
+        let result = truncate(emoji, 4);
+        assert_eq!(result, "🎉...");
+
+        // Mixed ASCII and Unicode
+        let mixed = "Hello 世界!";
+        assert_eq!(mixed.chars().count(), 9);
+        let result = truncate(mixed, 8);
+        assert_eq!(result, "Hello...");
+    }
+
+    #[test]
+    fn test_truncate_unicode_boundary() {
+        // This string has multi-byte chars that would panic with byte slicing
+        // 日 = 3 bytes, so at byte position 7 we'd be mid-character
+        let text = "ab日本語cd";
+        assert_eq!(text.len(), 13); // 2 + 9 + 2 bytes
+        assert_eq!(text.chars().count(), 7); // 7 characters
+
+        // Truncate at 6 chars - should work without panic
+        let result = truncate(text, 6);
+        assert_eq!(result, "ab日...");
+
+        // Verify old byte-based logic would have panicked
+        // (This is documentation of the bug we fixed)
+        // &text[..6.saturating_sub(3)] = &text[..3] = "ab" + partial 日 = PANIC
+    }
+
+    #[test]
+    fn test_truncate_combining_characters() {
+        // é as e + combining accent (2 code points, 1 grapheme)
+        let combining = "cafe\u{0301}"; // café with combining accent
+                                        // .chars().count() = 5 (c, a, f, e, combining_accent)
+        assert_eq!(combining.chars().count(), 5);
+
+        // At max_len=5, no truncation (5 <= 5)
+        assert_eq!(truncate(combining, 5), "cafe\u{0301}");
+
+        // At max_len=4, truncate to 1 char + "..."
+        // Note: .chars().count() counts code points, not graphemes
+        // This splits the combining character from 'e', which is suboptimal
+        // but acceptable - perfect grapheme handling requires unicode-segmentation
+        let result = truncate(combining, 4);
+        assert_eq!(result, "c...");
     }
 
     #[test]

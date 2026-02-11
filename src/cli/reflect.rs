@@ -219,17 +219,21 @@ impl<S: SessionStore, B: MemoryBackend> ReflectCommand<S, B> {
         session.add_trace(
             EventType::ReflectionComplete,
             Some(format!(
-                "accepted {}/{} candidates",
-                learnings_accepted, candidates_submitted
+                "accepted {}/{} candidates (validated: {}, written: {})",
+                learning_ids.len(),
+                candidates_submitted,
+                learnings_accepted,
+                learning_ids.len()
             )),
         );
 
         // Save session (fail-open)
         self.store.put(&session).fail_open_default("saving session");
 
+        // learnings_accepted should be the number actually written, not just validated
         ReflectOutput::success(
             candidates_submitted,
-            learnings_accepted,
+            learning_ids.len(),
             learning_ids,
             rejected,
         )

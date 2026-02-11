@@ -120,6 +120,11 @@ impl MemoryBackend for FallbackBackend {
         // We'll return the primary name since that's the intended backend
         self.primary.name()
     }
+
+    fn next_id(&self) -> String {
+        // Delegate to primary backend for ID generation
+        self.primary.next_id()
+    }
 }
 
 #[cfg(test)]

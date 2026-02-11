@@ -163,11 +163,16 @@ impl<S: SessionStore, B: MemoryBackend> ReflectCommand<S, B> {
             .collect::<Vec<_>>();
 
         // Validate candidates (schema + write gate + duplicate check)
-        let (valid_learnings, rejected) =
+        let (mut valid_learnings, rejected) =
             validate_with_duplicates(input.candidates.clone(), &session_id, &existing);
 
         let candidates_submitted = input.candidates.len();
         let learnings_accepted = valid_learnings.len();
+
+        // Assign unique IDs from backend (avoids counter collisions across sessions)
+        for learning in &mut valid_learnings {
+            learning.id = self.backend.next_id();
+        }
 
         // Write valid learnings to backend
         let mut learning_ids = Vec::new();

@@ -398,6 +398,31 @@ impl MemoryBackend for MarkdownBackend {
         // Delegate to the inherent method
         self.update_status(learning_id, LearningStatus::Active)
     }
+
+    fn next_id(&self) -> String {
+        // Scan existing learnings to find the highest counter for today
+        let today = chrono::Utc::now().format("%Y%m%d").to_string();
+        let today_prefix = format!("cl_{}_", today);
+        let mut max_counter: u32 = 0;
+
+        // Parse learnings from both project and personal files
+        for path in [&self.project_path, &self.personal_path] {
+            if let Ok(learnings) = self.parse_file(path) {
+                for learning in learnings {
+                    if learning.id.starts_with(&today_prefix) {
+                        // Parse the counter from the ID (last 3 digits)
+                        if let Some(counter_str) = learning.id.strip_prefix(&today_prefix) {
+                            if let Ok(counter) = counter_str.parse::<u32>() {
+                                max_counter = max_counter.max(counter + 1);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        format!("cl_{}_{:03}", today, max_counter % 1000)
+    }
 }
 
 /// Check if two file paths overlap (same file or one contains the other).
@@ -1217,5 +1242,86 @@ mod tests {
         let path = temp.path().join("learnings.md");
         let backend = MarkdownBackend::new(&path);
         assert_eq!(backend.name(), "markdown");
+    }
+
+    // next_id tests
+
+    #[test]
+    fn test_next_id_starts_at_000_for_empty_backend() {
+        let temp = TempDir::new().unwrap();
+        let path = temp.path().join(".grove").join("learnings.md");
+        let backend = MarkdownBackend::new(&path);
+
+        let id = backend.next_id();
+
+        // Should be cl_YYYYMMDD_000
+        assert!(id.starts_with("cl_"));
+        assert!(id.ends_with("_000"));
+    }
+
+    #[test]
+    fn test_next_id_increments_after_write() {
+        let temp = TempDir::new().unwrap();
+        let path = temp.path().join(".grove").join("learnings.md");
+        let backend = MarkdownBackend::new(&path);
+
+        // Write a learning
+        let learning = sample_learning();
+        backend.write(&learning).unwrap();
+
+        // Next ID should be _001
+        let id = backend.next_id();
+        assert!(id.ends_with("_001"), "Expected _001, got {}", id);
+    }
+
+    #[test]
+    fn test_next_id_finds_highest_counter_in_file() {
+        let temp = TempDir::new().unwrap();
+        let grove_dir = temp.path().join(".grove");
+        fs::create_dir_all(&grove_dir).unwrap();
+        let path = grove_dir.join("learnings.md");
+
+        // Create a learnings file with some existing entries
+        let today = chrono::Utc::now().format("%Y%m%d").to_string();
+        let content = format!(
+            r#"# Grove Learnings
+
+## cl_{}_002
+
+**Category:** Pattern
+**Summary:** First learning
+**Scope:** Project | **Confidence:** High | **Status:** Active
+**Tags:** #test
+**Session:** test
+**Criteria:** Behavior-Changing
+**Created:** 2026-02-10T10:00:00Z
+
+Detail text.
+
+---
+
+## cl_{}_007
+
+**Category:** Pattern
+**Summary:** Second learning
+**Scope:** Project | **Confidence:** High | **Status:** Active
+**Tags:** #test
+**Session:** test
+**Criteria:** Behavior-Changing
+**Created:** 2026-02-10T11:00:00Z
+
+Detail text.
+
+---
+"#,
+            today, today
+        );
+        fs::write(&path, content).unwrap();
+
+        let backend = MarkdownBackend::new(&path);
+
+        // Next ID should be _008 (highest was 007)
+        let id = backend.next_id();
+        assert!(id.ends_with("_008"), "Expected _008, got {}", id);
     }
 }

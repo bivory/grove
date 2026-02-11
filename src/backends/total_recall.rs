@@ -19,7 +19,7 @@ use std::fs::{self, OpenOptions};
 use std::io::Write as IoWrite;
 use std::path::{Path, PathBuf};
 
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use tracing::warn;
 
 use crate::backends::total_recall_format::{
@@ -332,7 +332,8 @@ impl TotalRecallBackend {
                     // Only include if it has grove entries
                     if content.contains(GROVE_ID_PREFIX) {
                         results.push_str(&format!("[{}]\n", entry.path().display()));
-                        // Extract grove entries
+                        // Extract grove entries - add separator after each Tags: line
+                        // to properly delimit multiple entries within the same file
                         for line in content.lines() {
                             if line.contains(GROVE_ID_PREFIX)
                                 || line.starts_with(BLOCKQUOTE_PREFIX)
@@ -340,9 +341,12 @@ impl TotalRecallBackend {
                             {
                                 results.push_str(line);
                                 results.push('\n');
+                                // Tags: line marks end of an entry, add separator
+                                if line.starts_with(LABEL_TAGS) {
+                                    results.push_str(&format!("\n{}\n\n", ENTRY_SEPARATOR));
+                                }
                             }
                         }
-                        results.push_str(&format!("\n{}\n\n", ENTRY_SEPARATOR));
                     }
                 }
             }
@@ -364,9 +368,12 @@ impl TotalRecallBackend {
                                     {
                                         results.push_str(line);
                                         results.push('\n');
+                                        // Tags: line marks end of an entry, add separator
+                                        if line.starts_with(LABEL_TAGS) {
+                                            results.push_str(&format!("\n{}\n\n", ENTRY_SEPARATOR));
+                                        }
                                     }
                                 }
-                                results.push_str(&format!("\n{}\n\n", ENTRY_SEPARATOR));
                             }
                         }
                     }
@@ -403,7 +410,7 @@ impl TotalRecallBackend {
                         let query_lower = query.to_lowercase();
                         if content.to_lowercase().contains(&query_lower) {
                             results.push_str(&format!("[{}]\n", entry.path().display()));
-                            // Extract grove entries
+                            // Extract grove entries - add separator after each Tags: line
                             for line in content.lines() {
                                 if line.contains(GROVE_ID_PREFIX)
                                     || line.starts_with(BLOCKQUOTE_PREFIX)
@@ -411,9 +418,12 @@ impl TotalRecallBackend {
                                 {
                                     results.push_str(line);
                                     results.push('\n');
+                                    // Tags: line marks end of an entry, add separator
+                                    if line.starts_with(LABEL_TAGS) {
+                                        results.push_str(&format!("\n{}\n\n", ENTRY_SEPARATOR));
+                                    }
                                 }
                             }
-                            results.push_str(&format!("\n{}\n\n", ENTRY_SEPARATOR));
                         }
                     }
                 }
@@ -438,9 +448,15 @@ impl TotalRecallBackend {
                                         {
                                             results.push_str(line);
                                             results.push('\n');
+                                            // Tags: line marks end of an entry, add separator
+                                            if line.starts_with(LABEL_TAGS) {
+                                                results.push_str(&format!(
+                                                    "\n{}\n\n",
+                                                    ENTRY_SEPARATOR
+                                                ));
+                                            }
                                         }
                                     }
-                                    results.push_str(&format!("\n{}\n\n", ENTRY_SEPARATOR));
                                 }
                             }
                         }
@@ -611,6 +627,10 @@ impl TotalRecallBackend {
             })
             .unwrap_or_default();
 
+        // Parse timestamp from entry
+        // Format: [HH:MM] at start of header line, date from ID (cl_YYYYMMDD_NNN)
+        let timestamp = self.parse_entry_timestamp(entry, grove_id);
+
         // Build a partial learning
         Some(CompoundLearning {
             id: grove_id.to_string(),
@@ -624,10 +644,54 @@ impl TotalRecallBackend {
             tags,
             session_id: String::new(),
             ticket_id: None,
-            timestamp: Utc::now(),
+            timestamp,
             context_files: None,
             status: crate::core::LearningStatus::Active,
         })
+    }
+
+    /// Parse timestamp from entry header and ID.
+    ///
+    /// Entry format: `[HH:MM] **Category** (grove:cl_YYYYMMDD_NNN): Summary`
+    /// Extracts time from `[HH:MM]` and date from ID.
+    fn parse_entry_timestamp(&self, entry: &str, grove_id: &str) -> DateTime<Utc> {
+        // Try to extract date from ID (cl_YYYYMMDD_NNN)
+        let date_str = grove_id
+            .strip_prefix("cl_")
+            .and_then(|s| s.get(0..8))
+            .unwrap_or("");
+
+        // Try to extract time from [HH:MM] at start of header line
+        let time_str = entry
+            .lines()
+            .find(|line| line.contains(GROVE_ID_PREFIX))
+            .and_then(|line| {
+                if line.starts_with('[') {
+                    line.find(']').and_then(|end| line.get(1..end))
+                } else {
+                    None
+                }
+            })
+            .unwrap_or("00:00");
+
+        // Parse date components
+        let year: i32 = date_str
+            .get(0..4)
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(2026);
+        let month: u32 = date_str.get(4..6).and_then(|s| s.parse().ok()).unwrap_or(1);
+        let day: u32 = date_str.get(6..8).and_then(|s| s.parse().ok()).unwrap_or(1);
+
+        // Parse time components
+        let parts: Vec<&str> = time_str.split(':').collect();
+        let hour: u32 = parts.first().and_then(|s| s.parse().ok()).unwrap_or(0);
+        let minute: u32 = parts.get(1).and_then(|s| s.parse().ok()).unwrap_or(0);
+
+        // Build timestamp
+        chrono::NaiveDate::from_ymd_opt(year, month, day)
+            .and_then(|date| date.and_hms_opt(hour, minute, 0))
+            .map(|naive| DateTime::from_naive_utc_and_offset(naive, Utc))
+            .unwrap_or_else(Utc::now)
     }
 }
 
@@ -685,6 +749,54 @@ impl MemoryBackend for TotalRecallBackend {
 
     fn name(&self) -> &'static str {
         "total-recall"
+    }
+
+    fn next_id(&self) -> String {
+        // Scan daily logs to find the highest counter for today
+        let today = Utc::now().format(DATE_FORMAT).to_string();
+        let today_prefix = format!("cl_{}_", today.replace('-', ""));
+        let mut max_counter: u32 = 0;
+
+        // Check today's daily log
+        let daily_dir = self.memory_dir.join("daily");
+        let daily_path = daily_dir.join(format!("{}.md", today));
+
+        if daily_path.exists() {
+            if let Ok(content) = fs::read_to_string(&daily_path) {
+                for line in content.lines() {
+                    if let Some(id) = self.extract_grove_id(line) {
+                        if id.starts_with(&today_prefix) {
+                            // Parse the counter from the ID (last 3 digits)
+                            if let Some(counter_str) = id.strip_prefix(&today_prefix) {
+                                if let Ok(counter) = counter_str.parse::<u32>() {
+                                    max_counter = max_counter.max(counter + 1);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        format!("cl_{}_{:03}", today.replace('-', ""), max_counter % 1000)
+    }
+}
+
+impl TotalRecallBackend {
+    /// Extract a grove ID from a line if present.
+    fn extract_grove_id(&self, line: &str) -> Option<String> {
+        let start = line.find(GROVE_ID_PREFIX)?;
+        let after_prefix = start + GROVE_ID_PREFIX.len();
+        let end = line[after_prefix..]
+            .find([')', ':', ' ', '\n'])
+            .map(|i| after_prefix + i)
+            .unwrap_or(line.len().min(after_prefix + MAX_ID_LENGTH));
+
+        if end > after_prefix {
+            Some(line[after_prefix..end].trim().to_string())
+        } else {
+            None
+        }
     }
 }
 
@@ -1172,5 +1284,170 @@ Tags: #performance #database | Confidence: High | Ticket: T001";
 
         assert_eq!(results.len(), 2);
         assert!(results[0].relevance > results[1].relevance);
+    }
+
+    // next_id tests
+
+    #[test]
+    fn test_next_id_starts_at_000_for_empty_backend() {
+        let temp = TempDir::new().unwrap();
+        let memory_dir = temp.path().join("memory");
+        fs::create_dir_all(&memory_dir).unwrap();
+
+        let backend = TotalRecallBackend::new(&memory_dir, temp.path());
+
+        let id = backend.next_id();
+
+        // Should be cl_YYYYMMDD_000
+        assert!(id.starts_with("cl_"));
+        assert!(id.ends_with("_000"));
+    }
+
+    #[test]
+    fn test_next_id_increments_after_write() {
+        let temp = TempDir::new().unwrap();
+        let memory_dir = temp.path().join("memory");
+        fs::create_dir_all(&memory_dir).unwrap();
+
+        let backend = TotalRecallBackend::new(&memory_dir, temp.path());
+
+        // Write a learning
+        let learning = sample_learning();
+        backend.write(&learning).unwrap();
+
+        // Next ID should be _001
+        let id = backend.next_id();
+        assert!(id.ends_with("_001"), "Expected _001, got {}", id);
+    }
+
+    #[test]
+    fn test_next_id_finds_highest_counter() {
+        let temp = TempDir::new().unwrap();
+        let memory_dir = temp.path().join("memory");
+        let daily_dir = memory_dir.join("daily");
+        fs::create_dir_all(&daily_dir).unwrap();
+
+        // Create a daily log with some existing entries
+        let today = Utc::now().format(DATE_FORMAT).to_string();
+        let today_ymd = today.replace('-', "");
+        let daily_path = daily_dir.join(format!("{}.md", today));
+
+        let content = format!(
+            r#"# {}
+
+## Learnings
+
+[10:00] **Pattern** (grove:cl_{}_002): First learning
+> Detail
+
+Tags: #test | Confidence: High
+
+[11:00] **Pattern** (grove:cl_{}_005): Second learning
+> Detail
+
+Tags: #test | Confidence: High
+"#,
+            today, today_ymd, today_ymd
+        );
+        fs::write(&daily_path, content).unwrap();
+
+        let backend = TotalRecallBackend::new(&memory_dir, temp.path());
+
+        // Next ID should be _006 (highest was 005)
+        let id = backend.next_id();
+        assert!(id.ends_with("_006"), "Expected _006, got {}", id);
+    }
+
+    // Timestamp parsing tests
+
+    #[test]
+    fn test_parse_entry_timestamp_from_id_and_time() {
+        let temp = TempDir::new().unwrap();
+        let memory_dir = temp.path().join("memory");
+        fs::create_dir_all(&memory_dir).unwrap();
+
+        let backend = TotalRecallBackend::new(&memory_dir, temp.path());
+
+        let entry = "[14:30] **Pattern** (grove:cl_20260210_001): Test summary
+> Test detail
+
+Tags: #test | Confidence: High";
+
+        let timestamp = backend.parse_entry_timestamp(entry, "cl_20260210_001");
+
+        // Should be 2026-02-10 14:30:00 UTC
+        assert_eq!(
+            timestamp.format("%Y-%m-%d %H:%M").to_string(),
+            "2026-02-10 14:30"
+        );
+    }
+
+    #[test]
+    fn test_parse_entry_timestamp_defaults_for_missing() {
+        let temp = TempDir::new().unwrap();
+        let memory_dir = temp.path().join("memory");
+        fs::create_dir_all(&memory_dir).unwrap();
+
+        let backend = TotalRecallBackend::new(&memory_dir, temp.path());
+
+        // Entry without timestamp prefix
+        let entry = "**Pattern** (grove:cl_20260210_001): Test summary";
+
+        let timestamp = backend.parse_entry_timestamp(entry, "cl_20260210_001");
+
+        // Should still parse date from ID, time defaults to 00:00
+        assert_eq!(timestamp.format("%Y-%m-%d").to_string(), "2026-02-10");
+    }
+
+    #[test]
+    fn test_parse_grove_entry_includes_correct_timestamp() {
+        let temp = TempDir::new().unwrap();
+        let memory_dir = temp.path().join("memory");
+        fs::create_dir_all(&memory_dir).unwrap();
+
+        let backend = TotalRecallBackend::new(&memory_dir, temp.path());
+
+        let entry = "[16:45] **Pitfall** (grove:cl_20260215_003): Watch out for this
+> Important detail here
+
+Tags: #warning | Confidence: High";
+
+        let learning = backend.parse_grove_entry(entry).unwrap();
+
+        assert_eq!(learning.id, "cl_20260215_003");
+        assert_eq!(
+            learning.timestamp.format("%Y-%m-%d %H:%M").to_string(),
+            "2026-02-15 16:45"
+        );
+    }
+
+    // extract_grove_id tests
+
+    #[test]
+    fn test_extract_grove_id() {
+        let temp = TempDir::new().unwrap();
+        let memory_dir = temp.path().join("memory");
+        fs::create_dir_all(&memory_dir).unwrap();
+
+        let backend = TotalRecallBackend::new(&memory_dir, temp.path());
+
+        let line = "[10:00] **Pattern** (grove:cl_20260210_001): Summary";
+        let id = backend.extract_grove_id(line);
+
+        assert_eq!(id, Some("cl_20260210_001".to_string()));
+    }
+
+    #[test]
+    fn test_extract_grove_id_none_when_missing() {
+        let temp = TempDir::new().unwrap();
+        let memory_dir = temp.path().join("memory");
+        fs::create_dir_all(&memory_dir).unwrap();
+
+        let backend = TotalRecallBackend::new(&memory_dir, temp.path());
+
+        let line = "No grove ID here";
+        let id = backend.extract_grove_id(line);
+
+        assert!(id.is_none());
     }
 }

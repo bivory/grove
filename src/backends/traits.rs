@@ -66,6 +66,18 @@ pub trait MemoryBackend: Send + Sync {
         let results = self.search(&SearchQuery::new(), &SearchFilters::all())?;
         Ok(results.into_iter().map(|r| r.learning).collect())
     }
+
+    /// Generate a unique ID for a new learning.
+    ///
+    /// The backend scans its existing entries to find the next available
+    /// counter for today's date, ensuring no ID collisions.
+    ///
+    /// Format: `cl_YYYYMMDD_NNN` where NNN is a zero-padded counter.
+    fn next_id(&self) -> String {
+        // Default implementation uses a simple counter
+        // Backends should override to scan existing entries
+        crate::core::generate_learning_id()
+    }
 }
 
 /// Blanket implementation for boxed trait objects.
@@ -98,6 +110,10 @@ impl MemoryBackend for Box<dyn MemoryBackend> {
 
     fn list_all(&self) -> Result<Vec<crate::core::CompoundLearning>> {
         (**self).list_all()
+    }
+
+    fn next_id(&self) -> String {
+        (**self).next_id()
     }
 }
 

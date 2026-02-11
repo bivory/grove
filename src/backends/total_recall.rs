@@ -631,16 +631,43 @@ impl TotalRecallBackend {
             .lines()
             .find(|line| line.contains(LABEL_TAGS))
             .map(|line| {
-                line.split(LABEL_TAGS)
-                    .nth(1)
-                    .unwrap_or("")
-                    .split('|')
-                    .next()
-                    .unwrap_or("")
+                let tag_content = line.split(LABEL_TAGS).nth(1);
+                if tag_content.is_none() {
+                    warn!(
+                        "Learning {}: Tags: line found but no content after label",
+                        grove_id
+                    );
+                    return vec![];
+                }
+                let tag_content = tag_content.unwrap().trim();
+                if tag_content.is_empty() {
+                    warn!(
+                        "Learning {}: Tags: line found but empty after label",
+                        grove_id
+                    );
+                    return vec![];
+                }
+                // Split by "|" in case there's a separator for other metadata
+                let tag_section = tag_content.split('|').next().unwrap_or("").trim();
+                if tag_section.is_empty() {
+                    warn!(
+                        "Learning {}: Tags: content is empty after separator",
+                        grove_id
+                    );
+                    return vec![];
+                }
+                let parsed_tags: Vec<String> = tag_section
                     .split_whitespace()
                     .filter_map(|t| t.strip_prefix('#'))
                     .map(String::from)
-                    .collect::<Vec<_>>()
+                    .collect();
+                if parsed_tags.is_empty() && !tag_section.is_empty() {
+                    warn!(
+                        "Learning {}: Tags: line '{}' contains no valid #tag entries",
+                        grove_id, tag_section
+                    );
+                }
+                parsed_tags
             })
             .unwrap_or_default();
 
@@ -1539,5 +1566,83 @@ Tags: #warning | Confidence: High";
         let id = backend.extract_grove_id(line);
 
         assert!(id.is_none());
+    }
+
+    #[test]
+    fn test_parse_entry_tags_valid() {
+        let temp = TempDir::new().unwrap();
+        let memory_dir = temp.path().join("memory");
+        fs::create_dir_all(&memory_dir).unwrap();
+
+        let backend = TotalRecallBackend::new(&memory_dir, temp.path());
+
+        let entry = r#"### [10:30] Pattern (grove:cl_20260211_001): Test summary
+> Some detail
+Tags: #api #performance | Confidence: High"#;
+
+        let learning = backend.parse_grove_entry(entry);
+        assert!(learning.is_some());
+        let learning = learning.unwrap();
+        assert_eq!(learning.tags, vec!["api", "performance"]);
+    }
+
+    #[test]
+    fn test_parse_entry_tags_empty_after_label() {
+        let temp = TempDir::new().unwrap();
+        let memory_dir = temp.path().join("memory");
+        fs::create_dir_all(&memory_dir).unwrap();
+
+        let backend = TotalRecallBackend::new(&memory_dir, temp.path());
+
+        // Tags: with nothing after it
+        let entry = r#"### [10:30] Pattern (grove:cl_20260211_001): Test summary
+> Some detail
+Tags:"#;
+
+        let learning = backend.parse_grove_entry(entry);
+        assert!(learning.is_some());
+        let learning = learning.unwrap();
+        // Tags should be empty, warning should be emitted
+        assert!(learning.tags.is_empty());
+    }
+
+    #[test]
+    fn test_parse_entry_tags_no_hash_prefix() {
+        let temp = TempDir::new().unwrap();
+        let memory_dir = temp.path().join("memory");
+        fs::create_dir_all(&memory_dir).unwrap();
+
+        let backend = TotalRecallBackend::new(&memory_dir, temp.path());
+
+        // Tags without # prefix should not be parsed as tags
+        let entry = r#"### [10:30] Pattern (grove:cl_20260211_001): Test summary
+> Some detail
+Tags: api performance | Confidence: High"#;
+
+        let learning = backend.parse_grove_entry(entry);
+        assert!(learning.is_some());
+        let learning = learning.unwrap();
+        // Tags should be empty since they don't have # prefix
+        assert!(learning.tags.is_empty());
+    }
+
+    #[test]
+    fn test_parse_entry_tags_mixed_valid_invalid() {
+        let temp = TempDir::new().unwrap();
+        let memory_dir = temp.path().join("memory");
+        fs::create_dir_all(&memory_dir).unwrap();
+
+        let backend = TotalRecallBackend::new(&memory_dir, temp.path());
+
+        // Mix of valid and invalid tags
+        let entry = r#"### [10:30] Pattern (grove:cl_20260211_001): Test summary
+> Some detail
+Tags: #api invalid #performance | Confidence: High"#;
+
+        let learning = backend.parse_grove_entry(entry);
+        assert!(learning.is_some());
+        let learning = learning.unwrap();
+        // Only valid tags should be parsed
+        assert_eq!(learning.tags, vec!["api", "performance"]);
     }
 }

@@ -182,6 +182,9 @@ impl MarkdownBackend {
     }
 
     /// Write all learnings to a file (used for status updates).
+    ///
+    /// Uses atomic writes via temp file + rename pattern to prevent data
+    /// corruption if the process crashes mid-write.
     fn write_all_learnings(&self, path: &Path, learnings: &[CompoundLearning]) -> Result<()> {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent).map_err(|e| {
@@ -193,21 +196,51 @@ impl MarkdownBackend {
             })?;
         }
 
-        let mut file = OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .open(path)
-            .map_err(|e| {
-                GroveError::backend(format!("Failed to open {}: {}", path.display(), e))
-            })?;
-
+        // Build the complete content first
+        let mut content = String::new();
         for learning in learnings {
-            let markdown = format_learning_as_markdown(learning);
-            file.write_all(markdown.as_bytes()).map_err(|e| {
-                GroveError::backend(format!("Failed to write to {}: {}", path.display(), e))
+            content.push_str(&format_learning_as_markdown(learning));
+        }
+
+        // Write atomically using temp file + rename
+        let temp_path = path.with_extension("md.tmp");
+
+        // Write to temp file
+        {
+            let mut file = fs::File::create(&temp_path).map_err(|e| {
+                GroveError::backend(format!(
+                    "Failed to create temp file {}: {}",
+                    temp_path.display(),
+                    e
+                ))
+            })?;
+            file.write_all(content.as_bytes()).map_err(|e| {
+                GroveError::backend(format!(
+                    "Failed to write to temp file {}: {}",
+                    temp_path.display(),
+                    e
+                ))
+            })?;
+            file.sync_all().map_err(|e| {
+                GroveError::backend(format!(
+                    "Failed to sync temp file {}: {}",
+                    temp_path.display(),
+                    e
+                ))
             })?;
         }
+
+        // Rename temp file to final path (atomic on POSIX)
+        fs::rename(&temp_path, path).map_err(|e| {
+            // Clean up temp file on rename failure
+            let _ = fs::remove_file(&temp_path);
+            GroveError::backend(format!(
+                "Failed to rename {} to {}: {}",
+                temp_path.display(),
+                path.display(),
+                e
+            ))
+        })?;
 
         Ok(())
     }
@@ -1178,6 +1211,64 @@ mod tests {
 
         let result = backend.archive("nonexistent");
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_atomic_write_no_temp_file_left() {
+        let temp = TempDir::new().unwrap();
+        let path = temp.path().join(".grove").join("learnings.md");
+        let backend = MarkdownBackend::new(&path);
+
+        // Write a learning
+        let mut learning = sample_learning();
+        learning.id = backend.next_id();
+        backend.write(&learning).unwrap();
+
+        // Archive it (this uses write_all_learnings internally)
+        backend.archive(&learning.id).unwrap();
+
+        // Verify the temp file doesn't exist
+        let temp_path = path.with_extension("md.tmp");
+        assert!(!temp_path.exists(), "Temp file should be cleaned up");
+
+        // Verify the final file exists and is valid
+        assert!(path.exists());
+        let parsed = backend.parse_learnings().unwrap();
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[0].status, LearningStatus::Archived);
+    }
+
+    #[test]
+    fn test_write_all_learnings_preserves_data_integrity() {
+        let temp = TempDir::new().unwrap();
+        let path = temp.path().join(".grove").join("learnings.md");
+        let backend = MarkdownBackend::new(&path);
+
+        // Write multiple learnings
+        let mut learning1 = sample_learning();
+        learning1.id = backend.next_id();
+        learning1.summary = "First learning summary".to_string();
+        backend.write(&learning1).unwrap();
+
+        let mut learning2 = sample_learning();
+        learning2.id = backend.next_id();
+        learning2.summary = "Second learning summary".to_string();
+        backend.write(&learning2).unwrap();
+
+        // Archive the first one (triggers write_all_learnings)
+        backend.archive(&learning1.id).unwrap();
+
+        // Verify both learnings are preserved with correct data
+        let parsed = backend.parse_learnings().unwrap();
+        assert_eq!(parsed.len(), 2);
+
+        let first = parsed.iter().find(|l| l.id == learning1.id).unwrap();
+        let second = parsed.iter().find(|l| l.id == learning2.id).unwrap();
+
+        assert_eq!(first.summary, "First learning summary");
+        assert_eq!(first.status, LearningStatus::Archived);
+        assert_eq!(second.summary, "Second learning summary");
+        assert_eq!(second.status, LearningStatus::Active);
     }
 
     // Ping test

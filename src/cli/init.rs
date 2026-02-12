@@ -70,9 +70,9 @@ const DEFAULT_CONFIG: &str = r#"# Grove Configuration
 discovery = ["tissue", "beads", "tasks", "session"]
 
 # Memory backend discovery order
-# Options: total-recall, mcp, markdown
+# Options: total-recall, markdown
 [backends]
-discovery = ["total-recall", "mcp", "markdown"]
+discovery = ["total-recall", "markdown"]
 
 # Auto-skip settings for trivial changes
 # decider: "agent" (default), "always", or "never"

@@ -3,13 +3,10 @@
 //! Probes the project directory to detect available memory backends.
 //! The discovery order is configurable via the Grove config file.
 //!
-//! Supported backends (Stage 1):
+//! Supported backends:
 //! - **config**: Explicit backend declared in `.grove/config.toml`
-//! - **markdown**: Built-in fallback (always available)
-//!
-//! Stage 2 backends (not yet implemented):
 //! - **total-recall**: Total Recall memory system
-//! - **mcp**: MCP memory server
+//! - **markdown**: Built-in fallback (always available)
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -26,10 +23,8 @@ use crate::error::Result;
 pub enum BackendType {
     /// Explicit configuration from `.grove/config.toml`.
     Config,
-    /// Total Recall memory system (Stage 2).
+    /// Total Recall memory system.
     TotalRecall,
-    /// MCP memory server (Stage 2).
-    Mcp,
     /// Built-in markdown backend (always available).
     Markdown,
 }
@@ -40,7 +35,6 @@ impl BackendType {
         match self {
             Self::Config => "config",
             Self::TotalRecall => "total-recall",
-            Self::Mcp => "mcp",
             Self::Markdown => "markdown",
         }
     }
@@ -50,7 +44,6 @@ impl BackendType {
         match s.to_lowercase().as_str() {
             "config" => Some(Self::Config),
             "total-recall" | "totalrecall" | "total_recall" => Some(Self::TotalRecall),
-            "mcp" => Some(Self::Mcp),
             "markdown" | "md" => Some(Self::Markdown),
             _ => None,
         }
@@ -144,7 +137,6 @@ fn probe_backend(cwd: &Path, backend_type: BackendType) -> Option<BackendInfo> {
     match backend_type {
         BackendType::Config => probe_config(cwd),
         BackendType::TotalRecall => probe_total_recall(cwd),
-        BackendType::Mcp => probe_mcp(cwd),
         BackendType::Markdown => probe_markdown(cwd),
     }
 }
@@ -196,15 +188,6 @@ fn probe_total_recall(cwd: &Path) -> Option<BackendInfo> {
     } else {
         None
     }
-}
-
-/// Probe for MCP memory server.
-///
-/// Stage 2 implementation - currently returns None.
-fn probe_mcp(_cwd: &Path) -> Option<BackendInfo> {
-    // MCP detection deferred to Stage 2
-    // Would check for MCP server registration
-    None
 }
 
 /// Probe for the built-in markdown backend.
@@ -303,8 +286,7 @@ pub fn create_primary_backend(cwd: &Path, config: Option<&Config>) -> Box<dyn Me
                 let md_backend = Box::new(MarkdownBackend::new(&md_path));
                 Box::new(FallbackBackend::new(tr_backend, md_backend))
             }
-            BackendType::Config | BackendType::Mcp => {
-                // MCP support is Stage 2, falls back to markdown
+            BackendType::Config => {
                 // Config should no longer be returned by probe_config (it returns the actual type)
                 // but kept for exhaustiveness and future compatibility
                 let path = project_learnings_path(cwd);
@@ -335,7 +317,6 @@ mod tests {
     fn test_backend_type_as_str() {
         assert_eq!(BackendType::Config.as_str(), "config");
         assert_eq!(BackendType::TotalRecall.as_str(), "total-recall");
-        assert_eq!(BackendType::Mcp.as_str(), "mcp");
         assert_eq!(BackendType::Markdown.as_str(), "markdown");
     }
 
@@ -354,7 +335,6 @@ mod tests {
             BackendType::parse("total_recall"),
             Some(BackendType::TotalRecall)
         );
-        assert_eq!(BackendType::parse("mcp"), Some(BackendType::Mcp));
         assert_eq!(BackendType::parse("markdown"), Some(BackendType::Markdown));
         assert_eq!(BackendType::parse("md"), Some(BackendType::Markdown));
         assert_eq!(BackendType::parse("unknown"), None);
@@ -402,8 +382,8 @@ mod tests {
 
     #[test]
     fn test_backend_info_no_path() {
-        let info = BackendInfo::new(BackendType::Mcp, None, false);
-        assert_eq!(info.backend_type, BackendType::Mcp);
+        let info = BackendInfo::new(BackendType::Config, None, false);
+        assert_eq!(info.backend_type, BackendType::Config);
         assert!(info.path.is_none());
         assert!(!info.is_primary);
     }
@@ -506,18 +486,6 @@ mod tests {
         let dir = TempDir::new().unwrap();
 
         let result = probe_total_recall(dir.path());
-
-        assert!(result.is_none());
-    }
-
-    // probe_mcp tests
-
-    #[test]
-    fn test_probe_mcp_returns_none() {
-        let dir = TempDir::new().unwrap();
-
-        // Stage 2: always returns None
-        let result = probe_mcp(dir.path());
 
         assert!(result.is_none());
     }

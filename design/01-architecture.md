@@ -30,7 +30,7 @@ flowchart TB
 | **Hook Runner** | Receives hook events from Claude Code, dispatches to core |
 | **Core Logic** | Gate state machine, reflection orchestration, write gate filter |
 | **Discovery** | Ticketing system and memory backend auto-detection |
-| **Backend Adapters** | Uniform interface over built-in markdown, Total Recall, MCP |
+| **Backend Adapters** | Uniform interface over built-in markdown and Total Recall |
 | **Stats Engine** | Usage tracking, decay evaluation, retrieval scoring, insights |
 | **Session Storage** | Per-session state persistence |
 
@@ -45,7 +45,6 @@ flowchart TB
 | **Backend Discovery** | Detecting which memory backends are available |
 | **Backend: Markdown** | Built-in append-only file storage |
 | **Backend: Total Recall** | Adapter routing through Total Recall's commands |
-| **Backend: MCP** | Adapter routing through MCP memory server |
 | **Stats: Tracking** | Per-learning and per-reflection usage counters |
 | **Stats: Decay** | Passive decay evaluation and archival |
 | **Stats: Scoring** | Composite retrieval scoring for injection ranking |
@@ -173,7 +172,7 @@ classDiagram
 **Scope routing** is a core logic responsibility, not a backend concern.
 Core logic inspects the learning's scope and selects the appropriate
 storage target. Project and Team scope route to the configured backend
-(markdown, Total Recall, or MCP). Personal scope always routes to the
+(markdown or Total Recall). Personal scope always routes to the
 local personal learnings file. Ephemeral scope routes to the daily log
 (if Total Recall is active) or is discarded. Backends receive learnings
 and write them — they don't make routing decisions.
@@ -342,18 +341,15 @@ flowchart TD
     B -->|Yes| C[Use configured backend]
     B -->|No| D{Total Recall detected?}
     D -->|Yes| E[Total Recall active]
-    D -->|No| F{MCP memory server?}
-    F -->|Yes| G[MCP active]
-    F -->|No| H[Built-in markdown]
+    D -->|No| F[Built-in markdown]
 ```
 
-Default discovery order: `config → total-recall → mcp → markdown`
+Default discovery order: `config → total-recall → markdown`
 
 | Backend | Detection |
 |---------|-----------|
 | Config explicit | `.grove/config.toml` declares a backend |
 | Total Recall | `memory/` directory + `rules/total-recall.md` exists |
-| MCP | MCP server with memory-compatible tools is registered |
 | Markdown | Always available (built-in fallback) |
 
 Multiple backends can be active simultaneously. Learnings route by scope.
@@ -966,7 +962,6 @@ When Total Recall is the active backend:
 |---------|---------------------|
 | **Markdown** | Parse `.grove/learnings.md`, match tags against query tags (exact match = 1.0, partial = 0.5), match file paths against `context_files` (overlap = 0.8), keyword substring match against summary and detail (0.3). Return all matches with relevance scores. |
 | **Total Recall** | Read daily logs (last 14 days) and registers directly, filtering for `grove:` prefixed entries. Match query terms against content. Grove applies its own composite scoring. Note: search results may be partial (not all learning metadata is preserved in Total Recall's format). |
-| **MCP** | Invoke the MCP server's search tool. Relevance scoring handled by the server. |
 
 The `query` parameter is a structured object containing available context:
 ticket title, ticket description, file paths from the current diff, and
@@ -982,7 +977,6 @@ The `filters` parameter supports: `status` (active only by default),
 |---------|---------|----------|
 | **Markdown** | `.grove/learnings.md` | Default, no dependencies |
 | **Total Recall** | `memory/daily/*.md` | Projects using Total Recall for memory |
-| **MCP** | External server | Custom or shared memory systems |
 | **In-Memory** | None (ephemeral) | Testing only |
 
 **Total Recall specifics:**
@@ -1012,7 +1006,7 @@ no config exists.
 |---------|-----|---------|-------------|
 | ticketing | discovery | `[tissue, beads, tasks, session]` | Ordered probe list |
 | ticketing | overrides | `{}` | Per-system enable/disable |
-| backends | discovery | `[config, total-recall, mcp, markdown]` | Ordered probe list |
+| backends | discovery | `[config, total-recall, markdown]` | Ordered probe list |
 | backends | overrides | `{}` | Per-backend enable/disable |
 | gate | auto_skip.enabled | `true` | Allow auto-skip for trivial changes |
 | gate | auto_skip.line_threshold | `5` | Diff size below which auto-skip applies |

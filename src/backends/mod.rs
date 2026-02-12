@@ -6,7 +6,6 @@
 //! Available backends:
 //! - **Markdown**: Built-in append-only markdown file backend (default)
 //! - **Total Recall**: Adapter for Total Recall memory system
-//! - **MCP**: Adapter for MCP memory servers
 //! - **Fallback**: Wrapper that tries primary, falls back to secondary on failure
 
 pub mod fallback;

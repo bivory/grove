@@ -2,7 +2,7 @@
 //!
 //! This module handles auto-detection of:
 //! - Ticketing systems (tissue, beads, tasks, session)
-//! - Memory backends (markdown, total-recall, mcp)
+//! - Memory backends (markdown, total-recall)
 //!
 //! Discovery order is configurable via the Grove config file.
 //! Individual systems can be enabled or disabled via overrides.

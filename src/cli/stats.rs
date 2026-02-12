@@ -10,7 +10,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::config::{project_stats_log_path, stats_cache_path, Config};
-use crate::core::{LearningCategory, WriteGateCriterion};
+use crate::discovery::create_primary_backend;
 use crate::stats::{
     generate_insights, AggregateStats, Insight, InsightConfig, ReflectionStats, StatsCache,
     StatsCacheManager, WriteGateStats,
@@ -306,12 +306,34 @@ impl StatsCommand {
             .filter_map(|(id, stats)| stats.last_surfaced.map(|ts| (id.clone(), ts)))
             .collect();
 
-        // Note: learning_categories, learning_criteria, and learning_context_files
-        // would need to be loaded from the backend to enable full insights.
-        // For now, pass empty maps.
-        let learning_categories: HashMap<String, LearningCategory> = HashMap::new();
-        let learning_criteria: HashMap<String, Vec<WriteGateCriterion>> = HashMap::new();
-        let learning_context_files: HashMap<String, Vec<String>> = HashMap::new();
+        // Load learning metadata from backend for full insights
+        let backend = create_primary_backend(&self.project_path, Some(&self.config));
+        let (learning_categories, learning_criteria, learning_context_files) =
+            match backend.list_all() {
+                Ok(learnings) => {
+                    let mut categories = HashMap::new();
+                    let mut criteria = HashMap::new();
+                    let mut context_files = HashMap::new();
+
+                    for learning in learnings {
+                        categories.insert(learning.id.clone(), learning.category);
+                        criteria.insert(learning.id.clone(), learning.criteria_met.clone());
+                        if let Some(files) = learning.context_files {
+                            context_files.insert(learning.id, files);
+                        }
+                    }
+
+                    (categories, criteria, context_files)
+                }
+                Err(e) => {
+                    // Fail-open: log warning but continue with empty maps
+                    warnings.push(format!(
+                        "Could not load learning metadata for insights: {}",
+                        e
+                    ));
+                    (HashMap::new(), HashMap::new(), HashMap::new())
+                }
+            };
 
         let insight_config = InsightConfig::default();
         let decay_config = &self.config.decay;

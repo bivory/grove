@@ -1,8 +1,8 @@
 //! Memory backend trait for Grove.
 //!
 //! This module defines the trait interface for memory backends that store
-//! and retrieve compound learnings. Backends include markdown files,
-//! Total Recall, and MCP memory servers.
+//! and retrieve compound learnings. Backends include markdown files and
+//! Total Recall.
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -12,8 +12,8 @@ use crate::error::Result;
 
 /// Trait for memory backends that store and retrieve learnings.
 ///
-/// Backends can be file-based (markdown), external (Total Recall),
-/// or server-based (MCP). All backends must be thread-safe.
+/// Backends can be file-based (markdown) or external (Total Recall).
+/// All backends must be thread-safe.
 pub trait MemoryBackend: Send + Sync {
     /// Write a learning to the backend.
     ///
@@ -29,7 +29,6 @@ pub trait MemoryBackend: Send + Sync {
     /// varies by backend:
     /// - Markdown: tag match (1.0), partial match (0.5), file overlap (0.8), keyword (0.3)
     /// - Total Recall: delegates to Total Recall's scoring
-    /// - MCP: delegates to the server's scoring
     fn search(&self, query: &SearchQuery, filters: &SearchFilters) -> Result<Vec<SearchResult>>;
 
     /// Health check for the backend.

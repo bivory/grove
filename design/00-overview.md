@@ -17,7 +17,7 @@ implements it as a Rust CLI with mechanical enforcement via hooks.
 |---------|-------------|
 | **Learning gate** | Mechanical enforcement via Stop hook, not prompts |
 | **Structured reflection** | Categorized extraction of learnings, not freeform |
-| **Pluggable memory** | Backend interface for storage (built-in, Total Recall, MCP) |
+| **Pluggable memory** | Backend interface for storage (built-in, Total Recall) |
 | **Ticket-driven** | Gate fires per-ticket, with auto-discovery of ticketing systems |
 | **Quality tracking** | Stats on every learning and decision, shared with team |
 

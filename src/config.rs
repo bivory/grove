@@ -72,11 +72,7 @@ pub struct BackendsConfig {
 impl Default for BackendsConfig {
     fn default() -> Self {
         Self {
-            discovery: vec![
-                "total-recall".to_string(),
-                "mcp".to_string(),
-                "markdown".to_string(),
-            ],
+            discovery: vec!["total-recall".to_string(), "markdown".to_string()],
             overrides: HashMap::new(),
         }
     }
@@ -627,10 +623,7 @@ mod tests {
         assert!(config.ticketing.overrides.is_empty());
 
         // Backends defaults
-        assert_eq!(
-            config.backends.discovery,
-            vec!["total-recall", "mcp", "markdown"]
-        );
+        assert_eq!(config.backends.discovery, vec!["total-recall", "markdown"]);
         assert!(config.backends.overrides.is_empty());
 
         // Gate defaults
@@ -837,14 +830,14 @@ beads = false
 discovery = ["markdown"]
 
 [backends.overrides]
-mcp = false
+total-recall = false
 "#;
         fs::write(&config_path, toml_content).unwrap();
 
         let config = Config::load_from_cwd(dir.path());
 
         assert_eq!(config.backends.discovery, vec!["markdown"]);
-        assert_eq!(config.backends.overrides.get("mcp"), Some(&false));
+        assert_eq!(config.backends.overrides.get("total-recall"), Some(&false));
     }
 
     #[test]

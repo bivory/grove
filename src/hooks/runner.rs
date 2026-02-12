@@ -6,17 +6,22 @@
 use std::io::{self, Read};
 use std::path::Path;
 
+use crate::backends::{SearchFilters, SearchQuery};
 use crate::config::{project_stats_log_path, Config};
 use crate::core::gate::Gate;
 use crate::core::state::{
     EventType, GateStatus, SessionState, SkipDecider, TicketCloseIntent, TicketContext,
 };
-use crate::discovery::{detect_backends, detect_ticketing_system, match_close_command};
+use crate::core::InjectedLearning;
+use crate::discovery::{
+    create_primary_backend, detect_backends, detect_ticketing_system, match_close_command,
+};
 use crate::error::{GroveError, Result};
 use crate::hooks::input::{
     parse_input, HookInput, PostToolUseInput, PreToolUseInput, SessionEndInput, TaskCompletedInput,
 };
 use crate::hooks::output::{PreToolUseOutput, SessionEndOutput, SessionStartOutput, StopOutput};
+use crate::stats::scoring::{recency_weight, reference_boost, CompositeScore, Strategy};
 use crate::stats::{StatsCacheManager, StatsLogger};
 use crate::storage::SessionStore;
 use tracing::warn;
@@ -137,15 +142,100 @@ impl<S: SessionStore> HookRunner<S> {
 
         // Search for relevant learnings and inject context
         let mut additional_context: Option<String> = None;
-        let injected_count = session.gate.injected_learnings.len();
 
-        // For now, we just record that we would inject learnings
-        // Full implementation requires backend search which is Stage 2
-        if injected_count > 0 {
-            session.add_trace(
-                EventType::LearningsInjected,
-                Some(format!("count: {}", injected_count)),
-            );
+        // Get retrieval settings from config
+        let max_injections = self.config.retrieval.max_injections;
+        let strategy = Strategy::parse(&self.config.retrieval.strategy).unwrap_or_default();
+
+        // Create primary backend and search for learnings
+        let backend = create_primary_backend(cwd, Some(&self.config));
+        let query = SearchQuery::new(); // Empty query matches all learnings
+        let filters = SearchFilters::active_only();
+
+        // Try to load stats cache for reference boost calculation
+        let stats_path = project_stats_log_path(cwd);
+        let cache_path = cwd.join(".grove").join("stats-cache.json");
+        let cache_manager = StatsCacheManager::new(&cache_path, &stats_path);
+        let cache = cache_manager.load_or_rebuild().ok();
+
+        // Search and score learnings
+        if let Ok(results) = backend.search(&query, &filters) {
+            let now = chrono::Utc::now();
+            let logger = StatsLogger::new(&stats_path);
+
+            // Build composite scores
+            let mut scored: Vec<CompositeScore> = results
+                .into_iter()
+                .map(|result| {
+                    // Get reference stats from cache
+                    let (surfaced, referenced) = cache
+                        .as_ref()
+                        .and_then(|c| c.learnings.get(&result.learning.id))
+                        .map(|stats| (stats.surfaced, stats.referenced))
+                        .unwrap_or((0, 0));
+
+                    let recency = recency_weight(result.learning.timestamp, now);
+                    let hit_rate = if surfaced == 0 {
+                        0.0
+                    } else {
+                        referenced as f64 / surfaced as f64
+                    };
+                    let ref_boost = reference_boost(hit_rate);
+
+                    CompositeScore::new(
+                        result.learning,
+                        result.relevance,
+                        recency,
+                        ref_boost,
+                        strategy,
+                    )
+                })
+                .collect();
+
+            // Sort by score descending
+            scored.sort_by(|a, b| {
+                b.score
+                    .partial_cmp(&a.score)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
+
+            // Take top N
+            let top_learnings: Vec<_> = scored.into_iter().take(max_injections as usize).collect();
+
+            if !top_learnings.is_empty() {
+                // Build injection context
+                let mut context_parts = Vec::new();
+                context_parts.push("## Relevant Learnings\n".to_string());
+                context_parts
+                    .push("The following learnings from past work may be relevant:\n".to_string());
+
+                for cs in &top_learnings {
+                    let learning = &cs.learning;
+                    context_parts.push(format!(
+                        "\n### {} [{}]\n**{}**\n{}\n",
+                        learning.category.display_name(),
+                        learning.id,
+                        learning.summary,
+                        learning.detail
+                    ));
+
+                    // Record surfaced event
+                    let _ = logger.append_surfaced(&learning.id, &session.id);
+
+                    // Add to session's injected learnings
+                    session
+                        .gate
+                        .injected_learnings
+                        .push(InjectedLearning::new(&learning.id, cs.score));
+                }
+
+                additional_context = Some(context_parts.join(""));
+
+                session.add_trace(
+                    EventType::LearningsInjected,
+                    Some(format!("count: {}", top_learnings.len())),
+                );
+            }
         }
 
         // Correction propagation: check for recently corrected learnings

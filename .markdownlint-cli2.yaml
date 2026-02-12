@@ -24,9 +24,11 @@ config:
   # Disable table column style - tables are readable without extra spacing
   MD060: false
 
-# Ignore generated files
+# Ignore generated files and local configs
 ignores:
   - "target/**"
   - "memory/**"
   - "node_modules/**"
   - ".grove/**"
+  - "CLAUDE.md"
+  - "CLAUDE.local.md"

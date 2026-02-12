@@ -61,7 +61,7 @@ echo '{"session_id":"test"}' \
 ### 1.3 Out of Scope
 
 - Mocking Claude Code itself
-- Testing external backend integrations (Total Recall, MCP) beyond interface conformance
+- Testing external backend integrations (Total Recall) beyond interface conformance
 - Performance benchmarking (deferred until real usage patterns emerge)
 
 ## 2. Test Categories

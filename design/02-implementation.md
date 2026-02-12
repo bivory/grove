@@ -29,8 +29,7 @@ grove/
 │   │   ├── mod.rs
 │   │   ├── traits.rs          # MemoryBackend trait
 │   │   ├── markdown.rs        # Built-in append-only markdown
-│   │   ├── total_recall.rs    # Total Recall adapter
-│   │   └── mcp.rs             # MCP memory server adapter
+│   │   └── total_recall.rs    # Total Recall adapter
 │   │
 │   ├── stats/
 │   │   ├── mod.rs
@@ -205,7 +204,6 @@ grove/
 |----------|--------|-------------|
 | `detect_backends` | `discovery/backends` | Probe in config order |
 | `probe_total_recall` | `discovery/backends` | Check for `memory/` + rules |
-| `probe_mcp` | `discovery/backends` | Check for MCP memory server |
 | `probe_markdown` | `discovery/backends` | Check for `.grove/learnings.md` |
 | `create_default_backend` | `discovery/backends` | Scaffold markdown backend |
 
@@ -476,16 +474,6 @@ This aligns with Total Recall's contradiction protocol.
 All errors follow fail-open philosophy: Grove continues operation
 with degraded functionality rather than blocking the user.
 
-### 4.4 MCP Adapter
-
-Routes through MCP memory server tools.
-
-| Function | Description |
-|----------|-------------|
-| `write` | Call MCP `memory_write` tool |
-| `search` | Call MCP `memory_search` tool |
-| `ping` | Call MCP health endpoint |
-
 ## 5. Hook Handlers
 
 ### 5.1 Session-Start Hook
@@ -625,7 +613,7 @@ the gate needs to be manually controlled.
 | Setting | Default |
 |---------|---------|
 | `ticketing.discovery` | `["tissue", "beads", "tasks", "session"]` |
-| `backends.discovery` | `["config", "total-recall", "mcp", "markdown"]` |
+| `backends.discovery` | `["config", "total-recall", "markdown"]` |
 | `gate.auto_skip.enabled` | `true` |
 | `gate.auto_skip.line_threshold` | `5` |
 | `gate.auto_skip.decider` | `"agent"` |

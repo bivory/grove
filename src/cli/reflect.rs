@@ -79,12 +79,23 @@ impl From<&RejectedCandidate> for RejectionInfo {
 
 impl ReflectOutput {
     /// Create a successful output.
+    ///
+    /// Note: `learnings_accepted` must equal `learning_ids.len()` as both represent
+    /// the count of learnings that were successfully written. This invariant is
+    /// enforced in debug builds.
     pub fn success(
         candidates_submitted: usize,
         learnings_accepted: usize,
         learning_ids: Vec<String>,
         rejected: Vec<RejectedCandidate>,
     ) -> Self {
+        debug_assert_eq!(
+            learnings_accepted,
+            learning_ids.len(),
+            "learnings_accepted ({}) must equal learning_ids.len() ({})",
+            learnings_accepted,
+            learning_ids.len()
+        );
         Self {
             success: true,
             candidates_submitted,
@@ -362,11 +373,12 @@ mod tests {
 
     #[test]
     fn test_reflect_output_success() {
-        let output = ReflectOutput::success(5, 3, vec!["L1".to_string(), "L2".to_string()], vec![]);
+        // Note: learnings_accepted must match learning_ids.len()
+        let output = ReflectOutput::success(5, 2, vec!["L1".to_string(), "L2".to_string()], vec![]);
 
         assert!(output.success);
         assert_eq!(output.candidates_submitted, 5);
-        assert_eq!(output.learnings_accepted, 3);
+        assert_eq!(output.learnings_accepted, 2);
         assert_eq!(output.learning_ids.len(), 2);
         assert!(output.rejected.is_empty());
         assert!(output.error.is_none());
@@ -381,6 +393,29 @@ mod tests {
         assert_eq!(output.learnings_accepted, 0);
         assert!(output.learning_ids.is_empty());
         assert_eq!(output.error, Some("test error".to_string()));
+    }
+
+    #[test]
+    fn test_reflect_output_invariant_learnings_accepted_equals_ids_len() {
+        // This test documents the invariant: learnings_accepted must equal learning_ids.len()
+        // Both represent the count of learnings that were successfully written to backend.
+
+        // Empty case
+        let output = ReflectOutput::success(0, 0, vec![], vec![]);
+        assert_eq!(output.learnings_accepted, output.learning_ids.len());
+
+        // Some accepted, some rejected (candidates_submitted > learnings_accepted)
+        let output = ReflectOutput::success(5, 2, vec!["L1".to_string(), "L2".to_string()], vec![]);
+        assert_eq!(output.learnings_accepted, output.learning_ids.len());
+
+        // All accepted
+        let output = ReflectOutput::success(
+            3,
+            3,
+            vec!["L1".to_string(), "L2".to_string(), "L3".to_string()],
+            vec![],
+        );
+        assert_eq!(output.learnings_accepted, output.learning_ids.len());
     }
 
     #[test]

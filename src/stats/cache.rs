@@ -588,7 +588,11 @@ impl StatsCacheManager {
     }
 
     /// Save the cache to disk.
+    ///
+    /// Uses atomic write pattern (temp file + rename) to prevent corruption on crash.
     pub fn save(&self, cache: &StatsCache) -> Result<()> {
+        use std::io::Write;
+
         // Ensure parent directory exists
         if let Some(parent) = self.cache_path.parent() {
             fs::create_dir_all(parent).map_err(|e| {
@@ -603,9 +607,35 @@ impl StatsCacheManager {
         let content = serde_json::to_string_pretty(cache)
             .map_err(|e| GroveError::serde(format!("Failed to serialize cache: {}", e)))?;
 
-        fs::write(&self.cache_path, content).map_err(|e| {
+        // Write atomically using temp file + rename pattern for durability
+        let temp_path = self.cache_path.with_extension("json.tmp");
+        {
+            let mut file = fs::File::create(&temp_path).map_err(|e| {
+                GroveError::backend(format!(
+                    "Failed to create temp file {}: {}",
+                    temp_path.display(),
+                    e
+                ))
+            })?;
+            file.write_all(content.as_bytes()).map_err(|e| {
+                GroveError::backend(format!(
+                    "Failed to write temp file {}: {}",
+                    temp_path.display(),
+                    e
+                ))
+            })?;
+            file.sync_all().map_err(|e| {
+                GroveError::backend(format!(
+                    "Failed to sync temp file {}: {}",
+                    temp_path.display(),
+                    e
+                ))
+            })?;
+        }
+        fs::rename(&temp_path, &self.cache_path).map_err(|e| {
             GroveError::backend(format!(
-                "Failed to write cache {}: {}",
+                "Failed to rename {} to {}: {}",
+                temp_path.display(),
                 self.cache_path.display(),
                 e
             ))
@@ -1279,6 +1309,77 @@ mod tests {
 
         assert_eq!(cache.log_entries_processed, parsed.log_entries_processed);
         assert_eq!(cache.learnings.len(), parsed.learnings.len());
+    }
+
+    // =========================================================================
+    // CacheManager atomic write tests
+    // =========================================================================
+
+    #[test]
+    fn test_cache_save_atomic_no_temp_file_left() {
+        let temp = TempDir::new().unwrap();
+        let log_path = temp.path().join(".grove/stats.log");
+        let cache_path = temp.path().join(".grove/stats-cache.json");
+        fs::create_dir_all(temp.path().join(".grove")).unwrap();
+
+        let manager = StatsCacheManager::new(&cache_path, &log_path);
+        let cache = StatsCache::default();
+
+        manager.save(&cache).unwrap();
+
+        // Verify no temp file exists
+        let temp_file_path = cache_path.with_extension("json.tmp");
+        assert!(
+            !temp_file_path.exists(),
+            "Temp file should be cleaned up after atomic save"
+        );
+
+        // Verify cache file was created
+        assert!(cache_path.exists());
+    }
+
+    #[test]
+    fn test_cache_save_load_roundtrip() {
+        let temp = TempDir::new().unwrap();
+        let log_path = temp.path().join(".grove/stats.log");
+        let cache_path = temp.path().join(".grove/stats-cache.json");
+        fs::create_dir_all(temp.path().join(".grove")).unwrap();
+
+        let manager = StatsCacheManager::new(&cache_path, &log_path);
+
+        let mut cache = StatsCache::default();
+        cache.log_entries_processed = 42;
+        cache.reflections.completed = 5;
+
+        manager.save(&cache).unwrap();
+
+        let loaded = manager.load().unwrap().unwrap();
+        assert_eq!(loaded.log_entries_processed, 42);
+        assert_eq!(loaded.reflections.completed, 5);
+    }
+
+    #[test]
+    fn test_cache_save_overwrites_previous() {
+        let temp = TempDir::new().unwrap();
+        let log_path = temp.path().join(".grove/stats.log");
+        let cache_path = temp.path().join(".grove/stats-cache.json");
+        fs::create_dir_all(temp.path().join(".grove")).unwrap();
+
+        let manager = StatsCacheManager::new(&cache_path, &log_path);
+
+        // First save
+        let mut cache1 = StatsCache::default();
+        cache1.log_entries_processed = 10;
+        manager.save(&cache1).unwrap();
+
+        // Second save
+        let mut cache2 = StatsCache::default();
+        cache2.log_entries_processed = 20;
+        manager.save(&cache2).unwrap();
+
+        // Should have the latest value
+        let loaded = manager.load().unwrap().unwrap();
+        assert_eq!(loaded.log_entries_processed, 20);
     }
 
     // =========================================================================

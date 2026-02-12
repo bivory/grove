@@ -15,7 +15,7 @@
 //! Format constants are centralized in [`super::total_recall_format`] to simplify
 //! updates if Total Recall changes its format.
 
-use std::fs::{self, OpenOptions};
+use std::fs;
 use std::io::Write as IoWrite;
 use std::path::{Path, PathBuf};
 
@@ -170,6 +170,8 @@ impl TotalRecallBackend {
     }
 
     /// Write a learning directly to the personal file (bypasses Total Recall).
+    ///
+    /// Uses atomic write pattern (temp file + rename) to prevent corruption on crash.
     fn write_to_personal(&self, learning: &CompoundLearning) -> Result<WriteResult> {
         // Ensure parent directory exists
         if let Some(parent) = self.personal_path.parent() {
@@ -185,22 +187,49 @@ impl TotalRecallBackend {
         // Format as markdown (reuse formatting logic)
         let markdown = self.format_personal_learning(learning);
 
-        // Append to file
-        let mut file = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&self.personal_path)
-            .map_err(|e| {
+        // Read existing content (if any) and append new content
+        let mut content = if self.personal_path.exists() {
+            fs::read_to_string(&self.personal_path).map_err(|e| {
                 crate::error::GroveError::backend(format!(
-                    "Failed to open {}: {}",
+                    "Failed to read {}: {}",
                     self.personal_path.display(),
                     e
                 ))
-            })?;
+            })?
+        } else {
+            String::new()
+        };
+        content.push_str(&markdown);
 
-        file.write_all(markdown.as_bytes()).map_err(|e| {
+        // Write atomically using temp file + rename pattern for durability
+        let temp_path = self.personal_path.with_extension("md.tmp");
+        {
+            let mut file = fs::File::create(&temp_path).map_err(|e| {
+                crate::error::GroveError::backend(format!(
+                    "Failed to create temp file {}: {}",
+                    temp_path.display(),
+                    e
+                ))
+            })?;
+            file.write_all(content.as_bytes()).map_err(|e| {
+                crate::error::GroveError::backend(format!(
+                    "Failed to write temp file {}: {}",
+                    temp_path.display(),
+                    e
+                ))
+            })?;
+            file.sync_all().map_err(|e| {
+                crate::error::GroveError::backend(format!(
+                    "Failed to sync temp file {}: {}",
+                    temp_path.display(),
+                    e
+                ))
+            })?;
+        }
+        fs::rename(&temp_path, &self.personal_path).map_err(|e| {
             crate::error::GroveError::backend(format!(
-                "Failed to write to {}: {}",
+                "Failed to rename {} to {}: {}",
+                temp_path.display(),
                 self.personal_path.display(),
                 e
             ))
@@ -1253,6 +1282,66 @@ Tags: #performance #database | Confidence: High | Ticket: T001";
         let content = fs::read_to_string(&personal_path).unwrap();
         assert!(content.contains(&format!("{}{}", GROVE_ID_PREFIX, learning.id)));
         assert!(content.contains("Avoid N+1 queries"));
+    }
+
+    #[test]
+    fn test_personal_write_atomic_no_temp_file_left() {
+        let temp = TempDir::new().unwrap();
+        let memory_dir = temp.path().join("memory");
+        let personal_path = temp.path().join("personal-learnings.md");
+        fs::create_dir_all(&memory_dir).unwrap();
+
+        let backend = TotalRecallBackend::with_paths(&memory_dir, &personal_path, temp.path());
+
+        let mut learning = sample_learning();
+        learning.scope = LearningScope::Personal;
+
+        let result = backend.write(&learning).unwrap();
+        assert!(result.success);
+
+        // Verify no temp file exists
+        let temp_path = personal_path.with_extension("md.tmp");
+        assert!(
+            !temp_path.exists(),
+            "Temp file should be cleaned up after atomic write"
+        );
+    }
+
+    #[test]
+    fn test_personal_write_multiple_appends_all_persist() {
+        let temp = TempDir::new().unwrap();
+        let memory_dir = temp.path().join("memory");
+        let personal_path = temp.path().join("personal-learnings.md");
+        fs::create_dir_all(&memory_dir).unwrap();
+
+        let backend = TotalRecallBackend::with_paths(&memory_dir, &personal_path, temp.path());
+
+        // Write first learning
+        let mut learning1 = sample_learning();
+        learning1.id = "L001".to_string();
+        learning1.scope = LearningScope::Personal;
+        learning1.summary = "First learning".to_string();
+        backend.write(&learning1).unwrap();
+
+        // Write second learning
+        let mut learning2 = sample_learning();
+        learning2.id = "L002".to_string();
+        learning2.scope = LearningScope::Personal;
+        learning2.summary = "Second learning".to_string();
+        backend.write(&learning2).unwrap();
+
+        // Both should be in the file
+        let content = fs::read_to_string(&personal_path).unwrap();
+        assert!(
+            content.contains("L001"),
+            "First learning should persist after second write"
+        );
+        assert!(
+            content.contains("L002"),
+            "Second learning should be in file"
+        );
+        assert!(content.contains("First learning"));
+        assert!(content.contains("Second learning"));
     }
 
     #[test]

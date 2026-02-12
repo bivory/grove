@@ -136,12 +136,19 @@ impl<'a> Gate<'a> {
             )));
         }
 
+        // If already blocked, don't increment counter again (prevents inflation
+        // from rapid stop hook invocations)
+        if self.state.status == GateStatus::Blocked {
+            // Already blocked, just return current circuit breaker status
+            return Ok(self.state.circuit_breaker_tripped);
+        }
+
         // Check if circuit breaker should reset
         if self.should_reset_circuit_breaker() {
             self.reset_circuit_breaker();
         }
 
-        // Increment block count
+        // Increment block count (only on Pending → Blocked transition)
         self.state.block_count += 1;
         self.state.last_blocked_session_id = Some(self.session_id.clone());
         self.state.last_blocked_at = Some(Utc::now());
@@ -772,6 +779,52 @@ mod tests {
 
         let result = gate.block();
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_reblock_does_not_increment_counter() {
+        let mut state = GateState {
+            status: GateStatus::Blocked,
+            block_count: 1,
+            ..Default::default()
+        };
+        let config = config_with_max_blocks(3);
+
+        // First re-block should not increment counter
+        {
+            let mut gate = Gate::new(&mut state, &config, "session-1");
+            let tripped = gate.block().unwrap();
+            assert!(!tripped);
+            assert_eq!(gate.status(), GateStatus::Blocked);
+        }
+        assert_eq!(state.block_count, 1); // Counter should still be 1
+
+        // Multiple re-blocks should not increment counter
+        {
+            let mut gate = Gate::new(&mut state, &config, "session-1");
+            let tripped = gate.block().unwrap();
+            assert!(!tripped);
+        }
+        assert_eq!(state.block_count, 1); // Counter should still be 1
+
+        // Circuit breaker should not trip from re-blocking
+        assert!(!state.circuit_breaker_tripped);
+    }
+
+    #[test]
+    fn test_reblock_returns_circuit_breaker_status() {
+        let mut state = GateState {
+            status: GateStatus::Blocked,
+            block_count: 2,
+            circuit_breaker_tripped: true, // Simulate previously tripped
+            ..Default::default()
+        };
+        let config = config_with_max_blocks(3);
+
+        let mut gate = Gate::new(&mut state, &config, "session-1");
+        // Re-blocking should return true because circuit breaker was tripped
+        let tripped = gate.block().unwrap();
+        assert!(tripped);
     }
 
     #[test]

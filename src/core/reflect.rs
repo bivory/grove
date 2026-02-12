@@ -733,8 +733,11 @@ fn check_duplicate_by_summary(
 
         // Check for significant substring overlap
         // Only flag as duplicate if the shorter string is >= 80% of the longer one
-        let longer_len = normalized.len().max(existing_normalized.len());
-        let shorter_len = normalized.len().min(existing_normalized.len());
+        // Use char count (not byte length) for consistent behavior with non-ASCII
+        let new_chars = normalized.chars().count();
+        let existing_chars = existing_normalized.chars().count();
+        let longer_len = new_chars.max(existing_chars);
+        let shorter_len = new_chars.min(existing_chars);
 
         // Avoid division by zero and skip very short strings
         if longer_len == 0 || shorter_len < 10 {
@@ -2263,5 +2266,27 @@ mod tests {
         assert_eq!(valid.len(), 1);
         assert_eq!(rejected.len(), 1);
         assert_eq!(rejected[0].stage, ValidationStage::Duplicate);
+    }
+
+    #[test]
+    fn test_duplicate_check_uses_char_count_not_byte_length() {
+        // This test verifies that duplicate checking uses character count,
+        // not byte length. CJK characters are 3 bytes each, so a 4-char
+        // CJK string is 12 bytes. Without the fix, this would be skipped
+        // by the "shorter_len < 10" check (12 bytes >= 10), but with proper
+        // char counting, 4 chars < 10, so it's correctly skipped.
+        let result = check_duplicate_by_summary(
+            "日本語文", // 4 characters, 12 bytes
+            &[],        // no existing learnings
+        );
+        assert!(!result.is_duplicate);
+
+        // Verify longer non-ASCII strings work correctly
+        // 12 CJK characters (36 bytes) should behave same as 12 ASCII chars
+        let result2 = check_duplicate_by_summary(
+            "日本語のプログラミング言語", // 13 characters
+            &[],
+        );
+        assert!(!result2.is_duplicate);
     }
 }

@@ -457,6 +457,48 @@ pub fn validate_write_gate(learning: &CompoundLearning) -> WriteGateResult {
     WriteGateResult::pass(learning.criteria_met.clone(), plausibility, confidence)
 }
 
+/// Check if text contains a word (not a substring of another word).
+/// Uses word boundary matching to avoid false positives like "misuse" matching "use".
+fn contains_word(text: &str, word: &str) -> bool {
+    // Multi-word phrases should be matched with simple contains
+    // (e.g., "next time", "from now on" are unlikely to be substrings)
+    if word.contains(' ') {
+        return text.contains(word);
+    }
+
+    // For single words, use word boundary matching
+    // A word boundary is the start/end of string or a non-alphanumeric character
+    let word_lower = word.to_lowercase();
+    let text_lower = text.to_lowercase();
+
+    for (i, _) in text_lower.match_indices(&word_lower) {
+        let before_ok = if i == 0 {
+            true
+        } else {
+            // Check character before the match
+            let before = text_lower.as_bytes()[i - 1];
+            !before.is_ascii_alphanumeric()
+        };
+
+        let after_ok = {
+            let end = i + word_lower.len();
+            if end >= text_lower.len() {
+                true
+            } else {
+                // Check character after the match
+                let after = text_lower.as_bytes()[end];
+                !after.is_ascii_alphanumeric()
+            }
+        };
+
+        if before_ok && after_ok {
+            return true;
+        }
+    }
+
+    false
+}
+
 /// Assess plausibility of a single criterion claim.
 fn assess_criterion_plausibility(
     criterion: &WriteGateCriterion,
@@ -488,7 +530,7 @@ fn assess_criterion_plausibility(
             ];
             let found: Vec<&str> = indicators
                 .iter()
-                .filter(|&&i| combined.contains(i))
+                .filter(|&&i| contains_word(&combined, i))
                 .copied()
                 .collect();
             if found.is_empty() {
@@ -517,7 +559,7 @@ fn assess_criterion_plausibility(
             ];
             let found: Vec<&str> = indicators
                 .iter()
-                .filter(|&&i| combined.contains(i))
+                .filter(|&&i| contains_word(&combined, i))
                 .copied()
                 .collect();
             if found.is_empty() {
@@ -547,7 +589,7 @@ fn assess_criterion_plausibility(
             ];
             let found: Vec<&str> = indicators
                 .iter()
-                .filter(|&&i| combined.contains(i))
+                .filter(|&&i| contains_word(&combined, i))
                 .copied()
                 .collect();
             // Be lenient for stable facts
@@ -574,7 +616,7 @@ fn assess_criterion_plausibility(
             ];
             let found: Vec<&str> = indicators
                 .iter()
-                .filter(|&&i| combined.contains(i))
+                .filter(|&&i| contains_word(&combined, i))
                 .copied()
                 .collect();
             if found.is_empty() {
@@ -1511,6 +1553,83 @@ mod tests {
         );
         assert!(!assessment.plausible);
         assert!(assessment.evidence.contains("no explicit user request"));
+    }
+
+    // =========================================================================
+    // contains_word tests - word boundary matching
+    // =========================================================================
+
+    #[test]
+    fn test_contains_word_exact_match() {
+        assert!(contains_word("use async", "use"));
+        assert!(contains_word("always use this", "use"));
+        assert!(contains_word("use", "use"));
+    }
+
+    #[test]
+    fn test_contains_word_rejects_substring_at_start() {
+        // "misuse" should not match "use"
+        assert!(!contains_word("misuse the API", "use"));
+    }
+
+    #[test]
+    fn test_contains_word_rejects_substring_at_end() {
+        // "abuse" should not match "use"
+        assert!(!contains_word("don't abuse this", "use"));
+    }
+
+    #[test]
+    fn test_contains_word_rejects_substring_in_middle() {
+        // "excuse" should not match "use"
+        assert!(!contains_word("there is no excuse", "use"));
+    }
+
+    #[test]
+    fn test_contains_word_with_punctuation() {
+        // Word followed by punctuation should match
+        assert!(contains_word("don't use, avoid it", "use"));
+        assert!(contains_word("we use. done.", "use"));
+        assert!(contains_word("will (definitely)", "will"));
+    }
+
+    #[test]
+    fn test_contains_word_case_insensitive() {
+        assert!(contains_word("ALWAYS USE THIS", "use"));
+        assert!(contains_word("Always Use This", "always"));
+    }
+
+    #[test]
+    fn test_contains_word_multi_word_phrase() {
+        // Multi-word phrases use simple contains
+        assert!(contains_word("from now on do this", "from now on"));
+        assert!(contains_word("do this next time", "next time"));
+    }
+
+    #[test]
+    fn test_contains_word_at_boundaries() {
+        assert!(contains_word("is this correct", "is"));
+        assert!(contains_word("this is correct", "is"));
+        assert!(contains_word("this is", "is"));
+    }
+
+    #[test]
+    fn test_contains_word_partial_word_rejection() {
+        // "reason" contains "is" as substring but not as word
+        assert!(!contains_word("the reason for this", "is"));
+        // "willow" contains "will" as substring but not as word
+        assert!(!contains_word("near the willow tree", "will"));
+    }
+
+    #[test]
+    fn test_plausibility_rejects_partial_matches() {
+        // This should NOT match because "misuse" contains "use" as substring
+        let assessment = assess_criterion_plausibility(
+            &WriteGateCriterion::BehaviorChanging,
+            "Avoid misuse of resources",
+            "Resource misuse causes problems in production.",
+        );
+        // Should not find "use" in "misuse"
+        assert!(!assessment.evidence.contains("use"));
     }
 
     // =========================================================================

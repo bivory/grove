@@ -69,10 +69,22 @@ impl From<&AggregateStats> for AggregateStatsInfo {
         Self {
             total_learnings: stats.total_learnings,
             total_archived: stats.total_archived,
-            active_learnings: stats.total_learnings - stats.total_archived,
-            average_hit_rate: stats.average_hit_rate,
+            active_learnings: stats.total_learnings.saturating_sub(stats.total_archived),
+            average_hit_rate: sanitize_f64(stats.average_hit_rate),
             cross_pollination_count: stats.cross_pollination_count,
         }
+    }
+}
+
+/// Sanitize a float value for safe display and serialization.
+///
+/// Replaces NaN and Infinity with 0.0 to prevent display issues
+/// and ensure valid JSON serialization.
+fn sanitize_f64(value: f64) -> f64 {
+    if value.is_finite() {
+        value
+    } else {
+        0.0
     }
 }
 
@@ -122,7 +134,7 @@ impl From<&WriteGateStats> for WriteGateStatsInfo {
             total_evaluated: stats.total_evaluated,
             total_accepted: stats.total_accepted,
             total_rejected: stats.total_rejected,
-            pass_rate: stats.pass_rate,
+            pass_rate: sanitize_f64(stats.pass_rate),
         }
     }
 }
@@ -674,5 +686,62 @@ mod tests {
         assert_eq!(info.message, "Test message");
         assert_eq!(info.suggestion, "Test suggestion");
         assert_eq!(info.priority, 1);
+    }
+
+    #[test]
+    fn test_sanitize_f64_finite_values() {
+        assert_eq!(sanitize_f64(0.0), 0.0);
+        assert_eq!(sanitize_f64(1.0), 1.0);
+        assert_eq!(sanitize_f64(-1.0), -1.0);
+        assert_eq!(sanitize_f64(0.5), 0.5);
+    }
+
+    #[test]
+    fn test_sanitize_f64_nan() {
+        assert_eq!(sanitize_f64(f64::NAN), 0.0);
+    }
+
+    #[test]
+    fn test_sanitize_f64_infinity() {
+        assert_eq!(sanitize_f64(f64::INFINITY), 0.0);
+        assert_eq!(sanitize_f64(f64::NEG_INFINITY), 0.0);
+    }
+
+    #[test]
+    fn test_aggregate_stats_info_sanitizes_hit_rate() {
+        use std::collections::HashMap;
+
+        let mut stats = AggregateStats {
+            total_learnings: 10,
+            total_archived: 3,
+            average_hit_rate: f64::NAN, // Simulate corrupted data
+            cross_pollination_count: 5,
+            by_category: HashMap::new(),
+            by_scope: HashMap::new(),
+        };
+
+        let info = AggregateStatsInfo::from(&stats);
+        assert_eq!(info.average_hit_rate, 0.0); // Should be sanitized
+
+        stats.average_hit_rate = f64::INFINITY;
+        let info = AggregateStatsInfo::from(&stats);
+        assert_eq!(info.average_hit_rate, 0.0); // Should be sanitized
+    }
+
+    #[test]
+    fn test_write_gate_stats_info_sanitizes_pass_rate() {
+        use std::collections::HashMap;
+
+        let stats = WriteGateStats {
+            total_evaluated: 20,
+            total_accepted: 15,
+            total_rejected: 5,
+            pass_rate: f64::NAN, // Simulate corrupted data
+            rejection_reasons: HashMap::new(),
+            retrospective_misses: 0,
+        };
+
+        let info = WriteGateStatsInfo::from(&stats);
+        assert_eq!(info.pass_rate, 0.0); // Should be sanitized
     }
 }

@@ -188,7 +188,20 @@ impl Config {
     /// 3. User config (`~/.grove/config.toml`)
     /// 4. Defaults
     pub fn load() -> Self {
-        Self::load_from_cwd(&env::current_dir().unwrap_or_default())
+        // Fail-open: if cwd is unavailable, return defaults with env overrides
+        // rather than trying path operations with an empty PathBuf
+        match env::current_dir() {
+            Ok(cwd) => Self::load_from_cwd(&cwd),
+            Err(_) => {
+                let mut config = Config::default();
+                // Still apply user config and env overrides
+                if let Some(user_config) = Self::load_user_config() {
+                    config = config.merge(user_config);
+                }
+                config.apply_env_overrides();
+                config
+            }
+        }
     }
 
     /// Load configuration with a specific working directory.

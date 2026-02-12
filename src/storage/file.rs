@@ -11,6 +11,7 @@ use crate::config::sessions_dir;
 use crate::core::SessionState;
 use crate::error::{GroveError, Result};
 use crate::storage::SessionStore;
+use crate::util::sync_parent_dir;
 
 /// File-based session storage.
 ///
@@ -109,6 +110,9 @@ impl FileSessionStore {
 
         // Rename temp file to final path (atomic on POSIX)
         fs::rename(&temp_path, &final_path).map_err(|e| GroveError::storage(&final_path, e))?;
+
+        // Sync parent directory for durability (fail-open: write succeeded)
+        let _ = sync_parent_dir(&final_path);
 
         Ok(())
     }

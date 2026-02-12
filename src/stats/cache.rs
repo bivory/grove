@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 use crate::core::LearningCategory;
 use crate::error::{GroveError, Result};
 use crate::stats::{StatsEvent, StatsEventType, StatsLogger};
+use crate::util::sync_parent_dir;
 
 /// A rejected candidate summary for retrospective miss detection.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -263,9 +264,12 @@ impl StatsCache {
         let by_category: HashMap<LearningCategory, CategoryStats> = HashMap::new();
 
         for stats in self.learnings.values_mut() {
-            // Compute hit rate for this learning
+            // Compute hit rate for this learning, clamped to [0.0, 1.0]
+            // Referenced can exceed surfaced if events are processed out of order
+            // or if there are duplicate reference events
             if stats.surfaced > 0 {
-                stats.hit_rate = stats.referenced as f64 / stats.surfaced as f64;
+                let raw_rate = stats.referenced as f64 / stats.surfaced as f64;
+                stats.hit_rate = raw_rate.clamp(0.0, 1.0);
                 total_hit_rate += stats.hit_rate;
                 hit_rate_count += 1;
             }
@@ -641,6 +645,9 @@ impl StatsCacheManager {
             ))
         })?;
 
+        // Sync parent directory for durability (fail-open: write succeeded)
+        let _ = sync_parent_dir(&self.cache_path);
+
         Ok(())
     }
 
@@ -825,6 +832,34 @@ mod tests {
 
         let stats = cache.learnings.get("L001").unwrap();
         assert!((stats.hit_rate - 0.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_hit_rate_clamped_to_1_when_referenced_exceeds_surfaced() {
+        // Simulate out-of-order or duplicate events where referenced > surfaced
+        let events = vec![
+            surfaced_event("L001", "s1"),
+            referenced_event("L001", "s1", None),
+            referenced_event("L001", "s2", None), // Extra reference without surfacing
+            referenced_event("L001", "s3", None), // Another extra reference
+        ];
+
+        let cache = StatsCache::from_events(&events);
+
+        let stats = cache.learnings.get("L001").unwrap();
+        // Without clamping, hit_rate would be 3.0 (3 refs / 1 surfaced)
+        // With clamping, it should be capped at 1.0
+        assert!(
+            stats.hit_rate <= 1.0,
+            "hit_rate {} should be clamped to 1.0",
+            stats.hit_rate
+        );
+        assert!(
+            stats.hit_rate >= 0.0,
+            "hit_rate {} should be >= 0.0",
+            stats.hit_rate
+        );
+        assert!((stats.hit_rate - 1.0).abs() < f64::EPSILON);
     }
 
     #[test]

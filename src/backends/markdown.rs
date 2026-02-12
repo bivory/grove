@@ -17,7 +17,7 @@ use crate::core::{
     WriteGateCriterion,
 };
 use crate::error::{GroveError, Result};
-use crate::util::read_to_string_limited;
+use crate::util::{read_to_string_limited, sync_parent_dir};
 
 /// Relevance score weights for search matching.
 mod scores {
@@ -237,6 +237,9 @@ impl MarkdownBackend {
             ))
         })?;
 
+        // Sync parent directory for durability (fail-open: write succeeded)
+        let _ = sync_parent_dir(path);
+
         Ok(())
     }
 
@@ -345,6 +348,11 @@ impl MemoryBackend for MarkdownBackend {
 
         file.write_all(markdown.as_bytes()).map_err(|e| {
             GroveError::backend(format!("Failed to write to {}: {}", path.display(), e))
+        })?;
+
+        // Ensure data is flushed to disk for durability
+        file.sync_all().map_err(|e| {
+            GroveError::backend(format!("Failed to sync {}: {}", path.display(), e))
         })?;
 
         let message = if learning_was_sanitized(learning, &sanitized) {
@@ -523,6 +531,34 @@ pub fn sanitize_tag(tag: &str) -> String {
         .to_lowercase()
 }
 
+/// Validate a learning ID read from a file.
+///
+/// Learning IDs must contain only safe characters to prevent path traversal attacks
+/// when IDs are used in file paths (e.g., for archive operations).
+///
+/// Returns None if the ID is invalid, allowing the parser to skip malformed entries.
+pub fn validate_learning_id(id: &str) -> Option<String> {
+    // Empty IDs are invalid
+    if id.is_empty() {
+        return None;
+    }
+
+    // Check for path traversal patterns
+    if id.contains("..") || id.contains('/') || id.contains('\\') {
+        return None;
+    }
+
+    // Only allow alphanumeric, dash, underscore
+    if !id
+        .chars()
+        .all(|c| c.is_alphanumeric() || c == '-' || c == '_')
+    {
+        return None;
+    }
+
+    Some(id.to_string())
+}
+
 /// Format a learning as markdown.
 fn format_learning_as_markdown(learning: &CompoundLearning) -> String {
     let mut md = String::new();
@@ -636,8 +672,14 @@ fn parse_learnings_from_markdown(content: &str) -> Result<Vec<CompoundLearning>>
                 }
             }
 
-            // Start new learning
-            let id = id_part.trim().to_string();
+            // Start new learning - validate ID to prevent path traversal
+            let id = match validate_learning_id(id_part.trim()) {
+                Some(valid_id) => valid_id,
+                None => {
+                    // Skip entries with invalid IDs (potential path traversal)
+                    continue;
+                }
+            };
             current_learning = Some(LearningBuilder::new(id));
             in_detail = false;
             detail_lines.clear();
@@ -940,6 +982,54 @@ mod tests {
         assert_eq!(sanitize_tag("rust-lang"), "rust-lang");
         assert_eq!(sanitize_tag("Rust_Lang!"), "rustlang");
         assert_eq!(sanitize_tag("UPPER"), "upper");
+    }
+
+    // Learning ID validation tests
+
+    #[test]
+    fn test_validate_learning_id_valid() {
+        // Valid IDs
+        assert_eq!(
+            validate_learning_id("cl_20260212_001"),
+            Some("cl_20260212_001".to_string())
+        );
+        assert_eq!(
+            validate_learning_id("test-learning-123"),
+            Some("test-learning-123".to_string())
+        );
+        assert_eq!(
+            validate_learning_id("learning_with_underscores"),
+            Some("learning_with_underscores".to_string())
+        );
+    }
+
+    #[test]
+    fn test_validate_learning_id_rejects_empty() {
+        assert_eq!(validate_learning_id(""), None);
+    }
+
+    #[test]
+    fn test_validate_learning_id_rejects_path_traversal() {
+        // Path traversal attempts
+        assert_eq!(validate_learning_id("../etc/passwd"), None);
+        assert_eq!(validate_learning_id(".."), None);
+        assert_eq!(validate_learning_id("foo/../bar"), None);
+        assert_eq!(validate_learning_id("/etc/passwd"), None);
+        assert_eq!(validate_learning_id("foo/bar"), None);
+        assert_eq!(validate_learning_id("foo\\bar"), None);
+        assert_eq!(validate_learning_id("C:\\Windows"), None);
+    }
+
+    #[test]
+    fn test_validate_learning_id_rejects_special_chars() {
+        // Special characters that shouldn't be in IDs
+        assert_eq!(validate_learning_id("id with spaces"), None);
+        assert_eq!(validate_learning_id("id:colon"), None);
+        assert_eq!(validate_learning_id("id@at"), None);
+        assert_eq!(validate_learning_id("id#hash"), None);
+        assert_eq!(validate_learning_id("id$dollar"), None);
+        assert_eq!(validate_learning_id("id%percent"), None);
+        assert_eq!(validate_learning_id("id.dot"), None);
     }
 
     // Write tests

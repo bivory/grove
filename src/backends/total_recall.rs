@@ -22,6 +22,9 @@ use std::path::{Path, PathBuf};
 use chrono::{DateTime, Datelike, Utc};
 use tracing::warn;
 
+use crate::util::sync_parent_dir;
+
+use crate::backends::markdown::validate_learning_id;
 use crate::backends::total_recall_format::{
     self as fmt, BLOCKQUOTE_PREFIX, DAILY_LOG_SEARCH_LIMIT, DATE_FORMAT, ENTRY_SEPARATOR,
     GROVE_ID_PREFIX, LABEL_CATEGORY, LABEL_CONFIDENCE, LABEL_CREATED, LABEL_FILES, LABEL_SUMMARY,
@@ -283,6 +286,9 @@ impl TotalRecallBackend {
             ))
         })?;
 
+        // Sync parent directory for durability (fail-open: write succeeded)
+        let _ = sync_parent_dir(&self.personal_path);
+
         Ok(WriteResult::success(
             &learning.id,
             self.personal_path.display().to_string(),
@@ -377,6 +383,9 @@ impl TotalRecallBackend {
                 e
             )
         })?;
+
+        // Sync parent directory for durability (fail-open: write succeeded)
+        let _ = sync_parent_dir(&daily_path);
 
         Ok(format!("memory/daily/{}.md", today))
     }
@@ -650,7 +659,8 @@ impl TotalRecallBackend {
             return None;
         }
 
-        let grove_id = entry[after_prefix..id_end].trim();
+        // Validate the ID to prevent path traversal attacks
+        let grove_id = validate_learning_id(entry[after_prefix..id_end].trim())?;
 
         // Extract category from **Category** pattern
         let category = fmt::CATEGORY_MARKERS
@@ -736,11 +746,11 @@ impl TotalRecallBackend {
 
         // Parse timestamp from entry
         // Format: [HH:MM] at start of header line, date from ID (cl_YYYYMMDD_NNN)
-        let timestamp = self.parse_entry_timestamp(entry, grove_id);
+        let timestamp = self.parse_entry_timestamp(entry, &grove_id);
 
         // Build a partial learning
         Some(CompoundLearning {
-            id: grove_id.to_string(),
+            id: grove_id,
             schema_version: 1,
             category,
             summary,

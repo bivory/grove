@@ -187,6 +187,30 @@ pub struct CircuitBreakerConfig {
     pub cooldown_seconds: u32,
 }
 
+/// Minimum valid max_blocks value (must be at least 1 to allow any blocks).
+pub const MIN_MAX_BLOCKS: u32 = 1;
+
+/// Minimum valid cooldown_seconds value (must be at least 1 second).
+pub const MIN_COOLDOWN_SECONDS: u32 = 1;
+
+impl CircuitBreakerConfig {
+    /// Check if max_blocks is valid (must be >= 1).
+    ///
+    /// A max_blocks of 0 would cause immediate circuit breaker trip, effectively
+    /// disabling the gate entirely.
+    pub fn is_valid_max_blocks(value: u32) -> bool {
+        value >= MIN_MAX_BLOCKS
+    }
+
+    /// Check if cooldown_seconds is valid (must be >= 1).
+    ///
+    /// A cooldown of 0 would cause immediate reset, making timing comparisons
+    /// behave unexpectedly.
+    pub fn is_valid_cooldown_seconds(value: u32) -> bool {
+        value >= MIN_COOLDOWN_SECONDS
+    }
+}
+
 impl Default for CircuitBreakerConfig {
     fn default() -> Self {
         Self {
@@ -265,22 +289,57 @@ impl Config {
     fn apply_env_overrides(&mut self) {
         // GROVE_MAX_BLOCKS
         if let Ok(val) = env::var("GROVE_MAX_BLOCKS") {
-            if let Ok(n) = val.parse() {
-                self.circuit_breaker.max_blocks = n;
+            match val.parse::<u32>() {
+                Ok(n) => {
+                    if CircuitBreakerConfig::is_valid_max_blocks(n) {
+                        self.circuit_breaker.max_blocks = n;
+                    } else {
+                        eprintln!(
+                            "Warning: Invalid GROVE_MAX_BLOCKS value '{}'. \
+                            Must be >= {}. Using default '{}'.",
+                            n, MIN_MAX_BLOCKS, self.circuit_breaker.max_blocks
+                        );
+                    }
+                }
+                Err(_) => eprintln!(
+                    "Warning: Invalid GROVE_MAX_BLOCKS value '{}'. \
+                    Expected a positive integer. Using default '{}'.",
+                    val, self.circuit_breaker.max_blocks
+                ),
             }
         }
 
         // GROVE_COOLDOWN_SECONDS
         if let Ok(val) = env::var("GROVE_COOLDOWN_SECONDS") {
-            if let Ok(n) = val.parse() {
-                self.circuit_breaker.cooldown_seconds = n;
+            match val.parse::<u32>() {
+                Ok(n) => {
+                    if CircuitBreakerConfig::is_valid_cooldown_seconds(n) {
+                        self.circuit_breaker.cooldown_seconds = n;
+                    } else {
+                        eprintln!(
+                            "Warning: Invalid GROVE_COOLDOWN_SECONDS value '{}'. \
+                            Must be >= {}. Using default '{}'.",
+                            n, MIN_COOLDOWN_SECONDS, self.circuit_breaker.cooldown_seconds
+                        );
+                    }
+                }
+                Err(_) => eprintln!(
+                    "Warning: Invalid GROVE_COOLDOWN_SECONDS value '{}'. \
+                    Expected a positive integer. Using default '{}'.",
+                    val, self.circuit_breaker.cooldown_seconds
+                ),
             }
         }
 
         // GROVE_MAX_INJECTIONS
         if let Ok(val) = env::var("GROVE_MAX_INJECTIONS") {
-            if let Ok(n) = val.parse() {
-                self.retrieval.max_injections = n;
+            match val.parse::<u32>() {
+                Ok(n) => self.retrieval.max_injections = n,
+                Err(_) => eprintln!(
+                    "Warning: Invalid GROVE_MAX_INJECTIONS value '{}'. \
+                    Expected a positive integer. Using default '{}'.",
+                    val, self.retrieval.max_injections
+                ),
             }
         }
 
@@ -304,8 +363,13 @@ impl Config {
 
         // GROVE_AUTO_SKIP_THRESHOLD
         if let Ok(val) = env::var("GROVE_AUTO_SKIP_THRESHOLD") {
-            if let Ok(n) = val.parse() {
-                self.gate.auto_skip.line_threshold = n;
+            match val.parse::<u32>() {
+                Ok(n) => self.gate.auto_skip.line_threshold = n,
+                Err(_) => eprintln!(
+                    "Warning: Invalid GROVE_AUTO_SKIP_THRESHOLD value '{}'. \
+                    Expected a positive integer. Using default '{}'.",
+                    val, self.gate.auto_skip.line_threshold
+                ),
             }
         }
 
@@ -324,23 +388,35 @@ impl Config {
 
         // GROVE_DECAY_DAYS
         if let Ok(val) = env::var("GROVE_DECAY_DAYS") {
-            if let Ok(n) = val.parse() {
-                self.decay.passive_duration_days = n;
+            match val.parse::<u32>() {
+                Ok(n) => self.decay.passive_duration_days = n,
+                Err(_) => eprintln!(
+                    "Warning: Invalid GROVE_DECAY_DAYS value '{}'. \
+                    Expected a positive integer. Using default '{}'.",
+                    val, self.decay.passive_duration_days
+                ),
             }
         }
 
         // GROVE_DECAY_IMMUNITY_RATE
         if let Ok(val) = env::var("GROVE_DECAY_IMMUNITY_RATE") {
-            if let Ok(n) = val.parse::<f64>() {
-                if DecayConfig::is_valid_immunity_rate(n) {
-                    self.decay.immunity_hit_rate = n;
-                } else {
-                    eprintln!(
-                        "Warning: Invalid GROVE_DECAY_IMMUNITY_RATE value '{}'. \
-                        Must be in range [0.0, 1.0]. Using default '{}'.",
-                        n, self.decay.immunity_hit_rate
-                    );
+            match val.parse::<f64>() {
+                Ok(n) => {
+                    if DecayConfig::is_valid_immunity_rate(n) {
+                        self.decay.immunity_hit_rate = n;
+                    } else {
+                        eprintln!(
+                            "Warning: Invalid GROVE_DECAY_IMMUNITY_RATE value '{}'. \
+                            Must be in range [0.0, 1.0]. Using default '{}'.",
+                            n, self.decay.immunity_hit_rate
+                        );
+                    }
                 }
+                Err(_) => eprintln!(
+                    "Warning: Invalid GROVE_DECAY_IMMUNITY_RATE value '{}'. \
+                    Expected a decimal number. Using default '{}'.",
+                    val, self.decay.immunity_hit_rate
+                ),
             }
         }
     }
@@ -1196,5 +1272,97 @@ max_blocks = 10
         }
 
         env::remove_var("GROVE_DECAY_IMMUNITY_RATE");
+    }
+
+    #[test]
+    fn test_is_valid_max_blocks() {
+        // Valid values (>= 1)
+        assert!(CircuitBreakerConfig::is_valid_max_blocks(1));
+        assert!(CircuitBreakerConfig::is_valid_max_blocks(3));
+        assert!(CircuitBreakerConfig::is_valid_max_blocks(100));
+
+        // Invalid values (0)
+        assert!(!CircuitBreakerConfig::is_valid_max_blocks(0));
+    }
+
+    #[test]
+    fn test_is_valid_cooldown_seconds() {
+        // Valid values (>= 1)
+        assert!(CircuitBreakerConfig::is_valid_cooldown_seconds(1));
+        assert!(CircuitBreakerConfig::is_valid_cooldown_seconds(300));
+        assert!(CircuitBreakerConfig::is_valid_cooldown_seconds(3600));
+
+        // Invalid values (0)
+        assert!(!CircuitBreakerConfig::is_valid_cooldown_seconds(0));
+    }
+
+    #[test]
+    fn test_env_var_invalid_max_blocks_ignored() {
+        // Clean up first
+        env::remove_var("GROVE_MAX_BLOCKS");
+
+        let default_max_blocks = Config::default().circuit_breaker.max_blocks;
+
+        // Set invalid max_blocks (0)
+        env::set_var("GROVE_MAX_BLOCKS", "0");
+
+        let mut config = Config::default();
+        config.apply_env_overrides();
+
+        // Should keep the default value
+        assert_eq!(config.circuit_breaker.max_blocks, default_max_blocks);
+
+        env::remove_var("GROVE_MAX_BLOCKS");
+    }
+
+    #[test]
+    fn test_env_var_valid_max_blocks_applied() {
+        // Clean up first
+        env::remove_var("GROVE_MAX_BLOCKS");
+
+        // Set valid max_blocks
+        env::set_var("GROVE_MAX_BLOCKS", "5");
+
+        let mut config = Config::default();
+        config.apply_env_overrides();
+
+        assert_eq!(config.circuit_breaker.max_blocks, 5);
+
+        env::remove_var("GROVE_MAX_BLOCKS");
+    }
+
+    #[test]
+    fn test_env_var_invalid_cooldown_seconds_ignored() {
+        // Clean up first
+        env::remove_var("GROVE_COOLDOWN_SECONDS");
+
+        let default_cooldown = Config::default().circuit_breaker.cooldown_seconds;
+
+        // Set invalid cooldown (0)
+        env::set_var("GROVE_COOLDOWN_SECONDS", "0");
+
+        let mut config = Config::default();
+        config.apply_env_overrides();
+
+        // Should keep the default value
+        assert_eq!(config.circuit_breaker.cooldown_seconds, default_cooldown);
+
+        env::remove_var("GROVE_COOLDOWN_SECONDS");
+    }
+
+    #[test]
+    fn test_env_var_valid_cooldown_seconds_applied() {
+        // Clean up first
+        env::remove_var("GROVE_COOLDOWN_SECONDS");
+
+        // Set valid cooldown
+        env::set_var("GROVE_COOLDOWN_SECONDS", "600");
+
+        let mut config = Config::default();
+        config.apply_env_overrides();
+
+        assert_eq!(config.circuit_breaker.cooldown_seconds, 600);
+
+        env::remove_var("GROVE_COOLDOWN_SECONDS");
     }
 }

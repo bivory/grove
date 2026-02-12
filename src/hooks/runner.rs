@@ -19,6 +19,7 @@ use crate::hooks::input::{
 use crate::hooks::output::{PreToolUseOutput, SessionEndOutput, SessionStartOutput, StopOutput};
 use crate::stats::{StatsCacheManager, StatsLogger};
 use crate::storage::SessionStore;
+use tracing::warn;
 
 /// Hook type enumeration.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -64,6 +65,21 @@ impl<S: SessionStore> HookRunner<S> {
     /// Create a new hook runner.
     pub fn new(store: S, config: Config) -> Self {
         Self { store, config }
+    }
+
+    /// Save session state with warning on failure (fail-open pattern).
+    ///
+    /// Logs a warning if the save fails but doesn't propagate the error,
+    /// following the fail-open philosophy where infrastructure errors
+    /// should never block work.
+    fn save_session(&self, session: &SessionState) {
+        if let Err(e) = self.store.put(session) {
+            warn!(
+                session_id = %session.id,
+                error = %e,
+                "Failed to save session state (fail-open: continuing anyway)"
+            );
+        }
     }
 
     /// Run a hook with input from stdin.
@@ -151,7 +167,7 @@ impl<S: SessionStore> HookRunner<S> {
         // We don't run it here to keep session-start fast
 
         // Save session state
-        let _ = self.store.put(&session);
+        self.save_session(&session);
 
         // Build output
         let output = if let Some(context) = additional_context.take() {
@@ -252,7 +268,7 @@ impl<S: SessionStore> HookRunner<S> {
             );
 
             // Save session
-            let _ = self.store.put(&session);
+            self.save_session(&session);
         }
 
         // Always allow the tool to proceed
@@ -339,7 +355,7 @@ impl<S: SessionStore> HookRunner<S> {
             }
 
             // Save session
-            let _ = self.store.put(&session);
+            self.save_session(&session);
         }
 
         let output = crate::hooks::output::PostToolUseOutput::empty();
@@ -374,7 +390,7 @@ impl<S: SessionStore> HookRunner<S> {
 
         // Check terminal states first
         if session.gate.status.is_terminal() {
-            let _ = self.store.put(&session);
+            self.save_session(&session);
             let output = StopOutput::approve();
             return crate::hooks::output::to_json(&output);
         }
@@ -388,13 +404,13 @@ impl<S: SessionStore> HookRunner<S> {
             if let Some(reason) = gate.evaluate_auto_skip(diff_size) {
                 let _ = gate.skip(&reason, SkipDecider::AutoThreshold);
                 session.add_trace(EventType::Skip, Some(reason));
-                let _ = self.store.put(&session);
+                self.save_session(&session);
                 let output = StopOutput::approve();
                 return crate::hooks::output::to_json(&output);
             }
 
             // No auto-skip, allow exit in Idle state
-            let _ = self.store.put(&session);
+            self.save_session(&session);
             let output = StopOutput::approve();
             return crate::hooks::output::to_json(&output);
         }
@@ -408,7 +424,7 @@ impl<S: SessionStore> HookRunner<S> {
                 Ok(circuit_breaker_tripped) => {
                     if circuit_breaker_tripped {
                         session.add_trace(EventType::CircuitBreakerTripped, None);
-                        let _ = self.store.put(&session);
+                        self.save_session(&session);
                         let output = StopOutput::approve_with_message(
                             "Circuit breaker tripped. Reflection skipped.",
                         );
@@ -416,7 +432,7 @@ impl<S: SessionStore> HookRunner<S> {
                     }
 
                     session.add_trace(EventType::GateBlocked, None);
-                    let _ = self.store.put(&session);
+                    self.save_session(&session);
 
                     let message = format!(
                         "Reflection required. Run `grove reflect --session-id {}` or `grove skip <reason> --session-id {}`",
@@ -427,7 +443,7 @@ impl<S: SessionStore> HookRunner<S> {
                 }
                 Err(_) => {
                     // Fail-open on error
-                    let _ = self.store.put(&session);
+                    self.save_session(&session);
                     let output = StopOutput::approve();
                     return crate::hooks::output::to_json(&output);
                 }
@@ -435,7 +451,7 @@ impl<S: SessionStore> HookRunner<S> {
         }
 
         // Default: approve
-        let _ = self.store.put(&session);
+        self.save_session(&session);
         let output = StopOutput::approve();
         crate::hooks::output::to_json(&output)
     }
@@ -481,7 +497,7 @@ impl<S: SessionStore> HookRunner<S> {
         );
 
         // Save final session state
-        let _ = self.store.put(&session);
+        self.save_session(&session);
 
         let output = SessionEndOutput::empty();
         crate::hooks::output::to_json(&output)
@@ -525,7 +541,7 @@ impl<S: SessionStore> HookRunner<S> {
         );
 
         // Save session state
-        let _ = self.store.put(&session);
+        self.save_session(&session);
 
         // Block task completion until reflection/skip
         // Return exit code 2 via StopOutput::block

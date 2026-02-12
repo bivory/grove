@@ -6,6 +6,7 @@ use chrono::{Duration, Utc};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
+use tracing::warn;
 
 use crate::config::sessions_dir;
 use crate::core::SessionState;
@@ -139,7 +140,14 @@ impl CleanCommand {
                 if name.starts_with('.') && name.ends_with(".tmp") {
                     if options.orphans {
                         if !options.dry_run {
-                            let _ = fs::remove_file(&path);
+                            if let Err(e) = fs::remove_file(&path) {
+                                warn!(
+                                    path = %path.display(),
+                                    error = %e,
+                                    "Failed to delete orphan file (fail-open: continuing)"
+                                );
+                                continue;
+                            }
                         }
                         orphans_deleted += 1;
                         bytes_freed += file_size;
@@ -166,12 +174,19 @@ impl CleanCommand {
 
             // Check if session is older than cutoff
             if session.updated_at < cutoff {
-                deleted_ids.push(session.id.clone());
-
                 if !options.dry_run {
-                    let _ = fs::remove_file(&path);
+                    if let Err(e) = fs::remove_file(&path) {
+                        warn!(
+                            path = %path.display(),
+                            session_id = %session.id,
+                            error = %e,
+                            "Failed to delete session file (fail-open: continuing)"
+                        );
+                        continue;
+                    }
                 }
 
+                deleted_ids.push(session.id.clone());
                 sessions_deleted += 1;
                 bytes_freed += file_size;
             }

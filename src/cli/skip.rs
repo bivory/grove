@@ -92,6 +92,11 @@ impl<S: SessionStore> SkipCommand<S> {
 
     /// Run the skip command with the given reason.
     pub fn run(&self, session_id: &str, reason: &str, options: &SkipOptions) -> SkipOutput {
+        // Validate reason is not empty or whitespace-only
+        if reason.trim().is_empty() {
+            return SkipOutput::failure("Reason cannot be empty or whitespace-only");
+        }
+
         let decider = options.decider.unwrap_or(SkipDecider::User);
         let lines_changed = options.lines_changed.unwrap_or(0);
 
@@ -439,5 +444,27 @@ mod tests {
             .as_ref()
             .unwrap()
             .contains("trace test"));
+    }
+
+    #[test]
+    fn test_skip_rejects_empty_reason() {
+        let store = setup();
+        let config = Config::default();
+        let cmd = SkipCommand::new(store, config);
+        let options = SkipOptions::default();
+
+        // Empty string
+        let output = cmd.run("test-session", "", &options);
+        assert!(!output.success);
+        assert!(output.error.as_ref().unwrap().contains("empty"));
+
+        // Whitespace-only
+        let output = cmd.run("test-session", "   ", &options);
+        assert!(!output.success);
+        assert!(output.error.as_ref().unwrap().contains("empty"));
+
+        // Tabs and newlines
+        let output = cmd.run("test-session", "\t\n  ", &options);
+        assert!(!output.success);
     }
 }

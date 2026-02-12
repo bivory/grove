@@ -165,6 +165,20 @@ impl MemoryBackend for FallbackBackend {
             ids
         }
     }
+
+    fn archive(&self, learning_id: &str) -> Result<()> {
+        // Try primary first, then fallback (learning could be in either)
+        self.primary
+            .archive(learning_id)
+            .or_else(|_| self.fallback.archive(learning_id))
+    }
+
+    fn restore(&self, learning_id: &str) -> Result<()> {
+        // Try primary first, then fallback (learning could be in either)
+        self.primary
+            .restore(learning_id)
+            .or_else(|_| self.fallback.restore(learning_id))
+    }
 }
 
 /// Parse a learning ID into its prefix and counter.
@@ -484,5 +498,48 @@ mod tests {
         let ids = backend.next_ids(1);
 
         assert_eq!(ids.len(), 1);
+    }
+
+    #[test]
+    fn test_archive_tries_primary_then_fallback() {
+        let temp = TempDir::new().unwrap();
+
+        let primary_path = temp.path().join("primary.md");
+        let fallback_path = temp.path().join("fallback.md");
+
+        let primary = MarkdownBackend::new(&primary_path);
+        let fallback = MarkdownBackend::new(&fallback_path);
+
+        // Write a learning to the fallback backend
+        let mut learning = sample_learning();
+        learning.id = "test-archive".to_string();
+        fallback.write(&learning).unwrap();
+
+        let backend = FallbackBackend::new(Box::new(primary), Box::new(fallback));
+
+        // Archive should succeed (finding it in fallback)
+        assert!(backend.archive("test-archive").is_ok());
+    }
+
+    #[test]
+    fn test_restore_tries_primary_then_fallback() {
+        let temp = TempDir::new().unwrap();
+
+        let primary_path = temp.path().join("primary.md");
+        let fallback_path = temp.path().join("fallback.md");
+
+        let primary = MarkdownBackend::new(&primary_path);
+        let fallback = MarkdownBackend::new(&fallback_path);
+
+        // Write and archive a learning in the fallback backend
+        let mut learning = sample_learning();
+        learning.id = "test-restore".to_string();
+        fallback.write(&learning).unwrap();
+        fallback.archive("test-restore").unwrap();
+
+        let backend = FallbackBackend::new(Box::new(primary), Box::new(fallback));
+
+        // Restore should succeed (finding it in fallback)
+        assert!(backend.restore("test-restore").is_ok());
     }
 }

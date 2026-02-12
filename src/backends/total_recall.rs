@@ -33,6 +33,7 @@ use crate::backends::traits::{
 };
 use crate::core::{CompoundLearning, Confidence, LearningScope};
 use crate::error::Result;
+use crate::util::read_to_string_limited;
 
 /// Total Recall backend adapter.
 ///
@@ -240,14 +241,9 @@ impl TotalRecallBackend {
         let markdown = self.format_personal_learning(learning);
 
         // Read existing content (if any) and append new content
+        // Use size-limited read to prevent OOM from corrupted/large files
         let mut content = if self.personal_path.exists() {
-            fs::read_to_string(&self.personal_path).map_err(|e| {
-                crate::error::GroveError::backend(format!(
-                    "Failed to read {}: {}",
-                    self.personal_path.display(),
-                    e
-                ))
-            })?
+            read_to_string_limited(&self.personal_path)?
         } else {
             String::new()
         };
@@ -350,8 +346,9 @@ impl TotalRecallBackend {
         })?;
 
         // Read existing content or create template
+        // Use size-limited read to prevent OOM from corrupted/large files
         let mut content = if daily_path.exists() {
-            fs::read_to_string(&daily_path)
+            read_to_string_limited(&daily_path)
                 .map_err(|e| format!("Failed to read daily log {}: {}", daily_path.display(), e))?
         } else {
             fmt::daily_log_template(&today)
@@ -438,8 +435,9 @@ impl TotalRecallBackend {
             daily_files.sort_by_key(|b| std::cmp::Reverse(b.file_name()));
 
             // Search last N days of logs
+            // Use size-limited read to prevent OOM; silently skip large/unreadable files
             for entry in daily_files.into_iter().take(DAILY_LOG_SEARCH_LIMIT) {
-                if let Ok(content) = fs::read_to_string(entry.path()) {
+                if let Ok(content) = read_to_string_limited(&entry.path()) {
                     // Only include if it has grove entries
                     if content.contains(GROVE_ID_PREFIX) {
                         results.push_str(&format!("[{}]\n", entry.path().display()));
@@ -461,12 +459,13 @@ impl TotalRecallBackend {
         }
 
         // Also check registers for any promoted grove learnings
+        // Use size-limited read to prevent OOM; silently skip large/unreadable files
         let registers_dir = self.memory_dir.join("registers");
         if registers_dir.is_dir() {
             if let Ok(entries) = fs::read_dir(&registers_dir) {
                 for entry in entries.filter_map(|e| e.ok()) {
                     if entry.path().extension().is_some_and(|ext| ext == "md") {
-                        if let Ok(content) = fs::read_to_string(entry.path()) {
+                        if let Ok(content) = read_to_string_limited(&entry.path()) {
                             if content.contains(GROVE_ID_PREFIX) {
                                 results.push_str(&format!("[{}]\n", entry.path().display()));
                                 for line in content.lines() {
@@ -508,8 +507,9 @@ impl TotalRecallBackend {
             daily_files.sort_by_key(|b| std::cmp::Reverse(b.file_name()));
 
             // Search last N days of logs
+            // Use size-limited read to prevent OOM; silently skip large/unreadable files
             for entry in daily_files.into_iter().take(DAILY_LOG_SEARCH_LIMIT) {
-                if let Ok(content) = fs::read_to_string(entry.path()) {
+                if let Ok(content) = read_to_string_limited(&entry.path()) {
                     // Only process if it has grove entries
                     if content.contains(GROVE_ID_PREFIX) {
                         // Extract only entries that match the query (entry-level filtering)
@@ -524,12 +524,13 @@ impl TotalRecallBackend {
         }
 
         // Search registers
+        // Use size-limited read to prevent OOM; silently skip large/unreadable files
         let registers_dir = self.memory_dir.join("registers");
         if registers_dir.is_dir() {
             if let Ok(entries) = fs::read_dir(&registers_dir) {
                 for entry in entries.filter_map(|e| e.ok()) {
                     if entry.path().extension().is_some_and(|ext| ext == "md") {
-                        if let Ok(content) = fs::read_to_string(entry.path()) {
+                        if let Ok(content) = read_to_string_limited(&entry.path()) {
                             if content.contains(GROVE_ID_PREFIX) {
                                 // Extract only entries that match the query (entry-level filtering)
                                 let matching_entries = extract_matching_entries(&content, query);
@@ -867,8 +868,9 @@ impl MemoryBackend for TotalRecallBackend {
         let daily_dir = self.memory_dir.join("daily");
         let daily_path = daily_dir.join(format!("{}.md", today));
 
+        // Use size-limited read to prevent OOM; silently skip if file is too large
         if daily_path.exists() {
-            if let Ok(content) = fs::read_to_string(&daily_path) {
+            if let Ok(content) = read_to_string_limited(&daily_path) {
                 for line in content.lines() {
                     if let Some(id) = self.extract_grove_id(line) {
                         if id.starts_with(&today_prefix) {

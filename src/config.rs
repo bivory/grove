@@ -105,6 +105,9 @@ pub struct AutoSkipConfig {
 /// Valid values for the auto-skip decider field.
 pub const VALID_DECIDERS: &[&str] = &["agent", "always", "never"];
 
+/// Valid values for the retrieval strategy field.
+pub const VALID_STRATEGIES: &[&str] = &["conservative", "moderate", "aggressive"];
+
 impl AutoSkipConfig {
     /// Check if a decider value is valid.
     pub fn is_valid_decider(value: &str) -> bool {
@@ -132,6 +135,13 @@ pub struct DecayConfig {
     pub immunity_hit_rate: f64,
 }
 
+impl DecayConfig {
+    /// Check if an immunity_hit_rate value is valid (must be in [0.0, 1.0] and finite).
+    pub fn is_valid_immunity_rate(value: f64) -> bool {
+        value.is_finite() && (0.0..=1.0).contains(&value)
+    }
+}
+
 impl Default for DecayConfig {
     fn default() -> Self {
         Self {
@@ -149,6 +159,13 @@ pub struct RetrievalConfig {
     pub max_injections: u32,
     /// Retrieval strategy: "conservative", "moderate", or "aggressive".
     pub strategy: String,
+}
+
+impl RetrievalConfig {
+    /// Check if a strategy value is valid.
+    pub fn is_valid_strategy(value: &str) -> bool {
+        VALID_STRATEGIES.contains(&value)
+    }
 }
 
 impl Default for RetrievalConfig {
@@ -269,7 +286,15 @@ impl Config {
 
         // GROVE_RETRIEVAL_STRATEGY
         if let Ok(val) = env::var("GROVE_RETRIEVAL_STRATEGY") {
-            self.retrieval.strategy = val;
+            if RetrievalConfig::is_valid_strategy(&val) {
+                self.retrieval.strategy = val;
+            } else {
+                eprintln!(
+                    "Warning: Invalid GROVE_RETRIEVAL_STRATEGY value '{}'. \
+                    Valid values: {:?}. Using default '{}'.",
+                    val, VALID_STRATEGIES, self.retrieval.strategy
+                );
+            }
         }
 
         // GROVE_AUTO_SKIP_ENABLED
@@ -306,8 +331,16 @@ impl Config {
 
         // GROVE_DECAY_IMMUNITY_RATE
         if let Ok(val) = env::var("GROVE_DECAY_IMMUNITY_RATE") {
-            if let Ok(n) = val.parse() {
-                self.decay.immunity_hit_rate = n;
+            if let Ok(n) = val.parse::<f64>() {
+                if DecayConfig::is_valid_immunity_rate(n) {
+                    self.decay.immunity_hit_rate = n;
+                } else {
+                    eprintln!(
+                        "Warning: Invalid GROVE_DECAY_IMMUNITY_RATE value '{}'. \
+                        Must be in range [0.0, 1.0]. Using default '{}'.",
+                        n, self.decay.immunity_hit_rate
+                    );
+                }
             }
         }
     }
@@ -1047,5 +1080,121 @@ max_blocks = 10
 
             env::remove_var("GROVE_AUTO_SKIP_DECIDER");
         }
+    }
+
+    #[test]
+    fn test_env_var_invalid_strategy_ignored() {
+        // Clean up first (in case previous test didn't clean up)
+        env::remove_var("GROVE_RETRIEVAL_STRATEGY");
+
+        // Get the default strategy
+        let default_strategy = Config::default().retrieval.strategy.clone();
+
+        // Set an invalid strategy value
+        env::set_var("GROVE_RETRIEVAL_STRATEGY", "invalid_value");
+
+        let mut config = Config::default();
+        config.apply_env_overrides();
+
+        // Should keep the default value, not the invalid one
+        assert_eq!(config.retrieval.strategy, default_strategy);
+
+        env::remove_var("GROVE_RETRIEVAL_STRATEGY");
+    }
+
+    #[test]
+    fn test_env_var_valid_strategy_applied() {
+        // Set valid strategy values
+        for valid in VALID_STRATEGIES {
+            env::set_var("GROVE_RETRIEVAL_STRATEGY", valid);
+
+            let mut config = Config::default();
+            config.apply_env_overrides();
+
+            assert_eq!(config.retrieval.strategy, *valid);
+
+            env::remove_var("GROVE_RETRIEVAL_STRATEGY");
+        }
+    }
+
+    #[test]
+    fn test_is_valid_strategy() {
+        // Valid strategies
+        assert!(RetrievalConfig::is_valid_strategy("conservative"));
+        assert!(RetrievalConfig::is_valid_strategy("moderate"));
+        assert!(RetrievalConfig::is_valid_strategy("aggressive"));
+
+        // Invalid strategies
+        assert!(!RetrievalConfig::is_valid_strategy("invalid"));
+        assert!(!RetrievalConfig::is_valid_strategy(""));
+        assert!(!RetrievalConfig::is_valid_strategy("MODERATE")); // Case sensitive
+    }
+
+    #[test]
+    fn test_is_valid_immunity_rate() {
+        // Valid rates (within [0.0, 1.0])
+        assert!(DecayConfig::is_valid_immunity_rate(0.0));
+        assert!(DecayConfig::is_valid_immunity_rate(0.5));
+        assert!(DecayConfig::is_valid_immunity_rate(1.0));
+        assert!(DecayConfig::is_valid_immunity_rate(0.001));
+        assert!(DecayConfig::is_valid_immunity_rate(0.999));
+
+        // Invalid rates (outside [0.0, 1.0])
+        assert!(!DecayConfig::is_valid_immunity_rate(-0.1));
+        assert!(!DecayConfig::is_valid_immunity_rate(-1.0));
+        assert!(!DecayConfig::is_valid_immunity_rate(1.1));
+        assert!(!DecayConfig::is_valid_immunity_rate(2.0));
+
+        // Invalid special values
+        assert!(!DecayConfig::is_valid_immunity_rate(f64::NAN));
+        assert!(!DecayConfig::is_valid_immunity_rate(f64::INFINITY));
+        assert!(!DecayConfig::is_valid_immunity_rate(f64::NEG_INFINITY));
+    }
+
+    #[test]
+    fn test_env_var_invalid_immunity_rate_ignored() {
+        // Clean up first
+        env::remove_var("GROVE_DECAY_IMMUNITY_RATE");
+
+        // Get the default rate
+        let default_rate = Config::default().decay.immunity_hit_rate;
+
+        // Test out-of-range values
+        env::set_var("GROVE_DECAY_IMMUNITY_RATE", "-0.5");
+        let mut config = Config::default();
+        config.apply_env_overrides();
+        assert_eq!(config.decay.immunity_hit_rate, default_rate);
+
+        env::set_var("GROVE_DECAY_IMMUNITY_RATE", "1.5");
+        let mut config = Config::default();
+        config.apply_env_overrides();
+        assert_eq!(config.decay.immunity_hit_rate, default_rate);
+
+        // Test non-numeric values (these just fail to parse, which is fine)
+        env::set_var("GROVE_DECAY_IMMUNITY_RATE", "invalid");
+        let mut config = Config::default();
+        config.apply_env_overrides();
+        assert_eq!(config.decay.immunity_hit_rate, default_rate);
+
+        env::remove_var("GROVE_DECAY_IMMUNITY_RATE");
+    }
+
+    #[test]
+    fn test_env_var_valid_immunity_rate_applied() {
+        // Clean up first
+        env::remove_var("GROVE_DECAY_IMMUNITY_RATE");
+
+        // Test valid values
+        let valid_values = [0.0, 0.5, 1.0, 0.75, 0.25];
+        for value in valid_values {
+            env::set_var("GROVE_DECAY_IMMUNITY_RATE", value.to_string());
+
+            let mut config = Config::default();
+            config.apply_env_overrides();
+
+            assert_eq!(config.decay.immunity_hit_rate, value);
+        }
+
+        env::remove_var("GROVE_DECAY_IMMUNITY_RATE");
     }
 }

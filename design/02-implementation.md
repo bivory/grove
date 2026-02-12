@@ -512,20 +512,25 @@ Routes through MCP memory server tools.
 
 1. Read `session_id`, `tool_name`, `tool_input` from stdin
 2. Match against configured ticket close patterns
-3. If match: record ticket close *intent* in session state (not yet confirmed)
-4. Add trace event
-5. Allow the tool to proceed
+3. If match: transition gate immediately (Idle/Active → Pending), add
+   `TicketClosed` trace event
+4. Allow the tool to proceed
+
+**Design note:** Gate transitions happen in PreToolUse rather than PostToolUse
+because PostToolUse hooks may not fire reliably in all Claude Code configurations.
+This follows the same pattern used by the Roz quality gate plugin. The circuit
+breaker provides a safety valve if the command fails.
 
 ### 5.3 PostToolUse Hook
 
 `grove hook post-tool-use`
 
+Fallback mechanism — may not fire reliably in all configurations.
+
 1. Read `session_id`, `tool_name`, `tool_input`, `tool_response` from stdin
-2. If a ticket close intent exists in session state:
-   - Check `tool_response` for success
-   - If successful: set gate status to `Pending`, add `TicketClosed` trace event
-   - If failed: clear intent, add `TicketCloseFailed` trace event
-3. If no intent: no-op
+2. If gate is Pending and `tool_response.success` is false:
+   - Revert gate status Pending → Active, add `TicketCloseFailed` trace event
+3. Otherwise: no-op
 
 ### 5.4 Stop Hook
 

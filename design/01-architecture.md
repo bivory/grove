@@ -266,8 +266,8 @@ stateDiagram-v2
 |------|-------|----|--------|
 | Idle | Ticket detected via discovery | Active | Store ticket context |
 | Idle | Stop hook (session mode, diff > threshold) | Pending | Enable gate |
-| Active | Ticket close confirmed (PostToolUse) | Pending | Enable gate |
-| Active | Ticket close failed (PostToolUse) | Active | Clear intent, log |
+| Active | Ticket close detected (PreToolUse) | Pending | Enable gate |
+| Pending | Ticket close failed (PostToolUse) | Active | Revert transition, log |
 | Active | Session ends without close | Idle | No reflection needed |
 | Pending | Stop hook fires | Blocked | Block with instructions |
 | Pending | Auto-skip (under threshold) | Skipped | Log skip to stats |
@@ -605,28 +605,30 @@ Steps:
 Fires before Claude Code executes a tool.
 
 1. Match tool name and input against ticket close patterns
-2. If match: record ticket close *intent* in session state, add trace event
+2. If match: transition gate immediately (Idle/Active → Pending), add trace event
 3. Allow the tool to proceed (gate fires on Stop, not here)
 
 Design choice: unlike roz which denies tools, grove allows ticket-close tools.
 The ticket close should succeed; reflection happens before the session ends.
 
-**Note:** PreToolUse fires *before* execution — the command might fail. Grove
-records the intent here and confirms via PostToolUse.
+**Note:** We transition the gate in PreToolUse rather than waiting for
+PostToolUse because PostToolUse hooks may not fire reliably in all Claude Code
+configurations. This follows the same pattern used by the Roz quality gate
+plugin. If the command fails, the circuit breaker provides a safety valve.
 
 ### 7.3 Post-Tool-Use
 
-Fires after Claude Code executes a tool.
+Fires after Claude Code executes a tool. **Note:** This hook serves as a
+fallback mechanism — PostToolUse may not fire reliably in all configurations.
 
-1. If a ticket close intent was recorded in PreToolUse:
-   - Check `tool_response.success` from the PostToolUse payload
-   - If successful: transition gate status Active → Pending
-   - If failed: clear the intent, log trace event ("ticket close failed")
-2. If no intent recorded: no-op
+1. If gate is Pending and `tool_response.success` is false:
+   - Revert gate status Pending → Active
+   - Log trace event ("ticket close failed, reverting gate")
+2. Otherwise: no-op (gate was already transitioned in PreToolUse)
 
-This two-phase approach (PreToolUse records intent, PostToolUse confirms)
-solves the problem of pattern-matching against commands that might fail.
-The gate only transitions when the ticket close actually succeeded.
+Since PostToolUse may not fire reliably, Grove assumes commands succeed and
+transitions the gate in PreToolUse. The circuit breaker provides a safety
+valve if this assumption proves wrong.
 
 ### 7.4 Stop
 

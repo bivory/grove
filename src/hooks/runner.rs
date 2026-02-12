@@ -170,8 +170,13 @@ impl<S: SessionStore> HookRunner<S> {
     /// Handle the pre-tool-use hook.
     ///
     /// 1. Match tool against ticket close patterns
-    /// 2. If match, record intent in session state
+    /// 2. If match, transition gate immediately (assuming command will succeed)
     /// 3. Always allow the tool to proceed
+    ///
+    /// Note: We transition the gate in PreToolUse rather than PostToolUse because
+    /// PostToolUse hooks may not fire reliably in all Claude Code configurations.
+    /// This follows the same pattern used by the Roz quality gate plugin.
+    /// If the command fails, the circuit breaker provides a safety valve.
     fn handle_pre_tool_use(&self, input: &str) -> Result<String> {
         let hook_input: PreToolUseInput = parse_input(input)?;
 
@@ -197,10 +202,46 @@ impl<S: SessionStore> HookRunner<S> {
             // Extract ticket ID from command (simplified extraction)
             let ticket_id = extract_ticket_id(command).unwrap_or_else(|| "unknown".to_string());
 
-            // Record intent
+            // Record intent for tracking
             let intent = TicketCloseIntent::new(&ticket_id, command);
-            let mut gate = Gate::new(&mut session.gate, &self.config, &session.id);
-            gate.record_close_intent(intent);
+
+            // Transition gate immediately based on current state
+            // We assume the command will succeed - if it fails, circuit breaker handles it
+            let current_status = session.gate.status;
+
+            if current_status == GateStatus::Idle {
+                // Idle -> Active -> Pending
+                let ticket = TicketContext::new(&ticket_id, "detected", "Ticket closed");
+                let mut gate = Gate::new(&mut session.gate, &self.config, &session.id);
+                gate.record_close_intent(intent);
+                let _ = gate.detect_ticket(ticket);
+                let _ = gate.confirm_ticket_close();
+                session.add_trace(EventType::TicketClosed, None);
+            } else if current_status == GateStatus::Active {
+                // Active -> Pending
+                let mut gate = Gate::new(&mut session.gate, &self.config, &session.id);
+                gate.record_close_intent(intent);
+                let _ = gate.confirm_ticket_close();
+                session.add_trace(EventType::TicketClosed, None);
+            } else if current_status.is_terminal() {
+                // Terminal (Reflected/Skipped) -> reset -> Active -> Pending
+                // Allows multiple ticket closures in same session
+                let ticket = TicketContext::new(&ticket_id, "detected", "Ticket closed");
+                let mut gate = Gate::new(&mut session.gate, &self.config, &session.id);
+                let _ = gate.reset_for_new_ticket();
+                gate.record_close_intent(intent);
+                let _ = gate.detect_ticket(ticket);
+                let _ = gate.confirm_ticket_close();
+                session.add_trace(
+                    EventType::GateStatusChanged,
+                    Some("reset from terminal state for new ticket".to_string()),
+                );
+                session.add_trace(EventType::TicketClosed, None);
+            } else {
+                // Already in Pending or Blocked - just record intent
+                let mut gate = Gate::new(&mut session.gate, &self.config, &session.id);
+                gate.record_close_intent(intent);
+            }
 
             session.add_trace(
                 EventType::TicketCloseDetected,
@@ -225,9 +266,12 @@ impl<S: SessionStore> HookRunner<S> {
 
     /// Handle the post-tool-use hook.
     ///
-    /// 1. Check if a ticket close intent was recorded
-    /// 2. If successful, transition gate to Pending
-    /// 3. If failed, clear the intent
+    /// This is a fallback handler - the primary gate transition happens in PreToolUse.
+    /// PostToolUse may not fire reliably in all Claude Code configurations.
+    ///
+    /// 1. Check if a ticket close intent was recorded but gate not yet transitioned
+    /// 2. If successful and gate still needs transition, complete it
+    /// 3. If failed, clear the intent (allows retry)
     fn handle_post_tool_use(&self, input: &str) -> Result<String> {
         let hook_input: PostToolUseInput = parse_input(input)?;
 
@@ -749,9 +793,18 @@ mod tests {
         let result = runner.run_with_input(HookType::PreToolUse, input);
         assert!(result.is_ok());
 
-        // Verify intent was recorded
+        // Verify gate was transitioned to Pending (intent is consumed on transition)
         let session = runner.store.get("close-detect-test").unwrap().unwrap();
-        assert!(session.gate.ticket_close_intent.is_some());
+        assert_eq!(
+            session.gate.status,
+            GateStatus::Pending,
+            "Gate should transition to Pending in PreToolUse"
+        );
+        // Intent is consumed by confirm_ticket_close()
+        assert!(
+            session.gate.ticket_close_intent.is_none(),
+            "Intent should be consumed after gate transition"
+        );
     }
 
     // Stop handler tests
@@ -1250,13 +1303,23 @@ mod tests {
             .run_with_input(HookType::PreToolUse, pre_input)
             .unwrap();
 
-        // Verify intent recorded
+        // Verify gate was transitioned to Pending in PreToolUse (not PostToolUse)
         let session = runner.store.get("beads-close-test").unwrap().unwrap();
-        assert!(session.gate.ticket_close_intent.is_some());
-        let intent = session.gate.ticket_close_intent.as_ref().unwrap();
-        assert_eq!(intent.ticket_id, "issue-456");
+        assert_eq!(
+            session.gate.status,
+            GateStatus::Pending,
+            "Gate should transition to Pending in PreToolUse"
+        );
+        // Intent is consumed by confirm_ticket_close()
+        assert!(
+            session.gate.ticket_close_intent.is_none(),
+            "Intent should be consumed after gate transition"
+        );
+        // Verify ticket context was set
+        assert!(session.gate.ticket.is_some());
+        assert_eq!(session.gate.ticket.as_ref().unwrap().ticket_id, "issue-456");
 
-        // 3. Post-tool-use: close confirmed
+        // 3. Post-tool-use: now a no-op since gate already transitioned
         let post_input = r#"{
             "session_id": "beads-close-test",
             "transcript_path": "/tmp/transcript.jsonl",
@@ -1269,7 +1332,7 @@ mod tests {
             .run_with_input(HookType::PostToolUse, post_input)
             .unwrap();
 
-        // Verify gate is now Pending
+        // Verify gate is still Pending (no change from PostToolUse)
         let session = runner.store.get("beads-close-test").unwrap().unwrap();
         assert_eq!(session.gate.status, GateStatus::Pending);
     }
@@ -1300,11 +1363,20 @@ mod tests {
             .run_with_input(HookType::PreToolUse, pre_input)
             .unwrap();
 
-        // Verify intent recorded
+        // Verify gate was transitioned to Pending in PreToolUse
         let session = runner.store.get("beads-complete-test").unwrap().unwrap();
-        assert!(session.gate.ticket_close_intent.is_some());
+        assert_eq!(
+            session.gate.status,
+            GateStatus::Pending,
+            "Gate should transition to Pending in PreToolUse"
+        );
+        // Intent is consumed by confirm_ticket_close()
+        assert!(
+            session.gate.ticket_close_intent.is_none(),
+            "Intent should be consumed after gate transition"
+        );
 
-        // 3. Post-tool-use: close confirmed
+        // 3. Post-tool-use: now a no-op since gate already transitioned
         let post_input = r#"{
             "session_id": "beads-complete-test",
             "transcript_path": "/tmp/transcript.jsonl",
@@ -1317,7 +1389,7 @@ mod tests {
             .run_with_input(HookType::PostToolUse, post_input)
             .unwrap();
 
-        // Verify gate is now Pending
+        // Verify gate is still Pending
         let session = runner.store.get("beads-complete-test").unwrap().unwrap();
         assert_eq!(session.gate.status, GateStatus::Pending);
     }
@@ -1385,7 +1457,7 @@ mod tests {
             .run_with_input(HookType::SessionStart, start_input)
             .unwrap();
 
-        // 2. First ticket close: pre-tool-use
+        // 2. First ticket close: pre-tool-use (now also transitions gate)
         let pre_input1 = r#"{
             "session_id": "multi-ticket-test",
             "transcript_path": "/tmp/transcript.jsonl",
@@ -1397,24 +1469,11 @@ mod tests {
             .run_with_input(HookType::PreToolUse, pre_input1)
             .unwrap();
 
-        // 3. First ticket close: post-tool-use
-        let post_input1 = r#"{
-            "session_id": "multi-ticket-test",
-            "transcript_path": "/tmp/transcript.jsonl",
-            "cwd": "/tmp/project",
-            "tool_name": "Bash",
-            "tool_input": {"command": "tissue status grove-001 closed"},
-            "tool_response": "grove-001"
-        }"#;
-        runner
-            .run_with_input(HookType::PostToolUse, post_input1)
-            .unwrap();
-
-        // Verify gate is Pending
+        // Verify gate is Pending after PreToolUse (no need for PostToolUse)
         let session = runner.store.get("multi-ticket-test").unwrap().unwrap();
         assert_eq!(session.gate.status, GateStatus::Pending);
 
-        // 4. Simulate reflection by setting gate to Reflected manually
+        // 3. Simulate reflection by setting gate to Reflected manually
         let mut session = runner.store.get("multi-ticket-test").unwrap().unwrap();
         session.gate.status = GateStatus::Reflected;
         session.gate.reflection = Some(crate::core::ReflectionResult::new(
@@ -1424,7 +1483,7 @@ mod tests {
         ));
         runner.store.put(&session).unwrap();
 
-        // 5. Second ticket close: pre-tool-use
+        // 4. Second ticket close: pre-tool-use (should reset from terminal state)
         let pre_input2 = r#"{
             "session_id": "multi-ticket-test",
             "transcript_path": "/tmp/transcript.jsonl",
@@ -1436,24 +1495,7 @@ mod tests {
             .run_with_input(HookType::PreToolUse, pre_input2)
             .unwrap();
 
-        // Verify intent was recorded even in Reflected state
-        let session = runner.store.get("multi-ticket-test").unwrap().unwrap();
-        assert!(session.gate.ticket_close_intent.is_some());
-
-        // 6. Second ticket close: post-tool-use
-        let post_input2 = r#"{
-            "session_id": "multi-ticket-test",
-            "transcript_path": "/tmp/transcript.jsonl",
-            "cwd": "/tmp/project",
-            "tool_name": "Bash",
-            "tool_input": {"command": "tissue status grove-002 closed"},
-            "tool_response": "grove-002"
-        }"#;
-        runner
-            .run_with_input(HookType::PostToolUse, post_input2)
-            .unwrap();
-
-        // Verify gate is now Pending again (reset from Reflected)
+        // Verify gate was reset and is now Pending again
         let session = runner.store.get("multi-ticket-test").unwrap().unwrap();
         assert_eq!(session.gate.status, GateStatus::Pending);
         assert!(session.gate.reflection.is_none()); // Previous reflection cleared

@@ -424,7 +424,32 @@ pub fn grove_home() -> Option<PathBuf> {
     }
 
     // Fall back to ~/.grove
-    dirs::home_dir().map(|h| h.join(".grove"))
+    if let Some(home) = dirs::home_dir() {
+        return Some(home.join(".grove"));
+    }
+
+    // Fallback for containerized/minimal environments without HOME
+    let fallback_path = fallback_grove_home();
+    tracing::warn!(
+        "HOME not set, using fallback location: {}",
+        fallback_path.display()
+    );
+    Some(fallback_path)
+}
+
+/// Get fallback grove home path when HOME is unavailable.
+#[cfg(unix)]
+fn fallback_grove_home() -> PathBuf {
+    use std::os::unix::fs::MetadataExt;
+    // Get UID for unique temp directory
+    let uid = std::fs::metadata("/").map(|m| m.uid()).unwrap_or(0);
+    PathBuf::from(format!("/tmp/grove-{}", uid))
+}
+
+/// Get fallback grove home path when HOME is unavailable.
+#[cfg(not(unix))]
+fn fallback_grove_home() -> PathBuf {
+    std::env::temp_dir().join("grove")
 }
 
 /// Get the sessions directory.

@@ -265,8 +265,9 @@ impl<'a> Gate<'a> {
                 "auto: {} lines changed (threshold: {})",
                 lines, threshold
             )),
-            (None, "agent") => None, // Agent decides when diff unavailable
-            (None, "always") => Some("auto: diff unavailable, always skip".to_string()),
+            // When diff is unavailable, we can't determine if it's a small change
+            // Don't auto-skip for either decider - require explicit decision
+            (None, _) => None,
             _ => None,
         }
     }
@@ -680,12 +681,17 @@ mod tests {
 
     #[test]
     fn test_auto_skip_no_diff_always() {
+        // When diff is unavailable, we can't determine if it's a small change
+        // Don't auto-skip - require explicit decision (fail-safe, not fail-open)
         let config = config_with_auto_skip(true, 10, "always");
         let mut state = GateState::default();
         let gate = Gate::new(&mut state, &config, "session-1");
 
         let reason = gate.evaluate_auto_skip(None);
-        assert!(reason.is_some());
+        assert!(
+            reason.is_none(),
+            "Should not auto-skip when diff is unavailable - require explicit decision"
+        );
     }
 
     #[test]

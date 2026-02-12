@@ -1347,9 +1347,14 @@ mod tests {
 
         let manager = StatsCacheManager::new(&cache_path, &log_path);
 
-        let mut cache = StatsCache::default();
-        cache.log_entries_processed = 42;
-        cache.reflections.completed = 5;
+        let cache = StatsCache {
+            log_entries_processed: 42,
+            reflections: ReflectionStats {
+                completed: 5,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
 
         manager.save(&cache).unwrap();
 
@@ -1368,13 +1373,17 @@ mod tests {
         let manager = StatsCacheManager::new(&cache_path, &log_path);
 
         // First save
-        let mut cache1 = StatsCache::default();
-        cache1.log_entries_processed = 10;
+        let cache1 = StatsCache {
+            log_entries_processed: 10,
+            ..Default::default()
+        };
         manager.save(&cache1).unwrap();
 
         // Second save
-        let mut cache2 = StatsCache::default();
-        cache2.log_entries_processed = 20;
+        let cache2 = StatsCache {
+            log_entries_processed: 20,
+            ..Default::default()
+        };
         manager.save(&cache2).unwrap();
 
         // Should have the latest value

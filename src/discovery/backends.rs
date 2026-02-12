@@ -151,7 +151,8 @@ fn probe_backend(cwd: &Path, backend_type: BackendType) -> Option<BackendInfo> {
 
 /// Probe for an explicitly configured backend.
 ///
-/// Checks for a `backend` key in `.grove/config.toml`.
+/// Checks for `[backends] primary` in `.grove/config.toml` and returns
+/// the corresponding backend type if valid.
 fn probe_config(cwd: &Path) -> Option<BackendInfo> {
     let config_path = project_grove_dir(cwd).join("config.toml");
 
@@ -163,20 +164,17 @@ fn probe_config(cwd: &Path) -> Option<BackendInfo> {
     let content = fs::read_to_string(&config_path).ok()?;
     let config: toml::Value = toml::from_str(&content).ok()?;
 
-    // Check for backends.primary or backends.default key
+    // Check for backends.primary key
     let backends = config.get("backends")?;
+    let primary = backends.get("primary")?;
 
-    // If there's an explicit "primary" or non-empty discovery list, consider config active
-    if backends.get("primary").is_some() {
-        // Config explicitly declares a backend
-        return Some(BackendInfo::new(
-            BackendType::Config,
-            Some(config_path),
-            false,
-        ));
-    }
+    // Parse the primary value as a backend type
+    let backend_name = primary.as_str()?;
+    let backend_type = BackendType::parse(backend_name)?;
 
-    None
+    // Return the actual configured backend type, not BackendType::Config
+    // This allows users to explicitly configure their backend
+    Some(BackendInfo::new(backend_type, Some(config_path), false))
 }
 
 /// Probe for Total Recall memory system.
@@ -306,8 +304,9 @@ pub fn create_primary_backend(cwd: &Path, config: Option<&Config>) -> Box<dyn Me
                 Box::new(FallbackBackend::new(tr_backend, md_backend))
             }
             BackendType::Config | BackendType::Mcp => {
-                // Config and MCP currently fall back to markdown
-                // MCP support is Stage 2
+                // MCP support is Stage 2, falls back to markdown
+                // Config should no longer be returned by probe_config (it returns the actual type)
+                // but kept for exhaustiveness and future compatibility
                 let path = project_learnings_path(cwd);
                 Box::new(MarkdownBackend::new(&path))
             }
@@ -547,7 +546,7 @@ mod tests {
     }
 
     #[test]
-    fn test_probe_config_with_primary() {
+    fn test_probe_config_with_primary_total_recall() {
         let dir = TempDir::new().unwrap();
         let grove_dir = dir.path().join(".grove");
         fs::create_dir_all(&grove_dir).unwrap();
@@ -561,7 +560,42 @@ mod tests {
 
         assert!(result.is_some());
         let info = result.unwrap();
-        assert_eq!(info.backend_type, BackendType::Config);
+        // Should return the actual backend type, not BackendType::Config
+        assert_eq!(info.backend_type, BackendType::TotalRecall);
+    }
+
+    #[test]
+    fn test_probe_config_with_primary_markdown() {
+        let dir = TempDir::new().unwrap();
+        let grove_dir = dir.path().join(".grove");
+        fs::create_dir_all(&grove_dir).unwrap();
+        fs::write(
+            grove_dir.join("config.toml"),
+            "[backends]\nprimary = \"markdown\"\n",
+        )
+        .unwrap();
+
+        let result = probe_config(dir.path());
+
+        assert!(result.is_some());
+        let info = result.unwrap();
+        assert_eq!(info.backend_type, BackendType::Markdown);
+    }
+
+    #[test]
+    fn test_probe_config_with_invalid_primary() {
+        let dir = TempDir::new().unwrap();
+        let grove_dir = dir.path().join(".grove");
+        fs::create_dir_all(&grove_dir).unwrap();
+        fs::write(
+            grove_dir.join("config.toml"),
+            "[backends]\nprimary = \"invalid-backend\"\n",
+        )
+        .unwrap();
+
+        // Invalid backend name should return None
+        let result = probe_config(dir.path());
+        assert!(result.is_none());
     }
 
     // detect_backends tests

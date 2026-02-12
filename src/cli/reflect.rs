@@ -149,9 +149,9 @@ impl<S: SessionStore, B: MemoryBackend> ReflectCommand<S, B> {
         let mut session = session_result
             .fail_open_with(
                 "loading session",
-                Some(SessionState::new(&session_id, ".", ".")),
+                Some(SessionState::new_fallback(&session_id)),
             )
-            .unwrap_or_else(|| SessionState::new(&session_id, ".", "."));
+            .unwrap_or_else(|| SessionState::new_fallback(&session_id));
 
         // Get existing learnings for duplicate check
         let existing = self

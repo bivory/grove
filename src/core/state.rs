@@ -51,6 +51,18 @@ impl SessionState {
         }
     }
 
+    /// Create a fallback session when no existing session is found.
+    ///
+    /// Uses the actual current working directory and a sentinel value for
+    /// transcript_path. This is preferred over creating sessions with
+    /// placeholder values like "." which could cause issues if persisted.
+    pub fn new_fallback(id: impl Into<String>) -> Self {
+        let cwd = std::env::current_dir()
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|_| ".".to_string());
+        Self::new(id, cwd, "<unknown>")
+    }
+
     /// Add a trace event to the session.
     pub fn add_trace(&mut self, event_type: EventType, details: Option<String>) {
         self.trace.push(TraceEvent::new(event_type, details));
@@ -517,6 +529,32 @@ mod tests {
         assert_eq!(session.gate.status, GateStatus::Idle);
         assert!(session.ticket.is_none());
         assert!(session.trace.is_empty());
+    }
+
+    #[test]
+    fn test_session_state_new_fallback() {
+        let session = SessionState::new_fallback("test-id");
+
+        assert_eq!(session.id, "test-id");
+        // cwd should be the actual current directory or "." as fallback
+        assert!(!session.cwd.is_empty());
+        // transcript_path should be the sentinel value
+        assert_eq!(session.transcript_path, "<unknown>");
+        assert_eq!(session.gate.status, GateStatus::Idle);
+        assert!(session.ticket.is_none());
+        assert!(session.trace.is_empty());
+    }
+
+    #[test]
+    fn test_session_state_new_fallback_has_valid_cwd() {
+        let session = SessionState::new_fallback("test-id");
+
+        // The cwd should be a valid path (either absolute path or "." as fallback)
+        // It should NOT be placeholder values that look like paths but aren't valid
+        assert!(!session.cwd.is_empty());
+        // Verify it's either "." (fallback) or an absolute path
+        let path = std::path::Path::new(&session.cwd);
+        assert!(session.cwd == "." || path.is_absolute() || path.exists());
     }
 
     #[test]

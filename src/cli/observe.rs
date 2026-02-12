@@ -90,9 +90,9 @@ impl<S: SessionStore> ObserveCommand<S> {
         let mut session = session_result
             .fail_open_with(
                 "loading session",
-                Some(SessionState::new(session_id, ".", ".")),
+                Some(SessionState::new_fallback(session_id)),
             )
-            .unwrap_or_else(|| SessionState::new(session_id, ".", "."));
+            .unwrap_or_else(|| SessionState::new_fallback(session_id));
 
         // Create observation
         let observation = SubagentObservation::new(trimmed_note);

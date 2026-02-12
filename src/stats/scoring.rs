@@ -275,7 +275,7 @@ fn score_files(query_files: &[String], context_files: &[String]) -> f64 {
 /// Returns true if:
 /// - Paths are exactly equal (and non-empty)
 /// - Same filename (last path component)
-/// - One path ends with the other (suffix match)
+/// - One path ends with the other at a path separator boundary
 fn files_overlap(path1: &str, path2: &str) -> bool {
     // Empty paths don't match
     if path1.is_empty() || path2.is_empty() {
@@ -294,11 +294,15 @@ fn files_overlap(path1: &str, path2: &str) -> bool {
         return true;
     }
 
-    // Check suffix match
+    // Check suffix match at path separator boundary
+    // e.g., "foo/bar/main.rs" should match "bar/main.rs" but NOT "r/main.rs"
     let normalized1 = path1.trim_start_matches('/');
     let normalized2 = path2.trim_start_matches('/');
 
-    normalized1.ends_with(normalized2) || normalized2.ends_with(normalized1)
+    // Either they're equal after normalization, or one ends with "/" + the other
+    normalized1 == normalized2
+        || normalized1.ends_with(&format!("/{normalized2}"))
+        || normalized2.ends_with(&format!("/{normalized1}"))
 }
 
 /// Score keyword matches in the summary.
@@ -871,6 +875,48 @@ mod tests {
     fn test_files_overlap_empty_path() {
         assert!(!files_overlap("", ""));
         assert!(!files_overlap("src/main.rs", ""));
+    }
+
+    #[test]
+    fn test_files_overlap_partial_directory_same_filename() {
+        // Even though "r/main.rs" is a partial directory path, both have "main.rs"
+        // as their filename, so they should match based on filename equality
+        assert!(files_overlap("foo/bar/main.rs", "r/main.rs"));
+        assert!(files_overlap("foo/bar/main.rs", "ar/main.rs"));
+    }
+
+    #[test]
+    fn test_files_overlap_partial_suffix_no_match() {
+        // This is the key fix: partial suffix matching should NOT work for
+        // paths where the suffix doesn't start at a path boundary
+        // e.g., "src/core.rs" should NOT match "ore.rs" (partial filename)
+        // But since filenames differ, this would already fail filename check
+        assert!(!files_overlap("src/core.rs", "ore.rs"));
+    }
+
+    #[test]
+    fn test_files_overlap_partial_filename_no_match() {
+        // "somelib.rs".ends_with("lib.rs") would be true with naive check
+        // but should NOT match because "somelib.rs" != "lib.rs" (different filenames)
+        assert!(!files_overlap("somelib.rs", "lib.rs"));
+        assert!(!files_overlap("main.rs", "ain.rs"));
+        assert!(!files_overlap("error_handling.rs", "handling.rs"));
+    }
+
+    #[test]
+    fn test_files_overlap_valid_suffix_matches() {
+        // These should all match because they're at path boundaries
+        assert!(files_overlap("foo/bar/main.rs", "bar/main.rs"));
+        assert!(files_overlap("foo/bar/main.rs", "main.rs"));
+        assert!(files_overlap("/full/path/src/lib.rs", "src/lib.rs"));
+        assert!(files_overlap("/full/path/src/lib.rs", "lib.rs"));
+    }
+
+    #[test]
+    fn test_files_overlap_normalized_paths() {
+        // Leading slashes should be stripped for comparison
+        assert!(files_overlap("/src/main.rs", "src/main.rs"));
+        assert!(files_overlap("src/main.rs", "/src/main.rs"));
     }
 
     // =======================================================================

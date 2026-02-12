@@ -712,13 +712,15 @@ fn parse_learnings_from_markdown(content: &str) -> Result<Vec<CompoundLearning>>
     }
 
     // Handle last learning
-    if let Some(builder) = current_learning {
+    if let Some(mut builder) = current_learning {
+        // If we were collecting detail lines, set the detail on the builder
         if in_detail && !detail_lines.is_empty() {
             let detail = detail_lines.join("\n").trim().to_string();
-            learnings.push(builder.with_detail(detail).build()?);
-        } else if builder.detail.is_some() {
-            learnings.push(builder.build()?);
+            builder.detail = Some(detail);
         }
+        // Always try to push the learning - build() will use defaults for missing fields
+        // This ensures learnings without details (e.g., after a separator) aren't lost
+        learnings.push(builder.build()?);
     }
 
     Ok(learnings)
@@ -1580,5 +1582,65 @@ Detail text.
         // Should successfully parse
         let learnings = backend.parse_learnings().unwrap();
         assert_eq!(learnings.len(), 10);
+    }
+
+    #[test]
+    fn test_parse_learning_after_separator_not_lost() {
+        // Regression test: learnings after a separator should not be lost
+        let content = r#"## cl_001
+**Category:** Pattern
+**Summary:** First learning
+**Scope:** Project | **Confidence:** High | **Status:** Active
+
+Detail for first learning.
+
+---
+
+## cl_002
+**Category:** Pitfall
+**Summary:** Second learning without detail
+**Scope:** Project | **Confidence:** Medium | **Status:** Active
+
+---
+"#;
+        let learnings = parse_learnings_from_markdown(content).unwrap();
+
+        // Both learnings should be parsed
+        assert_eq!(learnings.len(), 2);
+        assert_eq!(learnings[0].id, "cl_001");
+        assert_eq!(learnings[0].summary, "First learning");
+        assert_eq!(learnings[1].id, "cl_002");
+        assert_eq!(learnings[1].summary, "Second learning without detail");
+    }
+
+    #[test]
+    fn test_parse_learning_at_end_without_separator() {
+        // Learning at end of file without trailing separator should still be parsed
+        let content = r#"## cl_001
+**Category:** Pattern
+**Summary:** First learning
+**Scope:** Project | **Confidence:** High | **Status:** Active
+
+Detail here."#;
+        let learnings = parse_learnings_from_markdown(content).unwrap();
+
+        assert_eq!(learnings.len(), 1);
+        assert_eq!(learnings[0].summary, "First learning");
+        assert!(learnings[0].detail.contains("Detail here"));
+    }
+
+    #[test]
+    fn test_parse_learning_without_detail() {
+        // Learning without any detail content should still be parsed
+        let content = r#"## cl_001
+**Category:** Pattern
+**Summary:** Learning with no detail
+**Scope:** Project | **Confidence:** High | **Status:** Active
+**Tags:** `test`
+---"#;
+        let learnings = parse_learnings_from_markdown(content).unwrap();
+
+        assert_eq!(learnings.len(), 1);
+        assert_eq!(learnings[0].summary, "Learning with no detail");
     }
 }

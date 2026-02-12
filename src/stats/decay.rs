@@ -128,11 +128,9 @@ pub fn run_decay_evaluation(
     let mut decayed = Vec::new();
 
     for (learning_id, stats) in &cache.learnings {
-        // Get created_at from the provided map, or use a very old default
-        let created_at = learning_timestamps
-            .get(learning_id)
-            .copied()
-            .unwrap_or(DateTime::UNIX_EPOCH);
+        // Get created_at from the provided map. If missing, use `now` (fail-open:
+        // treat as new rather than as UNIX_EPOCH which would cause immediate archival)
+        let created_at = learning_timestamps.get(learning_id).copied().unwrap_or(now);
 
         let result = evaluate(stats, created_at, config, now);
 
@@ -218,10 +216,9 @@ pub fn get_decay_warnings(
             continue;
         }
 
-        let created_at = learning_timestamps
-            .get(learning_id)
-            .copied()
-            .unwrap_or(DateTime::UNIX_EPOCH);
+        // Fail-open: use `now` for missing timestamps (treat as new rather than as
+        // UNIX_EPOCH which would cause immediate warnings)
+        let created_at = learning_timestamps.get(learning_id).copied().unwrap_or(now);
 
         let last_verified = compute_last_verified(stats, created_at);
         let age = now - last_verified;
@@ -593,5 +590,65 @@ mod tests {
 
         let result = compute_last_verified(&stats, created_at);
         assert_eq!(result, referenced_at);
+    }
+
+    #[test]
+    fn test_missing_timestamp_does_not_cause_archival() {
+        // Test that learnings with missing timestamps are NOT immediately archived.
+        // This is fail-open behavior: treat missing timestamps as "new" (use `now`).
+        let now = Utc::now();
+        let config = default_config();
+
+        let mut cache = StatsCache::new();
+        // L001 has no timestamp in the map
+        cache
+            .learnings
+            .insert("L001".to_string(), make_stats(None, None, 0.0, false));
+        // L002 has an old timestamp and should be archived
+        cache
+            .learnings
+            .insert("L002".to_string(), make_stats(None, None, 0.0, false));
+
+        // Only provide timestamp for L002 (old), not for L001
+        let mut timestamps = HashMap::new();
+        timestamps.insert("L002".to_string(), now - Duration::days(100));
+        // L001 intentionally missing from timestamps
+
+        let decayed = run_decay_evaluation(&cache, &timestamps, &config, now);
+
+        // L001 should NOT be archived (fail-open: treated as new)
+        assert!(
+            !decayed.contains(&"L001".to_string()),
+            "Learning with missing timestamp should NOT be archived (fail-open)"
+        );
+        // L002 should be archived (has old timestamp)
+        assert!(
+            decayed.contains(&"L002".to_string()),
+            "Learning with old timestamp should be archived"
+        );
+    }
+
+    #[test]
+    fn test_missing_timestamp_does_not_cause_warning() {
+        // Test that learnings with missing timestamps do NOT get decay warnings.
+        let now = Utc::now();
+        let config = default_config(); // 90 days
+
+        let mut cache = StatsCache::new();
+        // L001 has no timestamp in the map
+        cache
+            .learnings
+            .insert("L001".to_string(), make_stats(None, None, 0.0, false));
+
+        // Empty timestamps map
+        let timestamps = HashMap::new();
+
+        let warnings = get_decay_warnings(&cache, &timestamps, &config, 14, now);
+
+        // L001 should NOT have a warning (fail-open: treated as new)
+        assert!(
+            warnings.is_empty(),
+            "Learning with missing timestamp should NOT get decay warning (fail-open)"
+        );
     }
 }

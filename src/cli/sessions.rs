@@ -109,12 +109,9 @@ impl SessionsOutput {
 
         for session in &self.sessions {
             let ticket = session.ticket_id.as_deref().unwrap_or("-");
-            // Truncate timestamp to just date and time
-            let updated = if session.updated_at.len() > 19 {
-                &session.updated_at[..19]
-            } else {
-                &session.updated_at
-            };
+            // Truncate timestamp to just date and time (YYYY-MM-DDTHH:MM:SS)
+            // Use char-based truncation for UTF-8 safety even though RFC 3339 is ASCII-only
+            let updated: String = session.updated_at.chars().take(19).collect();
             lines.push(format!(
                 "{:<36}  {:<10}  {:<20}  {}",
                 session.id, session.gate_status, updated, ticket

@@ -186,11 +186,12 @@ impl<'a> Gate<'a> {
         Ok(())
     }
 
-    /// Transition: Blocked → Reflected (reflection completes)
+    /// Transition: Pending/Blocked → Reflected (reflection completes)
     ///
     /// Called when structured reflection is successfully completed.
+    /// Allows proactive reflection from Pending state (before stop hook fires).
     pub fn complete_reflection(&mut self, result: ReflectionResult) -> Result<()> {
-        if self.state.status != GateStatus::Blocked {
+        if !self.state.status.requires_reflection() {
             return Err(GroveError::invalid_state(format!(
                 "Cannot complete reflection in {} state",
                 self.status_name()
@@ -838,9 +839,25 @@ mod tests {
     }
 
     #[test]
-    fn test_complete_reflection_fails_when_pending() {
+    fn test_complete_reflection_succeeds_from_pending() {
         let mut state = GateState {
             status: GateStatus::Pending,
+            ..Default::default()
+        };
+        let config = default_config();
+        let mut gate = Gate::new(&mut state, &config, "session-1");
+
+        let result = ReflectionResult::new(vec![], 0, 0);
+        // Proactive reflection from Pending should now succeed
+        let res = gate.complete_reflection(result);
+        assert!(res.is_ok());
+        assert_eq!(gate.status(), GateStatus::Reflected);
+    }
+
+    #[test]
+    fn test_complete_reflection_fails_when_idle() {
+        let mut state = GateState {
+            status: GateStatus::Idle,
             ..Default::default()
         };
         let config = default_config();

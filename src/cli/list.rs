@@ -174,10 +174,17 @@ impl<B: MemoryBackend> ListCommand<B> {
                     .map(|l| LearningInfo::from_learning(l, Some(decay_config)))
                     .collect();
 
-                // Filter to stale only if requested
+                // Calculate stale count using same threshold as filter
+                // (not the hardcoded 7-day approaching_decay threshold)
                 let stale_count = learning_infos
                     .iter()
-                    .filter(|l| l.approaching_decay == Some(true))
+                    .filter(|l| {
+                        if let Some(days) = l.days_until_decay {
+                            days <= stale_days as i64 && days > 0
+                        } else {
+                            false
+                        }
+                    })
                     .count();
 
                 if options.stale {
@@ -430,6 +437,40 @@ This pattern has been archived.
         assert!(output.success);
         // Should find the old pitfall that's approaching decay
         assert!(output.stale_count.is_some());
+    }
+
+    #[test]
+    fn test_list_stale_count_uses_stale_days_option() {
+        let (_temp, backend) = setup_with_learnings();
+        let config = Config::default();
+
+        let cmd = ListCommand::new(backend, config);
+
+        // With default stale_days=7, get the count
+        let options_7_days = ListOptions {
+            stale: true,
+            stale_days: Some(7),
+            ..Default::default()
+        };
+        let output_7 = cmd.run(&options_7_days);
+        let count_7 = output_7.stale_count.unwrap_or(0);
+
+        // With stale_days=30, should include more learnings
+        let options_30_days = ListOptions {
+            stale: true,
+            stale_days: Some(30),
+            ..Default::default()
+        };
+        let output_30 = cmd.run(&options_30_days);
+        let count_30 = output_30.stale_count.unwrap_or(0);
+
+        // The stale_count with wider window should be >= narrower window
+        assert!(
+            count_30 >= count_7,
+            "stale_count with 30 days ({}) should be >= stale_count with 7 days ({})",
+            count_30,
+            count_7
+        );
     }
 
     #[test]

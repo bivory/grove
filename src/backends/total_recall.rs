@@ -65,6 +65,58 @@ fn is_grove_entry_line(line: &str) -> bool {
         || line.starts_with(LABEL_FILES)
 }
 
+/// Extract grove entries from file content that match the given query.
+///
+/// Each entry starts with a line containing GROVE_ID_PREFIX and ends with Tags:.
+/// Only entries that contain the query (case-insensitive) are included.
+fn extract_matching_entries(content: &str, query: &str) -> String {
+    let query_lower = query.to_lowercase();
+    let mut results = String::new();
+    let mut current_entry = String::new();
+    let mut in_entry = false;
+
+    for line in content.lines() {
+        if line.contains(GROVE_ID_PREFIX) {
+            // Start of a new entry - flush previous if it matches
+            if in_entry
+                && !current_entry.is_empty()
+                && current_entry.to_lowercase().contains(&query_lower)
+            {
+                results.push_str(&current_entry);
+                results.push_str(&format!("\n{}\n\n", ENTRY_SEPARATOR));
+            }
+            current_entry.clear();
+            in_entry = true;
+        }
+
+        if in_entry && is_grove_entry_line(line) {
+            if !current_entry.is_empty() {
+                current_entry.push('\n');
+            }
+            current_entry.push_str(line);
+
+            // Tags: line marks end of an entry
+            if line.starts_with(LABEL_TAGS) {
+                if current_entry.to_lowercase().contains(&query_lower) {
+                    results.push_str(&current_entry);
+                    results.push_str(&format!("\n{}\n\n", ENTRY_SEPARATOR));
+                }
+                current_entry.clear();
+                in_entry = false;
+            }
+        }
+    }
+
+    // Flush final entry if it matches
+    if in_entry && !current_entry.is_empty() && current_entry.to_lowercase().contains(&query_lower)
+    {
+        results.push_str(&current_entry);
+        results.push_str(&format!("\n{}\n\n", ENTRY_SEPARATOR));
+    }
+
+    results
+}
+
 impl TotalRecallBackend {
     /// Create a new Total Recall backend with the given memory directory.
     ///
@@ -458,25 +510,13 @@ impl TotalRecallBackend {
             // Search last N days of logs
             for entry in daily_files.into_iter().take(DAILY_LOG_SEARCH_LIMIT) {
                 if let Ok(content) = fs::read_to_string(entry.path()) {
-                    // Only include if it has grove entries and matches query
+                    // Only process if it has grove entries
                     if content.contains(GROVE_ID_PREFIX) {
-                        let query_lower = query.to_lowercase();
-                        if content.to_lowercase().contains(&query_lower) {
+                        // Extract only entries that match the query (entry-level filtering)
+                        let matching_entries = extract_matching_entries(&content, query);
+                        if !matching_entries.is_empty() {
                             results.push_str(&format!("[{}]\n", entry.path().display()));
-                            // Extract grove entries - add separator after each Tags: line
-                            for line in content.lines() {
-                                if line.contains(GROVE_ID_PREFIX)
-                                    || line.starts_with(BLOCKQUOTE_PREFIX)
-                                    || line.starts_with(LABEL_TAGS)
-                                {
-                                    results.push_str(line);
-                                    results.push('\n');
-                                    // Tags: line marks end of an entry, add separator
-                                    if line.starts_with(LABEL_TAGS) {
-                                        results.push_str(&format!("\n{}\n\n", ENTRY_SEPARATOR));
-                                    }
-                                }
-                            }
+                            results.push_str(&matching_entries);
                         }
                     }
                 }
@@ -491,25 +531,11 @@ impl TotalRecallBackend {
                     if entry.path().extension().is_some_and(|ext| ext == "md") {
                         if let Ok(content) = fs::read_to_string(entry.path()) {
                             if content.contains(GROVE_ID_PREFIX) {
-                                let query_lower = query.to_lowercase();
-                                if content.to_lowercase().contains(&query_lower) {
+                                // Extract only entries that match the query (entry-level filtering)
+                                let matching_entries = extract_matching_entries(&content, query);
+                                if !matching_entries.is_empty() {
                                     results.push_str(&format!("[{}]\n", entry.path().display()));
-                                    for line in content.lines() {
-                                        if line.contains(GROVE_ID_PREFIX)
-                                            || line.starts_with(BLOCKQUOTE_PREFIX)
-                                            || line.starts_with(LABEL_TAGS)
-                                        {
-                                            results.push_str(line);
-                                            results.push('\n');
-                                            // Tags: line marks end of an entry, add separator
-                                            if line.starts_with(LABEL_TAGS) {
-                                                results.push_str(&format!(
-                                                    "\n{}\n\n",
-                                                    ENTRY_SEPARATOR
-                                                ));
-                                            }
-                                        }
-                                    }
+                                    results.push_str(&matching_entries);
                                 }
                             }
                         }
@@ -1881,5 +1907,82 @@ Tags: #api invalid #performance | Confidence: High"#;
         let learning = learning.unwrap();
         // Only valid tags should be parsed
         assert_eq!(learning.tags, vec!["api", "performance"]);
+    }
+
+    #[test]
+    fn test_extract_matching_entries_filters_at_entry_level() {
+        // File content with multiple grove entries
+        let content = r#"### Today's Log
+
+**Pattern** (grove:cl_001): Authentication improvement
+> Use JWT for stateless auth
+Tags: #auth #security | Confidence: High
+
+**Pitfall** (grove:cl_002): Database N+1 query
+> Always use eager loading
+Tags: #database #performance | Confidence: High
+
+**Convention** (grove:cl_003): UI button styling
+> Use consistent border-radius
+Tags: #ui #styling | Confidence: Medium"#;
+
+        // Search for "database" should only return the database entry
+        let results = extract_matching_entries(content, "database");
+        assert!(
+            results.contains("grove:cl_002"),
+            "Should contain the database entry"
+        );
+        assert!(
+            !results.contains("grove:cl_001"),
+            "Should NOT contain auth entry"
+        );
+        assert!(
+            !results.contains("grove:cl_003"),
+            "Should NOT contain UI entry"
+        );
+
+        // Search for "auth" should only return the auth entry
+        let results = extract_matching_entries(content, "auth");
+        assert!(
+            results.contains("grove:cl_001"),
+            "Should contain the auth entry"
+        );
+        assert!(
+            !results.contains("grove:cl_002"),
+            "Should NOT contain database entry"
+        );
+
+        // Search for "Confidence" should return all entries (appears in all)
+        let results = extract_matching_entries(content, "Confidence");
+        assert!(results.contains("grove:cl_001"));
+        assert!(results.contains("grove:cl_002"));
+        assert!(results.contains("grove:cl_003"));
+    }
+
+    #[test]
+    fn test_extract_matching_entries_case_insensitive() {
+        let content = r#"**Pattern** (grove:cl_001): DATABASE optimization
+> Use indexes
+Tags: #performance | Confidence: High"#;
+
+        // Case insensitive match
+        let results = extract_matching_entries(content, "database");
+        assert!(results.contains("grove:cl_001"));
+
+        let results = extract_matching_entries(content, "DATABASE");
+        assert!(results.contains("grove:cl_001"));
+
+        let results = extract_matching_entries(content, "DataBase");
+        assert!(results.contains("grove:cl_001"));
+    }
+
+    #[test]
+    fn test_extract_matching_entries_no_match_returns_empty() {
+        let content = r#"**Pattern** (grove:cl_001): Authentication
+> Use JWT
+Tags: #auth | Confidence: High"#;
+
+        let results = extract_matching_entries(content, "kubernetes");
+        assert!(results.is_empty());
     }
 }

@@ -802,7 +802,8 @@ mod tests {
         LearningStats {
             surfaced: 0,
             referenced: 0,
-            dismissed: 0,
+            // Default to 3 to meet min_dismissals_for_decay threshold for decay tests
+            dismissed: 3,
             corrected: 0,
             hit_rate: 0.0,
             last_surfaced: None,
@@ -810,6 +811,7 @@ mod tests {
             origin_ticket: None,
             referencing_tickets: vec![],
             archived: false,
+            category: None,
         }
     }
 

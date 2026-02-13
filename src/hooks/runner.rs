@@ -219,8 +219,9 @@ impl<S: SessionStore> HookRunner<S> {
                         learning.detail
                     ));
 
-                    // Record surfaced event
-                    let _ = logger.append_surfaced(&learning.id, &session.id);
+                    // Record surfaced event with category for category-aware decay
+                    let _ =
+                        logger.append_surfaced(&learning.id, &session.id, Some(learning.category));
 
                     // Add to session's injected learnings
                     session
@@ -228,6 +229,16 @@ impl<S: SessionStore> HookRunner<S> {
                         .injected_learnings
                         .push(InjectedLearning::new(&learning.id, cs.score));
                 }
+
+                // Add citation guidance
+                context_parts.push("\n---\n".to_string());
+                context_parts.push(
+                    "*If any of these learnings help you, mention them in your reflection:*\n"
+                        .to_string(),
+                );
+                context_parts.push(
+                    "*\"applied learning [ID]\" or use the `learnings_used` field.*\n".to_string(),
+                );
 
                 additional_context = Some(context_parts.join(""));
 
@@ -570,14 +581,27 @@ impl<S: SessionStore> HookRunner<S> {
             }
         };
 
-        // Log dismissed events for unreferenced learnings
-        let stats_path = project_stats_log_path(cwd);
-        let logger = StatsLogger::new(&stats_path);
+        // Log dismissed events for unreferenced learnings.
+        // By default, only reflected sessions log dismissals. Skip is treated as
+        // no-signal because the user might skip for many reasons unrelated to
+        // learning quality (urgent meeting, context switch, etc.).
+        // However, if skip_counts_as_dismissal is enabled, skipped sessions also
+        // log dismissals (opt-in for users who want the old behavior).
+        let should_log_dismissals = match session.gate.status {
+            crate::core::state::GateStatus::Reflected => true,
+            crate::core::state::GateStatus::Skipped => self.config.gate.skip_counts_as_dismissal,
+            _ => false,
+        };
 
-        for learning in &session.gate.injected_learnings {
-            if learning.outcome == crate::core::state::InjectionOutcome::Pending {
-                // Learning was surfaced but not referenced - mark as dismissed
-                let _ = logger.append_dismissed(&learning.learning_id, &session.id);
+        if should_log_dismissals {
+            let stats_path = project_stats_log_path(cwd);
+            let logger = StatsLogger::new(&stats_path);
+
+            for learning in &session.gate.injected_learnings {
+                if learning.outcome == crate::core::state::InjectionOutcome::Pending {
+                    // Learning was surfaced but not referenced - mark as dismissed
+                    let _ = logger.append_dismissed(&learning.learning_id, &session.id);
+                }
             }
         }
 
@@ -1336,7 +1360,7 @@ mod tests {
         // Create stats log with corrected learning
         let stats_log_path = grove_dir.join("stats.log");
         let logger = StatsLogger::new(&stats_log_path);
-        logger.append_surfaced("L001", "s1").unwrap();
+        logger.append_surfaced("L001", "s1", None).unwrap();
         logger.append_corrected("L001", "s2", None).unwrap();
 
         // Pre-populate cache
@@ -1667,5 +1691,268 @@ mod tests {
         let session = runner.store.get("skip-then-close-test").unwrap().unwrap();
         assert_eq!(session.gate.status, GateStatus::Pending);
         assert!(session.gate.skip.is_none()); // Previous skip cleared
+    }
+
+    #[test]
+    fn test_session_end_skip_does_not_dismiss_learnings() {
+        // Test that skip is treated as no-signal: dismissals should NOT be logged
+        // when a session ends in Skipped state.
+        use crate::core::state::{InjectedLearning, InjectionOutcome};
+
+        let runner = test_runner();
+
+        // 1. Session start
+        let start_input = r#"{
+            "session_id": "skip-dismiss-test",
+            "transcript_path": "/tmp/transcript.jsonl",
+            "cwd": "/tmp/project"
+        }"#;
+        runner
+            .run_with_input(HookType::SessionStart, start_input)
+            .unwrap();
+
+        // 2. Set up session with injected learnings in Skipped state
+        let mut session = runner.store.get("skip-dismiss-test").unwrap().unwrap();
+        session.gate.status = GateStatus::Skipped;
+        session.gate.injected_learnings.push(InjectedLearning {
+            learning_id: "L001".to_string(),
+            score: 0.8,
+            outcome: InjectionOutcome::Pending, // Not referenced
+        });
+        session.gate.injected_learnings.push(InjectedLearning {
+            learning_id: "L002".to_string(),
+            score: 0.7,
+            outcome: InjectionOutcome::Pending, // Not referenced
+        });
+        runner.store.put(&session).unwrap();
+
+        // 3. Session end (with Skipped state) - note: can't easily test stats logging
+        //    with MemorySessionStore, but we can verify the logic path was correct
+        //    by checking that the session state is preserved
+        let end_input = r#"{
+            "session_id": "skip-dismiss-test",
+            "transcript_path": "/tmp/transcript.jsonl",
+            "cwd": "/tmp/project",
+            "reason": "user_exit"
+        }"#;
+        runner
+            .run_with_input(HookType::SessionEnd, end_input)
+            .unwrap();
+
+        // Verify session still has the injected learnings as Pending (not modified)
+        let session = runner.store.get("skip-dismiss-test").unwrap().unwrap();
+        assert_eq!(session.gate.injected_learnings.len(), 2);
+        assert!(session
+            .gate
+            .injected_learnings
+            .iter()
+            .all(|l| l.outcome == InjectionOutcome::Pending));
+    }
+
+    #[test]
+    fn test_session_end_reflect_does_dismiss_unreferenced_learnings() {
+        // Test that reflected sessions DO log dismissals for unreferenced learnings.
+        // This test verifies the condition gate for dismissal logging.
+        use crate::core::state::{InjectedLearning, InjectionOutcome};
+
+        let runner = test_runner();
+
+        // 1. Session start
+        let start_input = r#"{
+            "session_id": "reflect-dismiss-test",
+            "transcript_path": "/tmp/transcript.jsonl",
+            "cwd": "/tmp/project"
+        }"#;
+        runner
+            .run_with_input(HookType::SessionStart, start_input)
+            .unwrap();
+
+        // 2. Set up session with injected learnings in Reflected state
+        let mut session = runner.store.get("reflect-dismiss-test").unwrap().unwrap();
+        session.gate.status = GateStatus::Reflected;
+        session.gate.injected_learnings.push(InjectedLearning {
+            learning_id: "L001".to_string(),
+            score: 0.8,
+            outcome: InjectionOutcome::Pending, // Not referenced - should be dismissed
+        });
+        session.gate.injected_learnings.push(InjectedLearning {
+            learning_id: "L002".to_string(),
+            score: 0.7,
+            outcome: InjectionOutcome::Referenced, // Referenced - should NOT be dismissed
+        });
+        runner.store.put(&session).unwrap();
+
+        // 3. Session end (with Reflected state) - dismissals should be logged
+        //    Note: We can't easily verify the stats log with MemorySessionStore,
+        //    but we verify the conditional logic path is correct based on gate state
+        let end_input = r#"{
+            "session_id": "reflect-dismiss-test",
+            "transcript_path": "/tmp/transcript.jsonl",
+            "cwd": "/tmp/project",
+            "reason": "user_exit"
+        }"#;
+        runner
+            .run_with_input(HookType::SessionEnd, end_input)
+            .unwrap();
+
+        // Session state should be preserved (dismissal logging doesn't modify state)
+        let session = runner.store.get("reflect-dismiss-test").unwrap().unwrap();
+        assert_eq!(session.gate.injected_learnings.len(), 2);
+    }
+
+    // Integration tests with actual file storage to verify stats log writing
+
+    #[test]
+    fn test_session_end_skip_does_not_write_dismissed_events_to_log() {
+        // Integration test: verify stats log is NOT written when session is skipped
+        use crate::core::state::{InjectedLearning, InjectionOutcome};
+        use crate::storage::FileSessionStore;
+
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let session_dir = temp_dir.path().join("sessions");
+        let grove_dir = temp_dir.path().join(".grove");
+        std::fs::create_dir_all(&grove_dir).unwrap();
+
+        let store = FileSessionStore::with_dir(&session_dir).unwrap();
+        let runner = HookRunner::new(store, Config::default());
+        let cwd = temp_dir.path().to_str().unwrap();
+
+        // Start a session
+        let start_input = format!(
+            r#"{{
+            "session_id": "skip-log-test",
+            "transcript_path": "/tmp/transcript.jsonl",
+            "cwd": "{}"
+        }}"#,
+            cwd
+        );
+        runner
+            .run_with_input(HookType::SessionStart, &start_input)
+            .unwrap();
+
+        // Get the session and modify it
+        let mut session = runner.store.get("skip-log-test").unwrap().unwrap();
+        session.gate.status = GateStatus::Skipped;
+        session.gate.injected_learnings.push(InjectedLearning {
+            learning_id: "L001".to_string(),
+            score: 0.8,
+            outcome: InjectionOutcome::Pending,
+        });
+        runner.store.put(&session).unwrap();
+
+        // Session end
+        let end_input = format!(
+            r#"{{
+            "session_id": "skip-log-test",
+            "transcript_path": "/tmp/transcript.jsonl",
+            "cwd": "{}",
+            "reason": "user_exit"
+        }}"#,
+            cwd
+        );
+        runner
+            .run_with_input(HookType::SessionEnd, &end_input)
+            .unwrap();
+
+        // Verify NO dismissed events were logged
+        let stats_path = grove_dir.join("stats.log");
+        if stats_path.exists() {
+            let events = crate::stats::StatsLogger::new(&stats_path)
+                .read_all()
+                .unwrap_or_default();
+            let dismissed: Vec<_> = events
+                .iter()
+                .filter(|e| e.data.event_name() == "dismissed")
+                .collect();
+            assert!(
+                dismissed.is_empty(),
+                "Skip should NOT log dismissed events, found: {:?}",
+                dismissed
+            );
+        }
+        // If file doesn't exist, that's also correct (no events written)
+    }
+
+    #[test]
+    fn test_session_end_reflect_writes_dismissed_events_to_log() {
+        // Integration test: verify stats log IS written when session is reflected
+        use crate::core::state::{InjectedLearning, InjectionOutcome};
+        use crate::storage::FileSessionStore;
+
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let session_dir = temp_dir.path().join("sessions");
+        let grove_dir = temp_dir.path().join(".grove");
+        std::fs::create_dir_all(&grove_dir).unwrap();
+
+        let store = FileSessionStore::with_dir(&session_dir).unwrap();
+        let runner = HookRunner::new(store, Config::default());
+        let cwd = temp_dir.path().to_str().unwrap();
+
+        // Start a session
+        let start_input = format!(
+            r#"{{
+            "session_id": "reflect-log-test",
+            "transcript_path": "/tmp/transcript.jsonl",
+            "cwd": "{}"
+        }}"#,
+            cwd
+        );
+        runner
+            .run_with_input(HookType::SessionStart, &start_input)
+            .unwrap();
+
+        // Get the session and modify it
+        let mut session = runner.store.get("reflect-log-test").unwrap().unwrap();
+        session.gate.status = GateStatus::Reflected;
+        session.gate.injected_learnings.push(InjectedLearning {
+            learning_id: "L001".to_string(),
+            score: 0.8,
+            outcome: InjectionOutcome::Pending, // Not referenced - should be dismissed
+        });
+        session.gate.injected_learnings.push(InjectedLearning {
+            learning_id: "L002".to_string(),
+            score: 0.7,
+            outcome: InjectionOutcome::Referenced, // Referenced - should NOT be dismissed
+        });
+        runner.store.put(&session).unwrap();
+
+        // Session end
+        let end_input = format!(
+            r#"{{
+            "session_id": "reflect-log-test",
+            "transcript_path": "/tmp/transcript.jsonl",
+            "cwd": "{}",
+            "reason": "user_exit"
+        }}"#,
+            cwd
+        );
+        runner
+            .run_with_input(HookType::SessionEnd, &end_input)
+            .unwrap();
+
+        // Verify dismissed event was logged for L001 (unreferenced) only
+        let stats_path = grove_dir.join("stats.log");
+        assert!(stats_path.exists(), "Stats log should exist after reflect");
+
+        let events = crate::stats::StatsLogger::new(&stats_path)
+            .read_all()
+            .unwrap();
+        let dismissed: Vec<_> = events
+            .iter()
+            .filter(|e| e.data.event_name() == "dismissed")
+            .collect();
+
+        assert_eq!(
+            dismissed.len(),
+            1,
+            "Should have exactly 1 dismissed event (for L001)"
+        );
+
+        // Verify it's for L001
+        if let crate::stats::StatsEventType::Dismissed { learning_id, .. } = &dismissed[0].data {
+            assert_eq!(learning_id, "L001");
+        } else {
+            panic!("Expected Dismissed event");
+        }
     }
 }

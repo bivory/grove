@@ -29,6 +29,16 @@ pub struct ReflectOptions {
     pub session_id: Option<String>,
 }
 
+/// A reference to a learning that was used during the session.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct LearningReference {
+    /// The learning ID that was referenced.
+    pub id: String,
+    /// Optional description of how the learning was applied.
+    #[serde(default)]
+    pub how: Option<String>,
+}
+
 /// Input format for reflection (JSON from stdin).
 #[derive(Debug, Clone, Deserialize)]
 pub struct ReflectInput {
@@ -36,6 +46,13 @@ pub struct ReflectInput {
     pub session_id: String,
     /// Candidate learnings produced by Claude.
     pub candidates: Vec<CandidateLearning>,
+    /// Explicit list of learnings that were used during this session.
+    /// Takes precedence over pattern-based detection.
+    #[serde(default)]
+    pub learnings_used: Option<Vec<LearningReference>>,
+    /// Free-form reflection notes that may mention applied learnings.
+    #[serde(default)]
+    pub reflection_notes: Option<String>,
 }
 
 /// Output format for the reflect command.
@@ -214,10 +231,43 @@ impl<S: SessionStore, B: MemoryBackend> ReflectCommand<S, B> {
                 candidates_submitted as u32,
                 learning_ids.len() as u32,
                 categories,
-                ticket_id,
+                ticket_id.clone(),
                 self.backend.name(),
             )
             .fail_open_default("logging reflection stats");
+
+        // Detect and log referenced learnings
+        let injected_ids: Vec<String> = session
+            .gate
+            .injected_learnings
+            .iter()
+            .map(|il| il.learning_id.clone())
+            .collect();
+
+        let referenced_ids = detect_referenced_learnings(input, &injected_ids);
+
+        for ref_id in &referenced_ids {
+            // Log referenced event
+            stats_logger
+                .append_referenced(ref_id, &session_id, ticket_id.clone())
+                .fail_open_default("logging referenced event");
+
+            // Mark learning as referenced in session state
+            if let Some(il) = session
+                .gate
+                .injected_learnings
+                .iter_mut()
+                .find(|il| il.learning_id == *ref_id)
+            {
+                il.mark_referenced();
+            }
+
+            // Add trace event
+            session.add_trace(
+                EventType::LearningReferenced,
+                Some(format!("Learning {} was referenced", ref_id)),
+            );
+        }
 
         // Update session state
         session.gate.reflection = Some(ReflectionResult::with_rejected(
@@ -339,6 +389,97 @@ fn truncate(s: &str, max_len: usize) -> String {
     }
 }
 
+/// Detect learning references in reflection input.
+///
+/// Uses a three-tier detection strategy:
+/// 1. Explicit `learnings_used` field (highest priority)
+/// 2. Generous pattern matching for phrases like "applied learning", "used learning", etc.
+/// 3. Bare learning ID mentions as fallback
+///
+/// Returns a deduplicated list of referenced learning IDs.
+pub fn detect_referenced_learnings(input: &ReflectInput, injected_ids: &[String]) -> Vec<String> {
+    use std::collections::HashSet;
+
+    let mut referenced: HashSet<String> = HashSet::new();
+
+    // 1. Explicit learnings_used field takes precedence
+    if let Some(refs) = &input.learnings_used {
+        for r in refs {
+            if injected_ids.contains(&r.id) {
+                referenced.insert(r.id.clone());
+            }
+        }
+    }
+
+    // Build text corpus for pattern matching
+    let mut text_corpus = String::new();
+
+    // Add reflection notes
+    if let Some(notes) = &input.reflection_notes {
+        text_corpus.push_str(notes);
+        text_corpus.push('\n');
+    }
+
+    // Add candidate details (might mention applied learnings)
+    for candidate in &input.candidates {
+        text_corpus.push_str(&candidate.detail);
+        text_corpus.push('\n');
+    }
+
+    let text_lower = text_corpus.to_lowercase();
+
+    // 2. Generous pattern matching for each injected learning ID
+    for id in injected_ids {
+        if referenced.contains(id) {
+            continue; // Already found via explicit field
+        }
+
+        let id_lower = id.to_lowercase();
+
+        // Patterns to match (case-insensitive):
+        // - "applied learning cl_001"
+        // - "used learning cl_001"
+        // - "referenced cl_001"
+        // - "leveraged learning cl_001"
+        // - "based on cl_001"
+        // - "following cl_001"
+        // - "following cl_001's guidance"
+        let patterns = [
+            format!("applied learning {}", id_lower),
+            format!("applied {}", id_lower),
+            format!("used learning {}", id_lower),
+            format!("used {}", id_lower),
+            format!("referenced learning {}", id_lower),
+            format!("referenced {}", id_lower),
+            format!("leveraged learning {}", id_lower),
+            format!("leveraged {}", id_lower),
+            format!("based on {}", id_lower),
+            format!("following {}", id_lower),
+        ];
+
+        for pattern in &patterns {
+            if text_lower.contains(pattern) {
+                referenced.insert(id.clone());
+                break;
+            }
+        }
+    }
+
+    // 3. Bare ID mention fallback
+    for id in injected_ids {
+        if referenced.contains(id) {
+            continue;
+        }
+
+        // Check if the ID appears anywhere in the text (case-insensitive)
+        if text_lower.contains(&id.to_lowercase()) {
+            referenced.insert(id.clone());
+        }
+    }
+
+    referenced.into_iter().collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -427,6 +568,8 @@ mod tests {
         let input = ReflectInput {
             session_id: "test-session".to_string(),
             candidates: vec![valid_candidate()],
+            learnings_used: None,
+            reflection_notes: None,
         };
 
         let options = ReflectOptions::default();
@@ -451,6 +594,8 @@ mod tests {
         let input = ReflectInput {
             session_id: "test-session".to_string(),
             candidates: vec![invalid],
+            learnings_used: None,
+            reflection_notes: None,
         };
 
         let options = ReflectOptions::default();
@@ -477,6 +622,8 @@ mod tests {
         let input = ReflectInput {
             session_id: "test-session".to_string(),
             candidates: vec![valid_candidate(), invalid],
+            learnings_used: None,
+            reflection_notes: None,
         };
 
         let options = ReflectOptions::default();
@@ -502,6 +649,8 @@ mod tests {
         let input = ReflectInput {
             session_id: "test-session".to_string(),
             candidates: vec![valid_candidate()],
+            learnings_used: None,
+            reflection_notes: None,
         };
 
         let options = ReflectOptions::default();
@@ -531,6 +680,8 @@ mod tests {
         let input = ReflectInput {
             session_id: "session-1".to_string(),
             candidates: vec![valid_candidate()],
+            learnings_used: None,
+            reflection_notes: None,
         };
 
         let options = ReflectOptions::default();
@@ -547,6 +698,8 @@ mod tests {
         let input2 = ReflectInput {
             session_id: "session-2".to_string(),
             candidates: vec![valid_candidate()],
+            learnings_used: None,
+            reflection_notes: None,
         };
 
         let output2 = cmd2.run_with_input(&input2, &options);
@@ -567,6 +720,8 @@ mod tests {
         let input = ReflectInput {
             session_id: "test-session".to_string(),
             candidates: vec![],
+            learnings_used: None,
+            reflection_notes: None,
         };
 
         let options = ReflectOptions::default();
@@ -711,5 +866,129 @@ mod tests {
         assert_eq!(info.summary, "test summary");
         assert_eq!(info.reason, "invalid category");
         assert_eq!(info.stage, "schema");
+    }
+
+    #[test]
+    fn test_detect_referenced_learnings_explicit_field() {
+        let input = ReflectInput {
+            session_id: "test".to_string(),
+            candidates: vec![],
+            learnings_used: Some(vec![LearningReference {
+                id: "cl_001".to_string(),
+                how: Some("Used for retry logic".to_string()),
+            }]),
+            reflection_notes: None,
+        };
+
+        let injected = vec!["cl_001".to_string(), "cl_002".to_string()];
+        let referenced = detect_referenced_learnings(&input, &injected);
+
+        assert_eq!(referenced.len(), 1);
+        assert!(referenced.contains(&"cl_001".to_string()));
+    }
+
+    #[test]
+    fn test_detect_referenced_learnings_pattern_matching() {
+        let input = ReflectInput {
+            session_id: "test".to_string(),
+            candidates: vec![],
+            learnings_used: None,
+            reflection_notes: Some("I applied learning cl_001 for the API calls and used learning cl_002 for error handling.".to_string()),
+        };
+
+        let injected = vec![
+            "cl_001".to_string(),
+            "cl_002".to_string(),
+            "cl_003".to_string(),
+        ];
+        let referenced = detect_referenced_learnings(&input, &injected);
+
+        assert_eq!(referenced.len(), 2);
+        assert!(referenced.contains(&"cl_001".to_string()));
+        assert!(referenced.contains(&"cl_002".to_string()));
+        assert!(!referenced.contains(&"cl_003".to_string()));
+    }
+
+    #[test]
+    fn test_detect_referenced_learnings_bare_id() {
+        let input = ReflectInput {
+            session_id: "test".to_string(),
+            candidates: vec![],
+            learnings_used: None,
+            reflection_notes: Some("The fix was based on cl_001 approach.".to_string()),
+        };
+
+        let injected = vec!["cl_001".to_string()];
+        let referenced = detect_referenced_learnings(&input, &injected);
+
+        assert_eq!(referenced.len(), 1);
+        assert!(referenced.contains(&"cl_001".to_string()));
+    }
+
+    #[test]
+    fn test_detect_referenced_learnings_in_candidate_detail() {
+        let mut candidate = valid_candidate();
+        candidate.detail = "Following cl_001's guidance, I implemented retry logic.".to_string();
+
+        let input = ReflectInput {
+            session_id: "test".to_string(),
+            candidates: vec![candidate],
+            learnings_used: None,
+            reflection_notes: None,
+        };
+
+        let injected = vec!["cl_001".to_string()];
+        let referenced = detect_referenced_learnings(&input, &injected);
+
+        assert_eq!(referenced.len(), 1);
+        assert!(referenced.contains(&"cl_001".to_string()));
+    }
+
+    #[test]
+    fn test_detect_referenced_learnings_case_insensitive() {
+        let input = ReflectInput {
+            session_id: "test".to_string(),
+            candidates: vec![],
+            learnings_used: None,
+            reflection_notes: Some("Applied Learning CL_001 for the fix.".to_string()),
+        };
+
+        let injected = vec!["cl_001".to_string()];
+        let referenced = detect_referenced_learnings(&input, &injected);
+
+        assert_eq!(referenced.len(), 1);
+    }
+
+    #[test]
+    fn test_detect_referenced_learnings_no_false_positives() {
+        let input = ReflectInput {
+            session_id: "test".to_string(),
+            candidates: vec![],
+            learnings_used: None,
+            reflection_notes: Some("I did not use any previous learnings.".to_string()),
+        };
+
+        let injected = vec!["cl_001".to_string(), "cl_002".to_string()];
+        let referenced = detect_referenced_learnings(&input, &injected);
+
+        assert!(referenced.is_empty());
+    }
+
+    #[test]
+    fn test_detect_referenced_learnings_ignores_non_injected() {
+        let input = ReflectInput {
+            session_id: "test".to_string(),
+            candidates: vec![],
+            learnings_used: Some(vec![LearningReference {
+                id: "cl_999".to_string(), // Not in injected list
+                how: None,
+            }]),
+            reflection_notes: None,
+        };
+
+        let injected = vec!["cl_001".to_string()];
+        let referenced = detect_referenced_learnings(&input, &injected);
+
+        assert!(referenced.is_empty());
     }
 }

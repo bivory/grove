@@ -163,7 +163,7 @@ impl StatsCache {
                 session_id: _,
                 candidates,
                 accepted,
-                categories: _,
+                categories,
                 ticket_id,
                 backend,
             } => {
@@ -178,6 +178,19 @@ impl StatsCache {
                 self.write_gate.total_evaluated += *candidates;
                 self.write_gate.total_accepted += *accepted;
                 self.write_gate.total_rejected += candidates.saturating_sub(*accepted);
+
+                // Track category counts from accepted learnings
+                for category in categories {
+                    let cat_stats =
+                        self.aggregates
+                            .by_category
+                            .entry(*category)
+                            .or_insert(CategoryStats {
+                                count: 0,
+                                avg_hit_rate: 0.0,
+                            });
+                    cat_stats.count += 1;
+                }
 
                 // Update origin tickets for learnings
                 if let Some(tid) = ticket_id {
@@ -257,11 +270,9 @@ impl StatsCache {
 
     /// Compute aggregate statistics from per-learning stats.
     fn compute_aggregates(&mut self) {
-        let mut total_learnings = 0;
         let mut total_archived = 0;
         let mut total_hit_rate = 0.0;
         let mut hit_rate_count = 0;
-        let by_category: HashMap<LearningCategory, CategoryStats> = HashMap::new();
 
         for stats in self.learnings.values_mut() {
             // Compute hit rate for this learning, clamped to [0.0, 1.0]
@@ -274,7 +285,6 @@ impl StatsCache {
                 hit_rate_count += 1;
             }
 
-            total_learnings += 1;
             if stats.archived {
                 total_archived += 1;
             }
@@ -286,7 +296,12 @@ impl StatsCache {
                 self.write_gate.total_accepted as f64 / self.write_gate.total_evaluated as f64;
         }
 
-        self.aggregates.total_learnings = total_learnings;
+        // total_learnings is the count of accepted learnings from reflections,
+        // or the count of surfaced learnings if higher (for legacy compatibility)
+        // (by_category is already populated during event processing)
+        let surfaced_count = self.learnings.len() as u32;
+        self.aggregates.total_learnings =
+            std::cmp::max(self.write_gate.total_accepted, surfaced_count);
         self.aggregates.total_archived = total_archived;
         self.aggregates.average_hit_rate = if hit_rate_count > 0 {
             total_hit_rate / hit_rate_count as f64
@@ -294,7 +309,6 @@ impl StatsCache {
             0.0
         };
         self.aggregates.cross_pollination_count = self.cross_pollination.len();
-        self.aggregates.by_category = by_category;
     }
 
     /// Check if the cache is stale compared to the log.

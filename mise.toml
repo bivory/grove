@@ -121,7 +121,17 @@ depends = ["fmt:check", "clippy", "typos", "docs:lint", "dupes"]
 
 [tasks.ci]
 description = "Run all CI checks"
-depends = ["fmt:check", "clippy", "test", "typos", "audit", "deny", "docs:lint", "dupes", "outdated"]
+depends = [
+  "fmt:check",
+  "clippy",
+  "test",
+  "typos",
+  "audit",
+  "deny",
+  "docs:lint",
+  "dupes",
+  "outdated",
+]
 
 [tasks.clean]
 description = "Clean build artifacts"

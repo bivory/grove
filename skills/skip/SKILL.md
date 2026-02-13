@@ -1,4 +1,4 @@
-# compound-skip
+# skip
 
 Skip reflection when no meaningful learnings were captured during a session.
 

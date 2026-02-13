@@ -1,4 +1,4 @@
-# compound-reflect
+# reflect
 
 Captures learnings from the current session after completing a ticket or
 significant work.

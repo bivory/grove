@@ -1,4 +1,4 @@
-# compound-search
+# search
 
 Search for relevant learnings from the grove memory backend.
 

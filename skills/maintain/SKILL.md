@@ -1,4 +1,4 @@
-# compound-maintain
+# maintain
 
 Manage and maintain the grove learning database.
 

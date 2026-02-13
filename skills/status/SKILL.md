@@ -1,4 +1,4 @@
-# compound-status
+# status
 
 Show grove status including stats, backends, and gate state.
 

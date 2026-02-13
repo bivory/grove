@@ -136,16 +136,23 @@ impl<'a> Gate<'a> {
             )));
         }
 
-        // If already blocked, don't increment counter again (prevents inflation
-        // from rapid stop hook invocations)
+        // Check if circuit breaker should reset BEFORE checking if already blocked.
+        // This ensures cooldown/session checks are applied even when already blocked,
+        // preventing infinite blocking loops (fail-open philosophy).
+        if self.should_reset_circuit_breaker() {
+            self.reset_circuit_breaker();
+            // After reset, if we're already blocked, force approval (fail-open)
+            if self.state.status == GateStatus::Blocked {
+                self.state.status = GateStatus::Idle;
+                return Ok(true); // Circuit breaker reset → force approval
+            }
+        }
+
+        // If already blocked (and circuit breaker didn't reset), don't increment counter
+        // again (prevents inflation from rapid stop hook invocations)
         if self.state.status == GateStatus::Blocked {
             // Already blocked, just return current circuit breaker status
             return Ok(self.state.circuit_breaker_tripped);
-        }
-
-        // Check if circuit breaker should reset
-        if self.should_reset_circuit_breaker() {
-            self.reset_circuit_breaker();
         }
 
         // Increment block count (only on Pending → Blocked transition)
@@ -826,6 +833,52 @@ mod tests {
         // Re-blocking should return true because circuit breaker was tripped
         let tripped = gate.block().unwrap();
         assert!(tripped);
+    }
+
+    #[test]
+    fn test_circuit_breaker_resets_when_blocked_and_cooldown_elapsed() {
+        // Regression test: circuit breaker reset must be checked even when already blocked
+        // to prevent infinite blocking loops (fail-open philosophy)
+        let mut state = GateState {
+            status: GateStatus::Blocked,
+            block_count: 2,
+            last_blocked_at: Some(Utc::now() - chrono::Duration::seconds(400)), // Cooldown elapsed
+            last_blocked_session_id: Some("session-1".to_string()),
+            ..Default::default()
+        };
+        let config = config_with_cooldown(300);
+
+        let mut gate = Gate::new(&mut state, &config, "session-1");
+        // Re-blocking when cooldown elapsed should force approval (circuit breaker resets)
+        let tripped = gate.block().unwrap();
+        assert!(
+            tripped,
+            "Circuit breaker should trip to force approval after cooldown"
+        );
+        assert_eq!(
+            gate.status(),
+            GateStatus::Idle,
+            "Gate should transition to Idle"
+        );
+    }
+
+    #[test]
+    fn test_circuit_breaker_resets_when_blocked_and_different_session() {
+        // Regression test: different session should reset circuit breaker even when blocked
+        let mut state = GateState {
+            status: GateStatus::Blocked,
+            block_count: 2,
+            last_blocked_at: Some(Utc::now()), // Not expired
+            last_blocked_session_id: Some("old-session".to_string()),
+            ..Default::default()
+        };
+        let config = config_with_max_blocks(3);
+
+        let mut gate = Gate::new(&mut state, &config, "new-session");
+        // Re-blocking with different session should force approval
+        let tripped = gate.block().unwrap();
+        assert!(tripped, "Circuit breaker should trip on different session");
+        assert_eq!(gate.status(), GateStatus::Idle);
     }
 
     #[test]

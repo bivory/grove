@@ -148,6 +148,9 @@ enum Commands {
         /// Days until decay to consider stale
         #[arg(long)]
         stale_days: Option<u32>,
+        /// Hide usage statistics
+        #[arg(long)]
+        no_stats: bool,
     },
 
     /// [User] Display quality statistics and insights
@@ -406,6 +409,7 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
             stale,
             include_archived,
             stale_days,
+            no_stats,
         } => run_list(
             json,
             quiet,
@@ -413,6 +417,7 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
             stale,
             include_archived,
             stale_days,
+            no_stats,
             &cwd,
         ),
         Commands::Stats {
@@ -642,6 +647,7 @@ fn run_search(
     Ok(success_to_exit_code(output.success))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn run_list(
     json: bool,
     quiet: bool,
@@ -649,15 +655,29 @@ fn run_list(
     stale: bool,
     include_archived: bool,
     stale_days: Option<u32>,
+    no_stats: bool,
     cwd: &Path,
 ) -> Result<ExitCode, Box<dyn std::error::Error>> {
     use grove::cli::list::{ListCommand, ListOptions};
+    use grove::config::{project_stats_log_path, stats_cache_path};
     use grove::create_primary_backend;
+    use grove::stats::StatsCacheManager;
 
     let config = Config::load();
     let backend = create_primary_backend(cwd, Some(&config));
 
-    let cmd = ListCommand::new(backend, config);
+    // Load stats cache if not disabled
+    let stats_cache = if no_stats {
+        None
+    } else {
+        stats_cache_path().and_then(|cache_path| {
+            let log_path = project_stats_log_path(cwd);
+            let manager = StatsCacheManager::new(&cache_path, &log_path);
+            manager.load_or_rebuild().ok()
+        })
+    };
+
+    let cmd = ListCommand::with_stats(backend, config, stats_cache);
     let options = ListOptions {
         json,
         quiet,
@@ -665,6 +685,7 @@ fn run_list(
         stale,
         include_archived,
         stale_days,
+        no_stats,
     };
 
     let output = cmd.run(&options);

@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use crate::backends::{MemoryBackend, SearchFilters, SearchQuery};
 use crate::config::{Config, DecayConfig};
 use crate::core::CompoundLearning;
+use crate::stats::{LearningStats, StatsCache};
 
 /// Options for the list command.
 #[derive(Debug, Clone, Default)]
@@ -24,6 +25,8 @@ pub struct ListOptions {
     pub include_archived: bool,
     /// Days until decay to consider "stale" (default: 7).
     pub stale_days: Option<u32>,
+    /// Hide usage statistics in output.
+    pub no_stats: bool,
 }
 
 /// Output format for the list command.
@@ -64,15 +67,31 @@ pub struct LearningInfo {
     /// Whether this learning is approaching decay.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub approaching_decay: Option<bool>,
+    /// Number of times surfaced.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub surfaced: Option<u32>,
+    /// Number of times referenced.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub referenced: Option<u32>,
+    /// Hit rate as percentage (0-100).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hit_rate_pct: Option<u32>,
+    /// Last referenced date (YYYY-MM-DD).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_used: Option<String>,
 }
 
 impl LearningInfo {
-    /// Create from a CompoundLearning with optional decay info.
+    /// Create from a CompoundLearning with optional decay info and stats.
     ///
     /// Note: Uses the learning's creation timestamp for decay calculation.
     /// In a more complete implementation, this would look up the last reference
     /// time from the stats cache.
-    pub fn from_learning(learning: &CompoundLearning, decay_config: Option<&DecayConfig>) -> Self {
+    pub fn from_learning(
+        learning: &CompoundLearning,
+        decay_config: Option<&DecayConfig>,
+        stats: Option<&LearningStats>,
+    ) -> Self {
         let (days_until_decay, approaching_decay) = if let Some(config) = decay_config {
             // Use creation timestamp for decay calculation
             // (a more complete implementation would use last_referenced from stats cache)
@@ -88,6 +107,21 @@ impl LearningInfo {
             (None, None)
         };
 
+        // Extract stats if available and learning has been surfaced
+        let (surfaced, referenced, hit_rate_pct, last_used) = if let Some(s) = stats {
+            if s.surfaced > 0 {
+                let hit_pct = (s.hit_rate * 100.0).round() as u32;
+                let last = s
+                    .last_referenced
+                    .map(|dt| dt.format("%Y-%m-%d").to_string());
+                (Some(s.surfaced), Some(s.referenced), Some(hit_pct), last)
+            } else {
+                (None, None, None, None)
+            }
+        } else {
+            (None, None, None, None)
+        };
+
         Self {
             id: learning.id.clone(),
             summary: learning.summary.clone(),
@@ -97,6 +131,10 @@ impl LearningInfo {
             created: learning.timestamp.format("%Y-%m-%d").to_string(),
             days_until_decay,
             approaching_decay,
+            surfaced,
+            referenced,
+            hit_rate_pct,
+            last_used,
         }
     }
 }
@@ -142,12 +180,26 @@ impl ListOutput {
 pub struct ListCommand<B: MemoryBackend> {
     backend: B,
     config: Config,
+    stats_cache: Option<StatsCache>,
 }
 
 impl<B: MemoryBackend> ListCommand<B> {
     /// Create a new list command.
     pub fn new(backend: B, config: Config) -> Self {
-        Self { backend, config }
+        Self {
+            backend,
+            config,
+            stats_cache: None,
+        }
+    }
+
+    /// Create a new list command with stats cache.
+    pub fn with_stats(backend: B, config: Config, stats_cache: Option<StatsCache>) -> Self {
+        Self {
+            backend,
+            config,
+            stats_cache,
+        }
     }
 
     /// Run the list command.
@@ -168,10 +220,19 @@ impl<B: MemoryBackend> ListCommand<B> {
                 let decay_config = &self.config.decay;
                 let stale_days = options.stale_days.unwrap_or(7);
 
-                // Convert to info with decay information
+                // Convert to info with decay information and stats
                 let mut learning_infos: Vec<LearningInfo> = learnings
                     .iter()
-                    .map(|l| LearningInfo::from_learning(l, Some(decay_config)))
+                    .map(|l| {
+                        let stats = if options.no_stats {
+                            None
+                        } else {
+                            self.stats_cache
+                                .as_ref()
+                                .and_then(|c| c.learnings.get(&l.id))
+                        };
+                        LearningInfo::from_learning(l, Some(decay_config), stats)
+                    })
                     .collect();
 
                 // Calculate stale count using same threshold as filter
@@ -281,6 +342,24 @@ impl<B: MemoryBackend> ListCommand<B> {
                 "   Created: {} | ID: {}",
                 learning.created, learning.id
             ));
+
+            // Add stats line if available (only shown when surfaced > 0)
+            if let (Some(surfaced), Some(referenced), Some(hit_pct)) = (
+                learning.surfaced,
+                learning.referenced,
+                learning.hit_rate_pct,
+            ) {
+                let last_used_part = learning
+                    .last_used
+                    .as_ref()
+                    .map(|d| format!(" | Last used: {}", d))
+                    .unwrap_or_default();
+                lines.push(format!(
+                    "   {} surfaced, {} referenced ({}% hit rate){}",
+                    surfaced, referenced, hit_pct, last_used_part
+                ));
+            }
+
             lines.push(String::new());
         }
 
@@ -370,6 +449,10 @@ This pattern has been archived.
             created: "2026-01-01".to_string(),
             days_until_decay: Some(30),
             approaching_decay: Some(false),
+            surfaced: None,
+            referenced: None,
+            hit_rate_pct: None,
+            last_used: None,
         }];
         let output = ListOutput::success(learnings);
 
@@ -554,6 +637,10 @@ This pattern has been archived.
             created: "2026-01-01".to_string(),
             days_until_decay: Some(5),
             approaching_decay: Some(true),
+            surfaced: None,
+            referenced: None,
+            hit_rate_pct: None,
+            last_used: None,
         }];
         let output = ListOutput::success(learnings);
         let options = ListOptions::default();
@@ -609,10 +696,103 @@ This pattern has been archived.
         );
 
         let decay_config = DecayConfig::default();
-        let info = LearningInfo::from_learning(&learning, Some(&decay_config));
+        let info = LearningInfo::from_learning(&learning, Some(&decay_config), None);
 
         assert_eq!(info.summary, "Test summary");
         assert_eq!(info.category, "pattern");
         assert!(info.days_until_decay.is_some());
+        assert!(info.surfaced.is_none());
+    }
+
+    #[test]
+    fn test_learning_info_with_stats() {
+        use crate::core::{Confidence, LearningCategory, LearningScope, WriteGateCriterion};
+        use chrono::Utc;
+
+        let learning = CompoundLearning::new(
+            LearningCategory::Pattern,
+            "Test summary",
+            "Test detail",
+            LearningScope::Project,
+            Confidence::High,
+            vec![WriteGateCriterion::BehaviorChanging],
+            vec!["rust".to_string()],
+            "test-session",
+        );
+
+        let stats = LearningStats {
+            surfaced: 5,
+            referenced: 3,
+            hit_rate: 0.6,
+            last_referenced: Some(Utc::now()),
+            ..Default::default()
+        };
+
+        let decay_config = DecayConfig::default();
+        let info = LearningInfo::from_learning(&learning, Some(&decay_config), Some(&stats));
+
+        assert_eq!(info.surfaced, Some(5));
+        assert_eq!(info.referenced, Some(3));
+        assert_eq!(info.hit_rate_pct, Some(60));
+        assert!(info.last_used.is_some());
+    }
+
+    #[test]
+    fn test_learning_info_stats_only_when_surfaced() {
+        use crate::core::{Confidence, LearningCategory, LearningScope, WriteGateCriterion};
+
+        let learning = CompoundLearning::new(
+            LearningCategory::Pattern,
+            "Test summary",
+            "Test detail",
+            LearningScope::Project,
+            Confidence::High,
+            vec![WriteGateCriterion::BehaviorChanging],
+            vec!["rust".to_string()],
+            "test-session",
+        );
+
+        // Stats with surfaced=0 should not show stats
+        let stats = LearningStats {
+            surfaced: 0,
+            referenced: 0,
+            hit_rate: 0.0,
+            ..Default::default()
+        };
+
+        let decay_config = DecayConfig::default();
+        let info = LearningInfo::from_learning(&learning, Some(&decay_config), Some(&stats));
+
+        assert!(info.surfaced.is_none());
+        assert!(info.referenced.is_none());
+        assert!(info.hit_rate_pct.is_none());
+    }
+
+    #[test]
+    fn test_format_output_with_stats() {
+        let (_temp, backend) = setup_with_learnings();
+        let config = Config::default();
+        let cmd = ListCommand::new(backend, config);
+
+        let learnings = vec![LearningInfo {
+            id: "cl_001".to_string(),
+            summary: "Test pattern".to_string(),
+            category: "pattern".to_string(),
+            tags: vec!["rust".to_string()],
+            status: "active".to_string(),
+            created: "2026-01-01".to_string(),
+            days_until_decay: Some(30),
+            approaching_decay: Some(false),
+            surfaced: Some(5),
+            referenced: Some(3),
+            hit_rate_pct: Some(60),
+            last_used: Some("2026-02-10".to_string()),
+        }];
+        let output = ListOutput::success(learnings);
+        let options = ListOptions::default();
+
+        let formatted = cmd.format_output(&output, &options);
+        assert!(formatted.contains("5 surfaced, 3 referenced (60% hit rate)"));
+        assert!(formatted.contains("Last used: 2026-02-10"));
     }
 }

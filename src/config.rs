@@ -15,6 +15,7 @@ use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use crate::core::LearningCategory;
 use crate::error::{FailOpen, GroveError, Result};
 
 /// Main configuration struct for Grove.
@@ -84,6 +85,10 @@ impl Default for BackendsConfig {
 pub struct GateConfig {
     /// Auto-skip configuration for trivial changes.
     pub auto_skip: AutoSkipConfig,
+    /// Whether to count skipped sessions as dismissals for unreferenced learnings.
+    /// Default is false (skip is "no signal" - doesn't affect learning quality tracking).
+    #[serde(default)]
+    pub skip_counts_as_dismissal: bool,
 }
 
 /// Auto-skip configuration for trivial changes.
@@ -127,8 +132,24 @@ impl Default for AutoSkipConfig {
 pub struct DecayConfig {
     /// Days without reference before a learning is archived.
     pub passive_duration_days: u32,
-    /// Hit rate above which decay is skipped.
+    /// Hit rate above which decay is skipped (conservative: 0.3 instead of 0.8).
     pub immunity_hit_rate: f64,
+    /// Minimum number of dismissals required before decay can occur.
+    /// Prevents decay based on single dismissals which may be false negatives.
+    #[serde(default = "default_min_dismissals")]
+    pub min_dismissals_for_decay: u32,
+    /// Whether to apply category-aware decay thresholds.
+    /// Debugging/domain learnings expect lower hit rates than patterns.
+    #[serde(default = "default_category_aware")]
+    pub category_aware: bool,
+}
+
+fn default_min_dismissals() -> u32 {
+    3
+}
+
+fn default_category_aware() -> bool {
+    true
 }
 
 impl DecayConfig {
@@ -136,13 +157,42 @@ impl DecayConfig {
     pub fn is_valid_immunity_rate(value: f64) -> bool {
         value.is_finite() && (0.0..=1.0).contains(&value)
     }
+
+    /// Get the immunity hit rate for a specific category.
+    /// Some categories (like debugging) are niche and expected to have lower hit rates.
+    /// Get the immunity rate for a specific learning category.
+    ///
+    /// Category-specific thresholds are more generous for niche categories
+    /// that are expected to have lower hit rates.
+    pub fn immunity_rate_for_category(&self, category: &LearningCategory) -> f64 {
+        if !self.category_aware {
+            return self.immunity_hit_rate;
+        }
+
+        // Category-specific thresholds per design doc (03-stats-and-quality.md)
+        // More generous for niche categories that naturally have lower hit rates
+        match category {
+            LearningCategory::Debugging => 0.2,  // Very situational
+            LearningCategory::Dependency => 0.2, // Version-specific
+            LearningCategory::Process => 0.2,    // Workflow-specific
+            LearningCategory::Domain => 0.3,     // May not apply often
+            LearningCategory::Convention => 0.3, // Project-specific
+            LearningCategory::Pitfall => 0.4,    // Warnings, may not surface often
+            LearningCategory::Pattern => 0.4,    // General patterns
+        }
+    }
 }
 
 impl Default for DecayConfig {
     fn default() -> Self {
         Self {
             passive_duration_days: 90,
-            immunity_hit_rate: 0.8,
+            // Lowered from 0.8 to 0.3 - be generous since hit rate is a lower bound
+            immunity_hit_rate: 0.3,
+            // Require 3 dismissals before counting against a learning
+            min_dismissals_for_decay: 3,
+            // Apply category-specific thresholds
+            category_aware: true,
         }
     }
 }
@@ -630,10 +680,13 @@ mod tests {
         assert!(config.gate.auto_skip.enabled);
         assert_eq!(config.gate.auto_skip.line_threshold, 5);
         assert_eq!(config.gate.auto_skip.decider, "agent");
+        assert!(!config.gate.skip_counts_as_dismissal); // Default: skip is no-signal
 
-        // Decay defaults
+        // Decay defaults (conservative: 0.3 instead of 0.8)
         assert_eq!(config.decay.passive_duration_days, 90);
-        assert!((config.decay.immunity_hit_rate - 0.8).abs() < f64::EPSILON);
+        assert!((config.decay.immunity_hit_rate - 0.3).abs() < f64::EPSILON);
+        assert_eq!(config.decay.min_dismissals_for_decay, 3);
+        assert!(config.decay.category_aware);
 
         // Retrieval defaults
         assert_eq!(config.retrieval.max_injections, 5);
@@ -948,10 +1001,13 @@ total-recall = false
                     line_threshold: 10,
                     decider: "never".to_string(),
                 },
+                skip_counts_as_dismissal: false,
             },
             decay: DecayConfig {
                 passive_duration_days: 60,
                 immunity_hit_rate: 0.9,
+                min_dismissals_for_decay: 3,
+                category_aware: true,
             },
             retrieval: RetrievalConfig {
                 max_injections: 10,
@@ -1027,10 +1083,13 @@ max_blocks = 10
                     line_threshold: 20,           // different from default (5)
                     decider: "agent".to_string(), // same as default
                 },
+                skip_counts_as_dismissal: false,
             },
             decay: DecayConfig {
                 passive_duration_days: 90, // same as default
-                immunity_hit_rate: 0.8,    // same as default
+                immunity_hit_rate: 0.3,    // same as default
+                min_dismissals_for_decay: 3,
+                category_aware: true,
             },
             ..Config::default()
         };
@@ -1043,10 +1102,13 @@ max_blocks = 10
                     line_threshold: 5,            // same as default
                     decider: "never".to_string(), // different from default
                 },
+                skip_counts_as_dismissal: false,
             },
             decay: DecayConfig {
                 passive_duration_days: 180, // different from default
-                immunity_hit_rate: 0.8,     // same as default
+                immunity_hit_rate: 0.3,     // same as default
+                min_dismissals_for_decay: 3,
+                category_aware: true,
             },
             ..Config::default()
         };
@@ -1065,8 +1127,8 @@ max_blocks = 10
         // passive_duration_days: override_config has 180 (non-default), should take precedence
         assert_eq!(merged.decay.passive_duration_days, 180);
 
-        // immunity_hit_rate: both have default, base's value should remain
-        assert!((merged.decay.immunity_hit_rate - 0.8).abs() < f64::EPSILON);
+        // immunity_hit_rate: both have default (0.3), base's value should remain
+        assert!((merged.decay.immunity_hit_rate - 0.3).abs() < f64::EPSILON);
     }
 
     #[test]
@@ -1078,6 +1140,7 @@ max_blocks = 10
         let user_config = Config {
             gate: GateConfig {
                 auto_skip: AutoSkipConfig::default(),
+                skip_counts_as_dismissal: false,
             },
             ..Config::default()
         };
@@ -1090,6 +1153,7 @@ max_blocks = 10
                     line_threshold: 10,           // different from default
                     decider: "agent".to_string(), // same as default
                 },
+                skip_counts_as_dismissal: false,
             },
             ..Config::default()
         };
@@ -1357,5 +1421,88 @@ max_blocks = 10
         assert_eq!(config.circuit_breaker.cooldown_seconds, 600);
 
         env::remove_var("GROVE_COOLDOWN_SECONDS");
+    }
+
+    // Category-aware decay threshold tests
+
+    #[test]
+    fn test_immunity_rate_for_category_debugging() {
+        let config = DecayConfig::default();
+        assert!(
+            (config.immunity_rate_for_category(&LearningCategory::Debugging) - 0.2).abs()
+                < f64::EPSILON
+        );
+    }
+
+    #[test]
+    fn test_immunity_rate_for_category_dependency() {
+        let config = DecayConfig::default();
+        assert!(
+            (config.immunity_rate_for_category(&LearningCategory::Dependency) - 0.2).abs()
+                < f64::EPSILON
+        );
+    }
+
+    #[test]
+    fn test_immunity_rate_for_category_process() {
+        let config = DecayConfig::default();
+        assert!(
+            (config.immunity_rate_for_category(&LearningCategory::Process) - 0.2).abs()
+                < f64::EPSILON
+        );
+    }
+
+    #[test]
+    fn test_immunity_rate_for_category_domain() {
+        let config = DecayConfig::default();
+        assert!(
+            (config.immunity_rate_for_category(&LearningCategory::Domain) - 0.3).abs()
+                < f64::EPSILON
+        );
+    }
+
+    #[test]
+    fn test_immunity_rate_for_category_convention() {
+        let config = DecayConfig::default();
+        assert!(
+            (config.immunity_rate_for_category(&LearningCategory::Convention) - 0.3).abs()
+                < f64::EPSILON
+        );
+    }
+
+    #[test]
+    fn test_immunity_rate_for_category_pitfall() {
+        let config = DecayConfig::default();
+        assert!(
+            (config.immunity_rate_for_category(&LearningCategory::Pitfall) - 0.4).abs()
+                < f64::EPSILON
+        );
+    }
+
+    #[test]
+    fn test_immunity_rate_for_category_pattern() {
+        let config = DecayConfig::default();
+        assert!(
+            (config.immunity_rate_for_category(&LearningCategory::Pattern) - 0.4).abs()
+                < f64::EPSILON
+        );
+    }
+
+    #[test]
+    fn test_immunity_rate_category_aware_disabled() {
+        let config = DecayConfig {
+            category_aware: false,
+            ..Default::default()
+        };
+
+        // All categories should return the default rate when category_aware is false
+        assert!(
+            (config.immunity_rate_for_category(&LearningCategory::Debugging) - 0.3).abs()
+                < f64::EPSILON
+        );
+        assert!(
+            (config.immunity_rate_for_category(&LearningCategory::Pattern) - 0.3).abs()
+                < f64::EPSILON
+        );
     }
 }

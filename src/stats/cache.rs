@@ -107,10 +107,15 @@ impl StatsCache {
             StatsEventType::Surfaced {
                 learning_id,
                 session_id: _,
+                category,
             } => {
                 let stats = self.learnings.entry(learning_id.clone()).or_default();
                 stats.surfaced += 1;
                 stats.last_surfaced = Some(event.ts);
+                // Track category if provided (first surfaced event sets it)
+                if stats.category.is_none() {
+                    stats.category = *category;
+                }
             }
 
             StatsEventType::Referenced {
@@ -461,6 +466,9 @@ pub struct LearningStats {
     /// Whether the learning is archived.
     #[serde(default)]
     pub archived: bool,
+    /// The learning's category (for category-aware decay).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub category: Option<crate::core::LearningCategory>,
 }
 
 /// Reflection statistics.
@@ -719,7 +727,7 @@ mod tests {
 
     // Helper to create test events
     fn surfaced_event(learning_id: &str, session_id: &str) -> StatsEvent {
-        StatsEvent::new(StatsEventType::surfaced(learning_id, session_id))
+        StatsEvent::new(StatsEventType::surfaced(learning_id, session_id, None))
     }
 
     fn referenced_event(
@@ -1266,7 +1274,7 @@ mod tests {
         let log_path = temp.path().join(".grove").join("stats.log");
 
         let logger = StatsLogger::new(&log_path);
-        logger.append_surfaced("L001", "s1").unwrap();
+        logger.append_surfaced("L001", "s1", None).unwrap();
         logger.append_referenced("L001", "s1", None).unwrap();
 
         let manager = StatsCacheManager::new(&cache_path, &log_path);
@@ -1284,7 +1292,7 @@ mod tests {
         let log_path = temp.path().join("stats.log");
 
         let logger = StatsLogger::new(&log_path);
-        logger.append_surfaced("L001", "s1").unwrap();
+        logger.append_surfaced("L001", "s1", None).unwrap();
 
         let manager = StatsCacheManager::new(&cache_path, &log_path);
 
@@ -1304,7 +1312,7 @@ mod tests {
         let log_path = temp.path().join("stats.log");
 
         let logger = StatsLogger::new(&log_path);
-        logger.append_surfaced("L001", "s1").unwrap();
+        logger.append_surfaced("L001", "s1", None).unwrap();
 
         let manager = StatsCacheManager::new(&cache_path, &log_path);
 
@@ -1313,7 +1321,7 @@ mod tests {
         assert_eq!(cache1.log_entries_processed, 1);
 
         // Add more events
-        logger.append_surfaced("L002", "s1").unwrap();
+        logger.append_surfaced("L002", "s1", None).unwrap();
 
         // Should detect staleness and rebuild
         let cache2 = manager.load_or_rebuild().unwrap();
@@ -1327,7 +1335,7 @@ mod tests {
         let log_path = temp.path().join("stats.log");
 
         let logger = StatsLogger::new(&log_path);
-        logger.append_surfaced("L001", "s1").unwrap();
+        logger.append_surfaced("L001", "s1", None).unwrap();
 
         let manager = StatsCacheManager::new(&cache_path, &log_path);
 
@@ -1338,7 +1346,7 @@ mod tests {
         manager.save(&cache).unwrap();
 
         // Add event and rebuild
-        logger.append_surfaced("L002", "s1").unwrap();
+        logger.append_surfaced("L002", "s1", None).unwrap();
         let rebuilt = manager.rebuild().unwrap();
 
         assert_eq!(rebuilt.last_decay_check, Some(decay_time));
@@ -1459,6 +1467,7 @@ mod tests {
                     .map(|i| StatsEvent::new(StatsEventType::Surfaced {
                         learning_id: format!("L{:03}", i),
                         session_id: "s1".to_string(),
+                        category: None,
                     }))
                     .collect();
 
@@ -1488,6 +1497,7 @@ mod tests {
                     events.push(StatsEvent::new(StatsEventType::Surfaced {
                         learning_id: "L001".to_string(),
                         session_id: "s1".to_string(),
+                        category: None,
                     }));
                 }
 
@@ -1538,6 +1548,7 @@ mod tests {
                     events.push(StatsEvent::new(StatsEventType::Surfaced {
                         learning_id: format!("L{:03}", i),
                         session_id: "s1".to_string(),
+                        category: None,
                     }));
                 }
 
@@ -1579,6 +1590,7 @@ mod tests {
                     StatsEvent::new(StatsEventType::Surfaced {
                         learning_id: "L001".to_string(),
                         session_id: "s1".to_string(),
+                        category: None,
                     }),
                     StatsEvent::new(StatsEventType::archived("L001", "decay")),
                     StatsEvent::new(StatsEventType::restored("L001")),

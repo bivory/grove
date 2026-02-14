@@ -63,6 +63,9 @@ pub enum StatsEventType {
         learning_id: String,
         /// The session where it was surfaced.
         session_id: String,
+        /// The category of the learning (for category-aware decay).
+        #[serde(skip_serializing_if = "Option::is_none")]
+        category: Option<LearningCategory>,
     },
 
     /// A learning was referenced (used) in a session.
@@ -162,10 +165,15 @@ pub enum StatsEventType {
 
 impl StatsEventType {
     /// Create a surfaced event.
-    pub fn surfaced(learning_id: impl Into<String>, session_id: impl Into<String>) -> Self {
+    pub fn surfaced(
+        learning_id: impl Into<String>,
+        session_id: impl Into<String>,
+        category: Option<LearningCategory>,
+    ) -> Self {
         Self::Surfaced {
             learning_id: learning_id.into(),
             session_id: session_id.into(),
+            category,
         }
     }
 
@@ -372,8 +380,9 @@ impl StatsLogger {
         &self,
         learning_id: impl Into<String>,
         session_id: impl Into<String>,
+        category: Option<LearningCategory>,
     ) -> Result<()> {
-        let event = StatsEvent::new(StatsEventType::surfaced(learning_id, session_id));
+        let event = StatsEvent::new(StatsEventType::surfaced(learning_id, session_id, category));
         self.append(&event)
     }
 
@@ -536,16 +545,31 @@ mod tests {
 
     #[test]
     fn test_surfaced_event() {
-        let event = StatsEventType::surfaced("L001", "session-123");
+        let event =
+            StatsEventType::surfaced("L001", "session-123", Some(LearningCategory::Pattern));
         assert_eq!(event.event_name(), "surfaced");
 
         if let StatsEventType::Surfaced {
             learning_id,
             session_id,
+            category,
         } = event
         {
             assert_eq!(learning_id, "L001");
             assert_eq!(session_id, "session-123");
+            assert_eq!(category, Some(LearningCategory::Pattern));
+        } else {
+            panic!("Expected Surfaced event");
+        }
+    }
+
+    #[test]
+    fn test_surfaced_event_without_category() {
+        let event = StatsEventType::surfaced("L001", "session-123", None);
+        assert_eq!(event.event_name(), "surfaced");
+
+        if let StatsEventType::Surfaced { category, .. } = event {
+            assert_eq!(category, None);
         } else {
             panic!("Expected Surfaced event");
         }
@@ -764,7 +788,7 @@ mod tests {
 
     #[test]
     fn test_stats_event_new() {
-        let event = StatsEvent::new(StatsEventType::surfaced("L001", "s1"));
+        let event = StatsEvent::new(StatsEventType::surfaced("L001", "s1", None));
         assert_eq!(event.v, STATS_SCHEMA_VERSION);
         assert!(event.ts <= Utc::now());
     }
@@ -772,7 +796,7 @@ mod tests {
     #[test]
     fn test_stats_event_with_timestamp() {
         let ts = Utc::now();
-        let event = StatsEvent::with_timestamp(StatsEventType::surfaced("L001", "s1"), ts);
+        let event = StatsEvent::with_timestamp(StatsEventType::surfaced("L001", "s1", None), ts);
         assert_eq!(event.v, STATS_SCHEMA_VERSION);
         assert_eq!(event.ts, ts);
     }
@@ -781,12 +805,17 @@ mod tests {
 
     #[test]
     fn test_surfaced_serialization() {
-        let event = StatsEvent::new(StatsEventType::surfaced("L001", "abc"));
+        let event = StatsEvent::new(StatsEventType::surfaced(
+            "L001",
+            "abc",
+            Some(LearningCategory::Pattern),
+        ));
         let json = serde_json::to_string(&event).unwrap();
 
         assert!(json.contains(r#""event":"surfaced""#));
         assert!(json.contains(r#""learning_id":"L001""#));
         assert!(json.contains(r#""session_id":"abc""#));
+        assert!(json.contains(r#""category":"pattern""#));
         assert!(json.contains(&format!(r#""v":{}"#, STATS_SCHEMA_VERSION)));
 
         // Deserialize back
@@ -875,7 +904,7 @@ mod tests {
         let path = temp.path().join("stats.log");
         let logger = StatsLogger::new(&path);
 
-        logger.append_surfaced("L001", "s1").unwrap();
+        logger.append_surfaced("L001", "s1", None).unwrap();
         logger.append_referenced("L001", "s1", None).unwrap();
 
         let events = logger.read_all().unwrap();
@@ -893,7 +922,7 @@ mod tests {
 
         assert_eq!(logger.count().unwrap(), 0);
 
-        logger.append_surfaced("L001", "s1").unwrap();
+        logger.append_surfaced("L001", "s1", None).unwrap();
         assert_eq!(logger.count().unwrap(), 1);
 
         logger.append_dismissed("L002", "s1").unwrap();
@@ -916,7 +945,7 @@ mod tests {
         let path = temp.path().join("subdir").join("stats.log");
         let logger = StatsLogger::new(&path);
 
-        logger.append_surfaced("L001", "s1").unwrap();
+        logger.append_surfaced("L001", "s1", None).unwrap();
 
         assert!(path.exists());
     }
@@ -927,7 +956,7 @@ mod tests {
         let path = temp.path().join("stats.log");
         let logger = StatsLogger::new(&path);
 
-        logger.append_surfaced("L001", "s1").unwrap();
+        logger.append_surfaced("L001", "s1", None).unwrap();
         logger
             .append_referenced("L001", "s1", Some("T001".to_string()))
             .unwrap();
@@ -1016,7 +1045,7 @@ mod tests {
 
     #[test]
     fn test_schema_version_in_events() {
-        let event = StatsEvent::new(StatsEventType::surfaced("L001", "s1"));
+        let event = StatsEvent::new(StatsEventType::surfaced("L001", "s1", None));
         assert_eq!(event.v, 1);
 
         let json = serde_json::to_string(&event).unwrap();
@@ -1090,7 +1119,7 @@ mod tests {
 
         // Write several events (well under limit)
         for _ in 0..100 {
-            logger.append_surfaced("L001", "s1").unwrap();
+            logger.append_surfaced("L001", "s1", None).unwrap();
         }
 
         // Should successfully read

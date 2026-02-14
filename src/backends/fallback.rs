@@ -418,11 +418,14 @@ mod tests {
         let primary_path = temp.path().join("primary.md");
         let fallback_path = temp.path().join("fallback.md");
 
+        // Use today's date so next_id will find these learnings
+        let today = chrono::Utc::now().format("%Y%m%d").to_string();
+
         // Write more learnings to fallback to give it a higher counter
         let fallback = MarkdownBackend::new(&fallback_path);
         for i in 0..5 {
             let mut learning = sample_learning();
-            learning.id = format!("cl_20260212_{:03}", i);
+            learning.id = format!("cl_{}_{:03}", today, i);
             fallback.write(&learning).unwrap();
         }
 
@@ -448,11 +451,14 @@ mod tests {
         let primary_path = temp.path().join("primary.md");
         let fallback_path = temp.path().join("fallback.md");
 
+        // Use today's date so next_id will find these learnings
+        let today = chrono::Utc::now().format("%Y%m%d").to_string();
+
         // Write learnings to fallback
         let fallback = MarkdownBackend::new(&fallback_path);
         for i in 0..3 {
             let mut learning = sample_learning();
-            learning.id = format!("cl_20260212_{:03}", i);
+            learning.id = format!("cl_{}_{:03}", today, i);
             fallback.write(&learning).unwrap();
         }
 

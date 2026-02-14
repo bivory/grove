@@ -57,9 +57,24 @@ pub fn evaluate(
         return DecayResult::AlreadyArchived;
     }
 
-    // Check immunity based on hit rate
-    if stats.hit_rate >= config.immunity_hit_rate {
+    // Check immunity based on hit rate (category-aware when enabled)
+    let immunity_threshold = if config.category_aware {
+        stats
+            .category
+            .as_ref()
+            .map(|c| config.immunity_rate_for_category(c))
+            .unwrap_or(config.immunity_hit_rate)
+    } else {
+        config.immunity_hit_rate
+    };
+    if stats.hit_rate >= immunity_threshold {
         return DecayResult::Immune;
+    }
+
+    // Require minimum dismissals before decay (conservative approach)
+    // This prevents decay based on single dismissals which may be false negatives
+    if stats.dismissed < config.min_dismissals_for_decay {
+        return DecayResult::Active;
     }
 
     // Compute last verified timestamp
@@ -212,7 +227,21 @@ pub fn get_decay_warnings(
         if stats.archived {
             continue;
         }
-        if stats.hit_rate >= config.immunity_hit_rate {
+        // Category-aware immunity threshold
+        let immunity_threshold = if config.category_aware {
+            stats
+                .category
+                .as_ref()
+                .map(|c| config.immunity_rate_for_category(c))
+                .unwrap_or(config.immunity_hit_rate)
+        } else {
+            config.immunity_hit_rate
+        };
+        if stats.hit_rate >= immunity_threshold {
+            continue;
+        }
+        // Skip learnings without sufficient dismissals (conservative approach)
+        if stats.dismissed < config.min_dismissals_for_decay {
             continue;
         }
 
@@ -237,7 +266,22 @@ pub fn get_immune_learnings(cache: &StatsCache, config: &DecayConfig) -> HashSet
     cache
         .learnings
         .iter()
-        .filter(|(_, stats)| !stats.archived && stats.hit_rate >= config.immunity_hit_rate)
+        .filter(|(_, stats)| {
+            if stats.archived {
+                return false;
+            }
+            // Category-aware immunity threshold
+            let immunity_threshold = if config.category_aware {
+                stats
+                    .category
+                    .as_ref()
+                    .map(|c| config.immunity_rate_for_category(c))
+                    .unwrap_or(config.immunity_hit_rate)
+            } else {
+                config.immunity_hit_rate
+            };
+            stats.hit_rate >= immunity_threshold
+        })
         .map(|(id, _)| id.clone())
         .collect()
 }
@@ -258,15 +302,27 @@ mod tests {
         hit_rate: f64,
         archived: bool,
     ) -> LearningStats {
+        // Default dismissed to 3 to meet min_dismissals_for_decay threshold
+        make_stats_with_dismissed(surfaced, referenced, hit_rate, archived, 3)
+    }
+
+    fn make_stats_with_dismissed(
+        surfaced: Option<DateTime<Utc>>,
+        referenced: Option<DateTime<Utc>>,
+        hit_rate: f64,
+        archived: bool,
+        dismissed: u32,
+    ) -> LearningStats {
         LearningStats {
             surfaced: 0,
             referenced: 0,
-            dismissed: 0,
+            dismissed,
             corrected: 0,
             hit_rate,
             last_surfaced: surfaced,
             last_referenced: referenced,
             origin_ticket: None,
+            category: None,
             referencing_tickets: vec![],
             archived,
         }
@@ -372,6 +428,46 @@ mod tests {
 
         let result = evaluate(&stats, created_at, &config, now);
         assert_eq!(result, DecayResult::Decayed);
+    }
+
+    #[test]
+    fn test_evaluate_insufficient_dismissals_prevents_decay() {
+        let config = default_config(); // min_dismissals_for_decay = 3
+        let now = Utc::now();
+        let created_at = now - Duration::days(100); // Old enough to decay
+
+        // Only 2 dismissals, below threshold of 3
+        let stats = make_stats_with_dismissed(None, None, 0.0, false, 2);
+
+        let result = evaluate(&stats, created_at, &config, now);
+        // Should stay active despite being old - insufficient dismissals
+        assert_eq!(result, DecayResult::Active);
+    }
+
+    #[test]
+    fn test_evaluate_sufficient_dismissals_allows_decay() {
+        let config = default_config(); // min_dismissals_for_decay = 3
+        let now = Utc::now();
+        let created_at = now - Duration::days(100); // Old enough to decay
+
+        // 3 dismissals meets threshold
+        let stats = make_stats_with_dismissed(None, None, 0.0, false, 3);
+
+        let result = evaluate(&stats, created_at, &config, now);
+        assert_eq!(result, DecayResult::Decayed);
+    }
+
+    #[test]
+    fn test_evaluate_zero_dismissals_prevents_decay() {
+        let config = default_config();
+        let now = Utc::now();
+        let created_at = now - Duration::days(100);
+
+        // Zero dismissals - definitely shouldn't decay
+        let stats = make_stats_with_dismissed(None, None, 0.0, false, 0);
+
+        let result = evaluate(&stats, created_at, &config, now);
+        assert_eq!(result, DecayResult::Active);
     }
 
     // Throttling tests
@@ -533,21 +629,23 @@ mod tests {
 
     #[test]
     fn test_get_immune_learnings() {
-        let config = default_config();
+        let config = default_config(); // immunity_hit_rate = 0.3
 
         let mut cache = StatsCache::new();
 
+        // Below immunity threshold (0.3)
         cache
             .learnings
-            .insert("L001".to_string(), make_stats(None, None, 0.5, false));
+            .insert("L001".to_string(), make_stats(None, None, 0.2, false));
 
+        // Above immunity threshold
         cache
             .learnings
-            .insert("L002".to_string(), make_stats(None, None, 0.85, false));
+            .insert("L002".to_string(), make_stats(None, None, 0.35, false));
 
         cache.learnings.insert(
             "L003".to_string(),
-            make_stats(None, None, 0.9, true), // Archived
+            make_stats(None, None, 0.9, true), // Archived - excluded
         );
 
         let immune = get_immune_learnings(&cache, &config);
@@ -650,5 +748,152 @@ mod tests {
             warnings.is_empty(),
             "Learning with missing timestamp should NOT get decay warning (fail-open)"
         );
+    }
+
+    // Category-aware decay tests
+
+    fn make_stats_with_category(
+        surfaced: Option<DateTime<Utc>>,
+        referenced: Option<DateTime<Utc>>,
+        hit_rate: f64,
+        archived: bool,
+        dismissed: u32,
+        category: Option<crate::core::LearningCategory>,
+    ) -> LearningStats {
+        LearningStats {
+            surfaced: 0,
+            referenced: 0,
+            dismissed,
+            corrected: 0,
+            hit_rate,
+            last_surfaced: surfaced,
+            last_referenced: referenced,
+            origin_ticket: None,
+            referencing_tickets: vec![],
+            archived,
+            category,
+        }
+    }
+
+    #[test]
+    fn test_category_aware_debugging_has_lower_threshold() {
+        // Debugging category has 0.2 threshold (lower than default 0.3)
+        let config = default_config(); // category_aware = true
+        let now = Utc::now();
+        let created_at = now - Duration::days(100);
+
+        // Hit rate 0.25 is above debugging threshold (0.2) but below default (0.3)
+        let stats = make_stats_with_category(
+            None,
+            None,
+            0.25,
+            false,
+            3,
+            Some(crate::core::LearningCategory::Debugging),
+        );
+
+        let result = evaluate(&stats, created_at, &config, now);
+        // Should be immune because 0.25 >= 0.2 (debugging threshold)
+        assert_eq!(result, DecayResult::Immune);
+    }
+
+    #[test]
+    fn test_category_aware_pattern_has_higher_threshold() {
+        // Pattern category has 0.4 threshold
+        let config = default_config();
+        let now = Utc::now();
+        let created_at = now - Duration::days(100);
+
+        // Hit rate 0.35 is below pattern threshold (0.4) but above default (0.3)
+        let stats = make_stats_with_category(
+            None,
+            None,
+            0.35,
+            false,
+            3,
+            Some(crate::core::LearningCategory::Pattern),
+        );
+
+        let result = evaluate(&stats, created_at, &config, now);
+        // Should decay because 0.35 < 0.4 (pattern threshold)
+        assert_eq!(result, DecayResult::Decayed);
+    }
+
+    #[test]
+    fn test_category_aware_disabled_uses_default() {
+        // When category_aware is false, use default threshold
+        let mut config = default_config();
+        config.category_aware = false;
+
+        let now = Utc::now();
+        let created_at = now - Duration::days(100);
+
+        // Hit rate 0.25 is below default threshold (0.3)
+        let stats = make_stats_with_category(
+            None,
+            None,
+            0.25,
+            false,
+            3,
+            Some(crate::core::LearningCategory::Debugging),
+        );
+
+        let result = evaluate(&stats, created_at, &config, now);
+        // Should decay because category_aware is false, 0.25 < 0.3
+        assert_eq!(result, DecayResult::Decayed);
+    }
+
+    #[test]
+    fn test_category_aware_none_category_uses_default() {
+        // When category is None, use default threshold
+        let config = default_config();
+        let now = Utc::now();
+        let created_at = now - Duration::days(100);
+
+        // Hit rate 0.25 is below default threshold (0.3)
+        let stats = make_stats_with_category(None, None, 0.25, false, 3, None);
+
+        let result = evaluate(&stats, created_at, &config, now);
+        // Should decay because no category, 0.25 < 0.3
+        assert_eq!(result, DecayResult::Decayed);
+    }
+
+    #[test]
+    fn test_get_immune_learnings_category_aware() {
+        let config = default_config(); // category_aware = true
+
+        let mut cache = StatsCache::new();
+
+        // Debugging with 0.25 hit rate - should be immune (0.25 >= 0.2)
+        cache.learnings.insert(
+            "L001".to_string(),
+            make_stats_with_category(
+                None,
+                None,
+                0.25,
+                false,
+                3,
+                Some(crate::core::LearningCategory::Debugging),
+            ),
+        );
+
+        // Pattern with 0.35 hit rate - should NOT be immune (0.35 < 0.4)
+        cache.learnings.insert(
+            "L002".to_string(),
+            make_stats_with_category(
+                None,
+                None,
+                0.35,
+                false,
+                3,
+                Some(crate::core::LearningCategory::Pattern),
+            ),
+        );
+
+        let immune = get_immune_learnings(&cache, &config);
+
+        assert_eq!(immune.len(), 1);
+        assert!(immune.contains("L001"));
+        assert!(!immune.contains("L002"));
     }
 }

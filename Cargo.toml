@@ -6,6 +6,10 @@ rust-version = "1.92"
 description = "Compound learning gate for Claude Code"
 license = "Apache-2.0"
 
+[features]
+default = []
+tantivy-search = ["tantivy"]
+
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
@@ -15,6 +19,7 @@ tracing = "0.1"
 toml = "0.9"
 dirs = "6.0"
 clap = { version = "4.5", features = ["derive"] }
+tantivy = { version = "0.25", optional = true }
 
 [dev-dependencies]
 tempfile = "3.15"

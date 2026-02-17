@@ -11,6 +11,8 @@ pub mod core;
 pub mod discovery;
 pub mod error;
 pub mod hooks;
+#[cfg(feature = "tantivy-search")]
+pub mod search;
 pub mod stats;
 pub mod storage;
 pub mod util;

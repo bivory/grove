@@ -69,12 +69,28 @@ fn is_grove_entry_line(line: &str) -> bool {
         || line.starts_with(LABEL_FILES)
 }
 
+/// Check if an entry matches all search terms (AND logic).
+///
+/// Each term must be present in the entry (case-insensitive).
+fn entry_matches_all_terms(entry: &str, terms: &[&str]) -> bool {
+    let entry_lower = entry.to_lowercase();
+    terms
+        .iter()
+        .all(|term| entry_lower.contains(&term.to_lowercase()))
+}
+
 /// Extract grove entries from file content that match the given query.
 ///
 /// Each entry starts with a line containing GROVE_ID_PREFIX and ends with Tags:.
-/// Only entries that contain the query (case-insensitive) are included.
+/// Only entries that contain ALL query terms (case-insensitive) are included.
 fn extract_matching_entries(content: &str, query: &str) -> String {
-    let query_lower = query.to_lowercase();
+    // Split query into individual terms for AND matching
+    let terms: Vec<&str> = query
+        .split_whitespace()
+        .map(|t| t.trim())
+        .filter(|t| !t.is_empty())
+        .collect();
+
     let mut results = String::new();
     let mut current_entry = String::new();
     let mut in_entry = false;
@@ -84,7 +100,7 @@ fn extract_matching_entries(content: &str, query: &str) -> String {
             // Start of a new entry - flush previous if it matches
             if in_entry
                 && !current_entry.is_empty()
-                && current_entry.to_lowercase().contains(&query_lower)
+                && entry_matches_all_terms(&current_entry, &terms)
             {
                 results.push_str(&current_entry);
                 results.push_str(&format!("\n{}\n\n", ENTRY_SEPARATOR));
@@ -101,7 +117,7 @@ fn extract_matching_entries(content: &str, query: &str) -> String {
 
             // Tags: line marks end of an entry
             if line.starts_with(LABEL_TAGS) {
-                if current_entry.to_lowercase().contains(&query_lower) {
+                if entry_matches_all_terms(&current_entry, &terms) {
                     results.push_str(&current_entry);
                     results.push_str(&format!("\n{}\n\n", ENTRY_SEPARATOR));
                 }
@@ -112,8 +128,7 @@ fn extract_matching_entries(content: &str, query: &str) -> String {
     }
 
     // Flush final entry if it matches
-    if in_entry && !current_entry.is_empty() && current_entry.to_lowercase().contains(&query_lower)
-    {
+    if in_entry && !current_entry.is_empty() && entry_matches_all_terms(&current_entry, &terms) {
         results.push_str(&current_entry);
         results.push_str(&format!("\n{}\n\n", ENTRY_SEPARATOR));
     }
@@ -1996,5 +2011,77 @@ Tags: #auth | Confidence: High"#;
 
         let results = extract_matching_entries(content, "kubernetes");
         assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_extract_matching_entries_multi_term_and_logic() {
+        let content = r#"**Convention** (grove:cl_001): Use tissue CLI for issue tracking
+> This project uses tissue for issues
+Tags: #tooling #issues #tissue | Confidence: High
+
+---
+
+**Pattern** (grove:cl_002): Database connection pooling
+> Use connection pools for performance
+Tags: #database #performance | Confidence: High"#;
+
+        // Single term "tissue" should match entry 1
+        let results = extract_matching_entries(content, "tissue");
+        assert!(
+            results.contains("grove:cl_001"),
+            "Should find entry with 'tissue'"
+        );
+        assert!(
+            !results.contains("grove:cl_002"),
+            "Should NOT find database entry"
+        );
+
+        // Single term "issue" should match entry 1
+        let results = extract_matching_entries(content, "issue");
+        assert!(
+            results.contains("grove:cl_001"),
+            "Should find entry with 'issue'"
+        );
+
+        // Multiple terms "tissue grove" should match entry 1 (AND logic)
+        let results = extract_matching_entries(content, "tissue grove");
+        assert!(
+            results.contains("grove:cl_001"),
+            "Should find entry matching both 'tissue' AND 'grove'"
+        );
+
+        // Multiple terms where one doesn't match should return empty
+        let results = extract_matching_entries(content, "tissue kubernetes");
+        assert!(
+            results.is_empty(),
+            "Should NOT match when one term is missing"
+        );
+
+        // Multiple terms matching different entries should return empty (AND requires all in same entry)
+        let results = extract_matching_entries(content, "tissue database");
+        assert!(
+            results.is_empty(),
+            "Should NOT match when terms are in different entries"
+        );
+    }
+
+    #[test]
+    fn test_entry_matches_all_terms() {
+        let entry = "Use tissue CLI for issue tracking with grove";
+
+        // All terms present
+        assert!(entry_matches_all_terms(entry, &["tissue", "grove"]));
+        assert!(entry_matches_all_terms(entry, &["tissue"]));
+        assert!(entry_matches_all_terms(entry, &["issue", "tracking"]));
+
+        // One term missing
+        assert!(!entry_matches_all_terms(entry, &["tissue", "kubernetes"]));
+        assert!(!entry_matches_all_terms(entry, &["database"]));
+
+        // Empty terms should match everything
+        assert!(entry_matches_all_terms(entry, &[]));
+
+        // Case insensitive
+        assert!(entry_matches_all_terms(entry, &["TISSUE", "GROVE"]));
     }
 }

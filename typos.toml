@@ -18,3 +18,5 @@ extend-ignore-re = [
 [default.extend-words]
 # Add project-specific words that are not typos
 grove = "grove"
+# Intentional typo used in fuzzy search tests
+contaner = "contaner"

@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-02-17
+
+### Added
+
+- Optional Tantivy full-text search behind `tantivy-search` feature flag
+  - Stemming tokenizer for better term matching (track/tracking, write/writes)
+  - Fuzzy search with dynamic edit distance based on term length
+  - BM25 relevance scoring with field boosts
+  - Generous search mode (stemming + fuzzy fallback) as default
+  - Query injection prevention via character escaping
+  - Upsert behavior for document updates
+- `TantivySearchIndex` and `TantivySearchResult` exports from `grove::search`
+
+### Changed
+
+- Total Recall backend search now matches all query terms individually
+  (improved recall for multi-word queries)
+
+## [0.5.0] - 2026-02-17
+
+### Added
+
+- Usage statistics in `grove list` output (hit count, last accessed date)
+- Category-aware decay tracking for stale learning detection
+- Git SHA and dirty status in `grove --version` output
+
+### Fixed
+
+- Correctly count total learnings across all categories in stats
+- Track categories properly in reflection stats events
+
 ## [0.4.0] - 2026-02-10
 
 ### Fixed
@@ -149,7 +180,9 @@ Initial release of Grove, a compound learning gate for Claude Code.
 - Architecture design documents
 - Implementation task roadmap
 
-[Unreleased]: https://github.com/bivory/grove/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/bivory/grove/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/bivory/grove/compare/v0.5.0...v0.6.0
+[0.5.0]: https://github.com/bivory/grove/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/bivory/grove/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/bivory/grove/compare/v0.2.2...v0.3.0
 [0.2.2]: https://github.com/bivory/grove/compare/v0.2.1...v0.2.2

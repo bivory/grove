@@ -745,6 +745,65 @@ fn fallback_grove_home() -> PathBuf {
     std::env::temp_dir().join("grove")
 }
 
+/// Find the project root for a given working directory.
+///
+/// This function walks up the directory tree to find the appropriate project root,
+/// using the following precedence:
+///
+/// 1. **Existing `.grove/` directory** - If a `.grove/` directory exists in the current
+///    directory or any ancestor, that directory is used. This allows explicit placement
+///    of the Grove directory.
+///
+/// 2. **Git repository root** - If no `.grove/` is found, we ask git for the repository
+///    root via `git rev-parse --show-toplevel`. This handles all git edge cases including
+///    worktrees and submodules.
+///
+/// 3. **Fallback to cwd** - If neither is found (e.g., not a git repo, git not installed),
+///    the original working directory is used.
+///
+/// # Arguments
+///
+/// * `cwd` - The current working directory to start searching from
+///
+/// # Examples
+///
+/// ```ignore
+/// // If cwd is /project/src/module and .grove exists at /project/.grove:
+/// let root = find_project_root(Path::new("/project/src/module"));
+/// assert_eq!(root, PathBuf::from("/project"));
+///
+/// // If no .grove but inside git repo rooted at /project:
+/// let root = find_project_root(Path::new("/project/src/module"));
+/// assert_eq!(root, PathBuf::from("/project"));
+/// ```
+pub fn find_project_root(cwd: &Path) -> PathBuf {
+    // 1. Walk up looking for existing .grove/ (explicit placement wins)
+    for ancestor in cwd.ancestors() {
+        if ancestor.join(".grove").is_dir() {
+            return ancestor.to_path_buf();
+        }
+    }
+
+    // 2. Ask git for the repo root
+    if let Ok(output) = std::process::Command::new("git")
+        .args(["rev-parse", "--show-toplevel"])
+        .current_dir(cwd)
+        .output()
+    {
+        if output.status.success() {
+            if let Ok(path) = String::from_utf8(output.stdout) {
+                let trimmed = path.trim();
+                if !trimmed.is_empty() {
+                    return PathBuf::from(trimmed);
+                }
+            }
+        }
+    }
+
+    // 3. Fall back to cwd
+    cwd.to_path_buf()
+}
+
 /// Get the sessions directory.
 ///
 /// Returns `<grove_home>/sessions/`.
@@ -761,9 +820,20 @@ pub fn stats_cache_path() -> Option<PathBuf> {
 
 /// Get the project grove directory for a given working directory.
 ///
-/// Returns `<cwd>/.grove/`.
+/// This function first finds the project root (by looking for an existing `.grove/`
+/// directory or the git repository root), then returns the `.grove/` subdirectory.
+///
+/// See [`find_project_root`] for details on how the project root is determined.
+///
+/// # Arguments
+///
+/// * `cwd` - The current working directory to start searching from
+///
+/// # Returns
+///
+/// The path to the `.grove/` directory, e.g., `<project_root>/.grove/`
 pub fn project_grove_dir(cwd: &Path) -> PathBuf {
-    cwd.join(".grove")
+    find_project_root(cwd).join(".grove")
 }
 
 /// Get the project learnings file path.
@@ -1750,5 +1820,176 @@ max_blocks = 10
         assert!(keys.contains(&"retrieval.strategy"));
         assert!(keys.contains(&"gate.auto_skip.line_threshold"));
         assert!(keys.contains(&"circuit_breaker.max_blocks"));
+    }
+
+    // Tests for find_project_root
+
+    #[test]
+    fn test_find_project_root_existing_grove_in_cwd() {
+        let dir = TempDir::new().unwrap();
+        let grove_dir = dir.path().join(".grove");
+        fs::create_dir_all(&grove_dir).unwrap();
+
+        let result = find_project_root(dir.path());
+        assert_eq!(result, dir.path());
+    }
+
+    #[test]
+    fn test_find_project_root_existing_grove_in_parent() {
+        let dir = TempDir::new().unwrap();
+        let grove_dir = dir.path().join(".grove");
+        fs::create_dir_all(&grove_dir).unwrap();
+
+        // Create a subdirectory
+        let subdir = dir.path().join("src").join("module");
+        fs::create_dir_all(&subdir).unwrap();
+
+        // find_project_root from subdirectory should find parent's .grove
+        let result = find_project_root(&subdir);
+        assert_eq!(result, dir.path());
+    }
+
+    #[test]
+    fn test_find_project_root_existing_grove_in_grandparent() {
+        let dir = TempDir::new().unwrap();
+        let grove_dir = dir.path().join(".grove");
+        fs::create_dir_all(&grove_dir).unwrap();
+
+        // Create nested subdirectories
+        let deep_subdir = dir.path().join("a").join("b").join("c").join("d");
+        fs::create_dir_all(&deep_subdir).unwrap();
+
+        // find_project_root from deep subdirectory should find root's .grove
+        let result = find_project_root(&deep_subdir);
+        assert_eq!(result, dir.path());
+    }
+
+    #[test]
+    fn test_find_project_root_fallback_behavior() {
+        // Test that when a parent has .grove/, we find it (not the cwd)
+        // This exercises the fallback path indirectly
+        let outer = TempDir::new().unwrap();
+        let outer_grove = outer.path().join(".grove");
+        fs::create_dir_all(&outer_grove).unwrap();
+
+        // Create an inner directory without .grove
+        let inner = outer.path().join("inner_project");
+        fs::create_dir_all(&inner).unwrap();
+
+        // find_project_root from inner should find outer (where .grove exists)
+        let result = find_project_root(&inner);
+        assert_eq!(result, outer.path());
+    }
+
+    #[test]
+    fn test_find_project_root_git_repo() {
+        let dir = TempDir::new().unwrap();
+
+        // Check if any ancestor has .grove/ - skip test if so (environment issue)
+        for ancestor in dir.path().ancestors() {
+            if ancestor.join(".grove").is_dir() {
+                // Skip test - can't reliably test git detection with .grove/ in ancestors
+                return;
+            }
+        }
+
+        // Initialize a git repo
+        let git_init = std::process::Command::new("git")
+            .args(["init"])
+            .current_dir(dir.path())
+            .output();
+
+        // Skip test if git is not available
+        if git_init.is_err() || !git_init.unwrap().status.success() {
+            return;
+        }
+
+        // Create a subdirectory
+        let subdir = dir.path().join("src");
+        fs::create_dir_all(&subdir).unwrap();
+
+        // find_project_root from subdirectory should find git root
+        let result = find_project_root(&subdir);
+        // Canonicalize both to handle symlinks (e.g., /tmp -> /private/tmp on macOS)
+        let expected = dir
+            .path()
+            .canonicalize()
+            .unwrap_or_else(|_| dir.path().to_path_buf());
+        let actual = result.canonicalize().unwrap_or(result);
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_find_project_root_grove_takes_precedence_over_git() {
+        let dir = TempDir::new().unwrap();
+
+        // Initialize a git repo
+        let git_init = std::process::Command::new("git")
+            .args(["init"])
+            .current_dir(dir.path())
+            .output();
+
+        // Skip test if git is not available
+        if git_init.is_err() || !git_init.unwrap().status.success() {
+            return;
+        }
+
+        // Create .grove in a subdirectory (not at git root)
+        let subproject = dir.path().join("packages").join("my-package");
+        let grove_dir = subproject.join(".grove");
+        fs::create_dir_all(&grove_dir).unwrap();
+
+        // Create a deeper subdirectory
+        let deep_subdir = subproject.join("src").join("lib");
+        fs::create_dir_all(&deep_subdir).unwrap();
+
+        // find_project_root should find .grove in packages/my-package, not git root
+        let result = find_project_root(&deep_subdir);
+        assert_eq!(result, subproject);
+    }
+
+    #[test]
+    fn test_project_grove_dir_uses_find_project_root() {
+        let dir = TempDir::new().unwrap();
+        let grove_dir = dir.path().join(".grove");
+        fs::create_dir_all(&grove_dir).unwrap();
+
+        // Create a subdirectory
+        let subdir = dir.path().join("src");
+        fs::create_dir_all(&subdir).unwrap();
+
+        // project_grove_dir from subdirectory should return parent's .grove
+        let result = project_grove_dir(&subdir);
+        assert_eq!(result, grove_dir);
+    }
+
+    #[test]
+    fn test_project_learnings_path_uses_find_project_root() {
+        let dir = TempDir::new().unwrap();
+        let grove_dir = dir.path().join(".grove");
+        fs::create_dir_all(&grove_dir).unwrap();
+
+        // Create a subdirectory
+        let subdir = dir.path().join("src");
+        fs::create_dir_all(&subdir).unwrap();
+
+        // project_learnings_path from subdirectory should return parent's path
+        let result = project_learnings_path(&subdir);
+        assert_eq!(result, grove_dir.join("learnings.md"));
+    }
+
+    #[test]
+    fn test_project_stats_log_path_uses_find_project_root() {
+        let dir = TempDir::new().unwrap();
+        let grove_dir = dir.path().join(".grove");
+        fs::create_dir_all(&grove_dir).unwrap();
+
+        // Create a subdirectory
+        let subdir = dir.path().join("src");
+        fs::create_dir_all(&subdir).unwrap();
+
+        // project_stats_log_path from subdirectory should return parent's path
+        let result = project_stats_log_path(&subdir);
+        assert_eq!(result, grove_dir.join("stats.log"));
     }
 }

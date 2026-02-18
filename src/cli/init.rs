@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
 
-use crate::config::{grove_home, project_grove_dir, project_learnings_path, sessions_dir};
+use crate::config::{grove_home, sessions_dir};
 
 /// Options for the init command.
 #[derive(Debug, Clone, Default)]
@@ -118,13 +118,18 @@ impl InitCommand {
     }
 
     /// Run the init command.
+    ///
+    /// Note: init always creates `.grove/` at the specified cwd, not at the
+    /// project root. This is intentional - the user is explicitly saying
+    /// "initialize Grove HERE". Other commands like `reflect` will use
+    /// `find_project_root` to locate the existing `.grove/` directory.
     pub fn run(&self, options: &InitOptions) -> InitOutput {
         let cwd = Path::new(&self.cwd);
         let mut created = Vec::new();
         let mut skipped = Vec::new();
 
-        // Create project .grove directory
-        let grove_dir = project_grove_dir(cwd);
+        // Create project .grove directory at cwd (not at project root)
+        let grove_dir = cwd.join(".grove");
         match self.ensure_dir(&grove_dir, options.force) {
             Ok(true) => created.push(grove_dir.display().to_string()),
             Ok(false) => skipped.push(grove_dir.display().to_string()),
@@ -140,7 +145,7 @@ impl InitCommand {
         }
 
         // Create project learnings.md
-        let learnings_path = project_learnings_path(cwd);
+        let learnings_path = grove_dir.join("learnings.md");
         match self.ensure_file(&learnings_path, DEFAULT_LEARNINGS, options.force) {
             Ok(true) => created.push(learnings_path.display().to_string()),
             Ok(false) => skipped.push(learnings_path.display().to_string()),

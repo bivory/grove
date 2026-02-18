@@ -167,6 +167,9 @@ enum Commands {
         /// Force rebuild the cache
         #[arg(long)]
         rebuild: bool,
+        /// Apply safe configuration recommendations
+        #[arg(long)]
+        update_config: bool,
     },
 
     /// [User] Maintain learnings (archive stale, restore)
@@ -425,7 +428,8 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
             quiet,
             detailed,
             rebuild,
-        } => run_stats(json, quiet, detailed, rebuild, &cwd),
+            update_config,
+        } => run_stats(json, quiet, detailed, rebuild, update_config, &cwd),
         Commands::Maintain {
             action,
             json,
@@ -703,6 +707,7 @@ fn run_stats(
     quiet: bool,
     detailed: bool,
     rebuild: bool,
+    update_config: bool,
     cwd: &Path,
 ) -> Result<ExitCode, Box<dyn std::error::Error>> {
     use grove::cli::stats::{StatsCommand, StatsOptions};
@@ -715,6 +720,7 @@ fn run_stats(
         quiet,
         detailed,
         rebuild,
+        update_config,
     };
 
     let output = cmd.run(&options);

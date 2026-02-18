@@ -9,6 +9,7 @@
 pub mod cache;
 pub mod decay;
 pub mod insights;
+pub mod recommendations;
 pub mod scoring;
 pub mod tracker;
 
@@ -23,6 +24,9 @@ pub use decay::{
 pub use insights::{
     generate_all as generate_insights, generate_cross_pollination_insight, generate_decay_warning,
     has_insights, Insight, InsightConfig, InsightKind,
+};
+pub use recommendations::{
+    apply_safe_recommendations, generate_recommendations, ConfigRecommendation, Recommendations,
 };
 pub use scoring::{rank, rank_learnings, score, weights, ScoredLearning};
 pub use tracker::{StatsEvent, StatsEventType, StatsLogger, STATS_SCHEMA_VERSION};

@@ -1,6 +1,6 @@
 //! Stats command for Grove.
 //!
-//! Displays quality dashboard with insights.
+//! Displays quality dashboard with insights and configuration recommendations.
 
 use std::collections::HashMap;
 use std::fs;
@@ -12,7 +12,8 @@ use serde::{Deserialize, Serialize};
 use crate::config::{project_stats_log_path, stats_cache_path, Config};
 use crate::discovery::create_primary_backend;
 use crate::stats::{
-    generate_insights, AggregateStats, Insight, InsightConfig, ReflectionStats, StatsCache,
+    apply_safe_recommendations, generate_insights, generate_recommendations, AggregateStats,
+    ConfigRecommendation, Insight, InsightConfig, Recommendations, ReflectionStats, StatsCache,
     StatsCacheManager, WriteGateStats,
 };
 
@@ -27,6 +28,8 @@ pub struct StatsOptions {
     pub detailed: bool,
     /// Force rebuild the cache.
     pub rebuild: bool,
+    /// Apply safe configuration recommendations.
+    pub update_config: bool,
 }
 
 /// Output format for the stats command.
@@ -42,11 +45,92 @@ pub struct StatsOutput {
     pub write_gate: WriteGateStatsInfo,
     /// Generated insights.
     pub insights: Vec<InsightInfo>,
+    /// Configuration recommendations.
+    pub recommendations: RecommendationsInfo,
     /// Warnings (e.g., large learnings file).
     pub warnings: Vec<String>,
     /// Error message if stats failed.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    /// Whether config was updated (when --update-config is used).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub config_updated: Option<bool>,
+    /// Config changes that were applied.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub config_changes: Vec<ConfigChange>,
+}
+
+/// A config change that was applied.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConfigChange {
+    /// The config key.
+    pub key: String,
+    /// The old value.
+    pub old_value: String,
+    /// The new value.
+    pub new_value: String,
+}
+
+/// Configuration recommendations info for output.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct RecommendationsInfo {
+    /// Safe recommendations (can be auto-applied).
+    pub safe: Vec<RecommendationInfo>,
+    /// Aggressive recommendations (require manual review).
+    pub aggressive: Vec<RecommendationInfo>,
+}
+
+impl RecommendationsInfo {
+    /// Check if there are any recommendations.
+    pub fn is_empty(&self) -> bool {
+        self.safe.is_empty() && self.aggressive.is_empty()
+    }
+
+    /// Check if there are safe recommendations.
+    pub fn has_safe(&self) -> bool {
+        !self.safe.is_empty()
+    }
+}
+
+impl From<&Recommendations> for RecommendationsInfo {
+    fn from(recs: &Recommendations) -> Self {
+        Self {
+            safe: recs.safe.iter().map(RecommendationInfo::from).collect(),
+            aggressive: recs
+                .aggressive
+                .iter()
+                .map(RecommendationInfo::from)
+                .collect(),
+        }
+    }
+}
+
+/// Simplified recommendation for output.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RecommendationInfo {
+    /// Config key.
+    pub config_key: String,
+    /// Current value.
+    pub current_value: String,
+    /// Recommended value.
+    pub recommended_value: String,
+    /// Reason for recommendation.
+    pub reason: String,
+    /// Risk explanation (for aggressive recommendations).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub risk: Option<String>,
+}
+
+impl From<&ConfigRecommendation> for RecommendationInfo {
+    fn from(rec: &ConfigRecommendation) -> Self {
+        Self {
+            config_key: rec.config_key.clone(),
+            current_value: rec.current_value.clone(),
+            recommended_value: rec.recommended_value.clone(),
+            reason: rec.reason.clone(),
+            risk: rec.risk.clone(),
+        }
+    }
 }
 
 /// Simplified aggregate stats for output.
@@ -165,15 +249,23 @@ impl From<&Insight> for InsightInfo {
 
 impl StatsOutput {
     /// Create a successful output.
-    pub fn success(cache: &StatsCache, insights: Vec<Insight>, warnings: Vec<String>) -> Self {
+    pub fn success(
+        cache: &StatsCache,
+        insights: Vec<Insight>,
+        recommendations: &Recommendations,
+        warnings: Vec<String>,
+    ) -> Self {
         Self {
             success: true,
             aggregates: AggregateStatsInfo::from(&cache.aggregates),
             reflections: ReflectionStatsInfo::from(&cache.reflections),
             write_gate: WriteGateStatsInfo::from(&cache.write_gate),
             insights: insights.iter().map(InsightInfo::from).collect(),
+            recommendations: RecommendationsInfo::from(recommendations),
             warnings,
             error: None,
+            config_updated: None,
+            config_changes: Vec::new(),
         }
     }
 
@@ -200,8 +292,11 @@ impl StatsOutput {
                 pass_rate: 0.0,
             },
             insights: Vec::new(),
+            recommendations: RecommendationsInfo::default(),
             warnings,
             error: None,
+            config_updated: None,
+            config_changes: Vec::new(),
         }
     }
 
@@ -228,15 +323,17 @@ impl StatsOutput {
                 pass_rate: 0.0,
             },
             insights: Vec::new(),
+            recommendations: RecommendationsInfo::default(),
             warnings: Vec::new(),
             error: Some(error.into()),
+            config_updated: None,
+            config_changes: Vec::new(),
         }
     }
 }
 
 /// The stats command implementation.
 pub struct StatsCommand {
-    #[allow(dead_code)]
     config: Config,
     project_path: std::path::PathBuf,
 }
@@ -349,7 +446,43 @@ impl StatsCommand {
             now,
         );
 
-        StatsOutput::success(&cache, insights, warnings)
+        // Generate recommendations based on insights and cache
+        let recommendations = generate_recommendations(&cache, &insights, &self.config);
+
+        let mut output = StatsOutput::success(&cache, insights, &recommendations, warnings);
+
+        // Apply safe recommendations if requested
+        if options.update_config && recommendations.has_safe() {
+            let new_config = apply_safe_recommendations(&self.config, &recommendations);
+            let changes = self.config.diff(&new_config);
+
+            if !changes.is_empty() {
+                // Save the new config
+                match new_config.save_project(&self.project_path) {
+                    Ok(()) => {
+                        output.config_updated = Some(true);
+                        output.config_changes = changes
+                            .into_iter()
+                            .map(|(key, old, new)| ConfigChange {
+                                key,
+                                old_value: old,
+                                new_value: new,
+                            })
+                            .collect();
+                    }
+                    Err(e) => {
+                        output
+                            .warnings
+                            .push(format!("Failed to save config: {}", e));
+                        output.config_updated = Some(false);
+                    }
+                }
+            } else {
+                output.config_updated = Some(false);
+            }
+        }
+
+        output
     }
 
     /// Format output based on options.
@@ -436,6 +569,64 @@ impl StatsCommand {
             lines.push(String::new());
         }
 
+        // Recommendations
+        if !output.recommendations.is_empty() {
+            // Safe recommendations
+            if !output.recommendations.safe.is_empty() {
+                lines.push("=== Safe Recommendations ===".to_string());
+                lines.push("(auto-applicable with --update-config)\n".to_string());
+                for rec in &output.recommendations.safe {
+                    lines.push(format!(
+                        "• {}: {} → {}",
+                        rec.config_key, rec.current_value, rec.recommended_value
+                    ));
+                    lines.push(format!("  Reason: {}", rec.reason));
+                }
+                lines.push(String::new());
+            }
+
+            // Aggressive recommendations
+            if !output.recommendations.aggressive.is_empty() {
+                lines.push("=== Aggressive Recommendations ===".to_string());
+                lines.push("(require manual review - edit .grove/config.toml)\n".to_string());
+                for rec in &output.recommendations.aggressive {
+                    lines.push(format!(
+                        "• {}: {} → {}",
+                        rec.config_key, rec.current_value, rec.recommended_value
+                    ));
+                    lines.push(format!("  Reason: {}", rec.reason));
+                    if let Some(ref risk) = rec.risk {
+                        lines.push(format!("  Risk: {}", risk));
+                    }
+                }
+                lines.push(String::new());
+            }
+
+            // Hint for safe recommendations
+            if output.recommendations.has_safe() && output.config_updated.is_none() {
+                lines.push(format!(
+                    "Run 'grove stats --update-config' to apply {} safe tweak(s).\n",
+                    output.recommendations.safe.len()
+                ));
+            }
+        }
+
+        // Config update result
+        if let Some(updated) = output.config_updated {
+            if updated && !output.config_changes.is_empty() {
+                lines.push("✓ Config updated:".to_string());
+                for change in &output.config_changes {
+                    lines.push(format!(
+                        "  {} = {} → {}",
+                        change.key, change.old_value, change.new_value
+                    ));
+                }
+                lines.push(String::new());
+            } else if !updated && output.config_changes.is_empty() {
+                lines.push("No config changes needed.\n".to_string());
+            }
+        }
+
         lines.join("\n")
     }
 }
@@ -471,10 +662,12 @@ mod tests {
     #[test]
     fn test_stats_output_success() {
         let cache = StatsCache::default();
-        let output = StatsOutput::success(&cache, vec![], vec![]);
+        let recommendations = Recommendations::default();
+        let output = StatsOutput::success(&cache, vec![], &recommendations, vec![]);
 
         assert!(output.success);
         assert!(output.error.is_none());
+        assert!(output.recommendations.is_empty());
     }
 
     #[test]
@@ -639,6 +832,58 @@ mod tests {
     }
 
     #[test]
+    fn test_format_output_with_recommendations() {
+        let temp = setup();
+        let config = Config::default();
+        let cmd = StatsCommand::new(config, temp.path());
+
+        let mut output = StatsOutput::empty(vec![]);
+        output.recommendations = RecommendationsInfo {
+            safe: vec![RecommendationInfo {
+                config_key: "retrieval.strategy".to_string(),
+                current_value: "moderate".to_string(),
+                recommended_value: "aggressive".to_string(),
+                reason: "hit rate: 75%".to_string(),
+                risk: None,
+            }],
+            aggressive: vec![RecommendationInfo {
+                config_key: "circuit_breaker.max_blocks".to_string(),
+                current_value: "3".to_string(),
+                recommended_value: "5".to_string(),
+                reason: "frequent legitimate blocks".to_string(),
+                risk: Some("May mask actual issues".to_string()),
+            }],
+        };
+        let options = StatsOptions::default();
+
+        let formatted = cmd.format_output(&output, &options);
+        assert!(formatted.contains("Safe Recommendations"));
+        assert!(formatted.contains("Aggressive Recommendations"));
+        assert!(formatted.contains("retrieval.strategy"));
+        assert!(formatted.contains("--update-config"));
+    }
+
+    #[test]
+    fn test_format_output_config_updated() {
+        let temp = setup();
+        let config = Config::default();
+        let cmd = StatsCommand::new(config, temp.path());
+
+        let mut output = StatsOutput::empty(vec![]);
+        output.config_updated = Some(true);
+        output.config_changes = vec![ConfigChange {
+            key: "retrieval.strategy".to_string(),
+            old_value: "moderate".to_string(),
+            new_value: "aggressive".to_string(),
+        }];
+        let options = StatsOptions::default();
+
+        let formatted = cmd.format_output(&output, &options);
+        assert!(formatted.contains("Config updated"));
+        assert!(formatted.contains("retrieval.strategy"));
+    }
+
+    #[test]
     fn test_aggregate_stats_info_from() {
         use std::collections::HashMap;
 
@@ -765,5 +1010,28 @@ mod tests {
 
         let info = WriteGateStatsInfo::from(&stats);
         assert_eq!(info.pass_rate, 0.0); // Should be sanitized
+    }
+
+    #[test]
+    fn test_recommendations_info_is_empty() {
+        let info = RecommendationsInfo::default();
+        assert!(info.is_empty());
+        assert!(!info.has_safe());
+    }
+
+    #[test]
+    fn test_recommendations_info_has_safe() {
+        let info = RecommendationsInfo {
+            safe: vec![RecommendationInfo {
+                config_key: "test".to_string(),
+                current_value: "a".to_string(),
+                recommended_value: "b".to_string(),
+                reason: "reason".to_string(),
+                risk: None,
+            }],
+            aggressive: vec![],
+        };
+        assert!(!info.is_empty());
+        assert!(info.has_safe());
     }
 }

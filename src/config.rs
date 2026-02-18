@@ -555,6 +555,131 @@ impl Config {
         let result: Result<Self> = Ok(Self::load());
         result.fail_open_default("loading config")
     }
+
+    /// Save configuration to the project config file.
+    ///
+    /// Writes to `.grove/config.toml` in the given directory.
+    /// Creates the `.grove` directory if it doesn't exist.
+    /// Uses atomic write (write to temp file, then rename) for safety.
+    pub fn save_project(&self, cwd: &Path) -> Result<()> {
+        let grove_dir = cwd.join(".grove");
+
+        // Create .grove directory if it doesn't exist
+        if !grove_dir.exists() {
+            fs::create_dir_all(&grove_dir).map_err(|e| GroveError::storage(&grove_dir, e))?;
+        }
+
+        let config_path = grove_dir.join("config.toml");
+
+        // Serialize to TOML
+        let content =
+            toml::to_string_pretty(self).map_err(|e| GroveError::config(e.to_string()))?;
+
+        // Atomic write: write to temp file, then rename
+        let temp_path = grove_dir.join(".config.toml.tmp");
+        fs::write(&temp_path, &content).map_err(|e| GroveError::storage(&temp_path, e))?;
+
+        // Sync the file to disk
+        let file = fs::File::open(&temp_path).map_err(|e| GroveError::storage(&temp_path, e))?;
+        file.sync_all()
+            .map_err(|e| GroveError::storage(&temp_path, e))?;
+        drop(file);
+
+        // Rename temp to final (atomic on most filesystems)
+        fs::rename(&temp_path, &config_path).map_err(|e| GroveError::storage(&config_path, e))?;
+
+        Ok(())
+    }
+
+    /// Generate a diff of changed values between two configs.
+    ///
+    /// Returns a list of (key, old_value, new_value) tuples for changed fields.
+    pub fn diff(&self, other: &Config) -> Vec<(String, String, String)> {
+        let mut changes = Vec::new();
+
+        // Retrieval strategy
+        if self.retrieval.strategy != other.retrieval.strategy {
+            changes.push((
+                "retrieval.strategy".to_string(),
+                self.retrieval.strategy.clone(),
+                other.retrieval.strategy.clone(),
+            ));
+        }
+
+        // Auto-skip threshold
+        if self.gate.auto_skip.line_threshold != other.gate.auto_skip.line_threshold {
+            changes.push((
+                "gate.auto_skip.line_threshold".to_string(),
+                self.gate.auto_skip.line_threshold.to_string(),
+                other.gate.auto_skip.line_threshold.to_string(),
+            ));
+        }
+
+        // Auto-skip enabled
+        if self.gate.auto_skip.enabled != other.gate.auto_skip.enabled {
+            changes.push((
+                "gate.auto_skip.enabled".to_string(),
+                self.gate.auto_skip.enabled.to_string(),
+                other.gate.auto_skip.enabled.to_string(),
+            ));
+        }
+
+        // Auto-skip decider
+        if self.gate.auto_skip.decider != other.gate.auto_skip.decider {
+            changes.push((
+                "gate.auto_skip.decider".to_string(),
+                self.gate.auto_skip.decider.clone(),
+                other.gate.auto_skip.decider.clone(),
+            ));
+        }
+
+        // Decay days
+        if self.decay.passive_duration_days != other.decay.passive_duration_days {
+            changes.push((
+                "decay.passive_duration_days".to_string(),
+                self.decay.passive_duration_days.to_string(),
+                other.decay.passive_duration_days.to_string(),
+            ));
+        }
+
+        // Decay immunity rate
+        if (self.decay.immunity_hit_rate - other.decay.immunity_hit_rate).abs() > f64::EPSILON {
+            changes.push((
+                "decay.immunity_hit_rate".to_string(),
+                format!("{:.2}", self.decay.immunity_hit_rate),
+                format!("{:.2}", other.decay.immunity_hit_rate),
+            ));
+        }
+
+        // Circuit breaker max_blocks
+        if self.circuit_breaker.max_blocks != other.circuit_breaker.max_blocks {
+            changes.push((
+                "circuit_breaker.max_blocks".to_string(),
+                self.circuit_breaker.max_blocks.to_string(),
+                other.circuit_breaker.max_blocks.to_string(),
+            ));
+        }
+
+        // Circuit breaker cooldown
+        if self.circuit_breaker.cooldown_seconds != other.circuit_breaker.cooldown_seconds {
+            changes.push((
+                "circuit_breaker.cooldown_seconds".to_string(),
+                self.circuit_breaker.cooldown_seconds.to_string(),
+                other.circuit_breaker.cooldown_seconds.to_string(),
+            ));
+        }
+
+        // Max injections
+        if self.retrieval.max_injections != other.retrieval.max_injections {
+            changes.push((
+                "retrieval.max_injections".to_string(),
+                self.retrieval.max_injections.to_string(),
+                other.retrieval.max_injections.to_string(),
+            ));
+        }
+
+        changes
+    }
 }
 
 /// Get the Grove home directory.
@@ -1504,5 +1629,126 @@ max_blocks = 10
             (config.immunity_rate_for_category(&LearningCategory::Pattern) - 0.3).abs()
                 < f64::EPSILON
         );
+    }
+
+    #[test]
+    fn test_save_project_creates_config_file() {
+        let dir = TempDir::new().unwrap();
+        let config = Config {
+            retrieval: RetrievalConfig {
+                max_injections: 10,
+                strategy: "aggressive".to_string(),
+            },
+            ..Config::default()
+        };
+
+        config.save_project(dir.path()).unwrap();
+
+        let config_path = dir.path().join(".grove").join("config.toml");
+        assert!(config_path.exists());
+
+        // Verify content
+        let content = fs::read_to_string(&config_path).unwrap();
+        assert!(content.contains("aggressive"));
+        assert!(content.contains("10"));
+    }
+
+    #[test]
+    fn test_save_project_creates_grove_dir() {
+        let dir = TempDir::new().unwrap();
+        let grove_dir = dir.path().join(".grove");
+
+        // Ensure .grove doesn't exist initially
+        assert!(!grove_dir.exists());
+
+        let config = Config::default();
+        config.save_project(dir.path()).unwrap();
+
+        // .grove should now exist
+        assert!(grove_dir.exists());
+    }
+
+    #[test]
+    fn test_save_project_overwrites_existing() {
+        let dir = TempDir::new().unwrap();
+        let grove_dir = dir.path().join(".grove");
+        fs::create_dir_all(&grove_dir).unwrap();
+
+        // Write initial config
+        let config1 = Config {
+            retrieval: RetrievalConfig {
+                strategy: "conservative".to_string(),
+                ..Default::default()
+            },
+            ..Config::default()
+        };
+        config1.save_project(dir.path()).unwrap();
+
+        // Write updated config
+        let config2 = Config {
+            retrieval: RetrievalConfig {
+                strategy: "aggressive".to_string(),
+                ..Default::default()
+            },
+            ..Config::default()
+        };
+        config2.save_project(dir.path()).unwrap();
+
+        // Verify the file was updated
+        let config_path = dir.path().join(".grove").join("config.toml");
+        let content = fs::read_to_string(&config_path).unwrap();
+        assert!(content.contains("aggressive"));
+        assert!(!content.contains("conservative"));
+    }
+
+    #[test]
+    fn test_diff_no_changes() {
+        let config = Config::default();
+        let changes = config.diff(&config);
+        assert!(changes.is_empty());
+    }
+
+    #[test]
+    fn test_diff_retrieval_strategy() {
+        let config1 = Config::default();
+        let mut config2 = Config::default();
+        config2.retrieval.strategy = "aggressive".to_string();
+
+        let changes = config1.diff(&config2);
+        assert_eq!(changes.len(), 1);
+        assert_eq!(changes[0].0, "retrieval.strategy");
+        assert_eq!(changes[0].1, "moderate");
+        assert_eq!(changes[0].2, "aggressive");
+    }
+
+    #[test]
+    fn test_diff_auto_skip_threshold() {
+        let config1 = Config::default();
+        let mut config2 = Config::default();
+        config2.gate.auto_skip.line_threshold = 10;
+
+        let changes = config1.diff(&config2);
+        assert_eq!(changes.len(), 1);
+        assert_eq!(changes[0].0, "gate.auto_skip.line_threshold");
+        assert_eq!(changes[0].1, "5");
+        assert_eq!(changes[0].2, "10");
+    }
+
+    #[test]
+    fn test_diff_multiple_changes() {
+        let config1 = Config::default();
+        let mut config2 = Config::default();
+        config2.retrieval.strategy = "aggressive".to_string();
+        config2.gate.auto_skip.line_threshold = 3;
+        config2.circuit_breaker.max_blocks = 5;
+
+        let changes = config1.diff(&config2);
+        assert_eq!(changes.len(), 3);
+
+        // Check that all expected changes are present
+        let keys: Vec<_> = changes.iter().map(|(k, _, _)| k.as_str()).collect();
+        assert!(keys.contains(&"retrieval.strategy"));
+        assert!(keys.contains(&"gate.auto_skip.line_threshold"));
+        assert!(keys.contains(&"circuit_breaker.max_blocks"));
     }
 }

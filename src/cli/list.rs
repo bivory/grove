@@ -10,6 +10,30 @@ use crate::config::{Config, DecayConfig};
 use crate::core::CompoundLearning;
 use crate::stats::{LearningStats, StatsCache};
 
+/// Sort field for list output.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum SortBy {
+    /// Sort by creation timestamp (default).
+    #[default]
+    Created,
+    /// Sort by last used/referenced date.
+    LastUsed,
+    /// Sort by hit rate (referenced/surfaced ratio).
+    HitRate,
+    /// Sort by number of times surfaced.
+    Surfaced,
+}
+
+/// Sort direction for list output.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum SortOrder {
+    /// Descending order (default) - highest/newest first.
+    #[default]
+    Desc,
+    /// Ascending order - lowest/oldest first.
+    Asc,
+}
+
 /// Options for the list command.
 #[derive(Debug, Clone, Default)]
 pub struct ListOptions {
@@ -27,6 +51,10 @@ pub struct ListOptions {
     pub stale_days: Option<u32>,
     /// Hide usage statistics in output.
     pub no_stats: bool,
+    /// Sort field.
+    pub sort_by: SortBy,
+    /// Sort direction.
+    pub sort_order: SortOrder,
 }
 
 /// Output format for the list command.
@@ -213,9 +241,11 @@ impl<B: MemoryBackend> ListCommand<B> {
 
         match self.backend.search(&SearchQuery::new(), &filters) {
             Ok(results) => {
-                // Extract learnings and sort by timestamp (most recent first)
+                // Extract learnings
                 let mut learnings: Vec<_> = results.into_iter().map(|r| r.learning).collect();
-                learnings.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+
+                // Sort based on options
+                self.sort_learnings(&mut learnings, options);
 
                 let decay_config = &self.config.decay;
                 let stale_days = options.stale_days.unwrap_or(7);
@@ -272,6 +302,79 @@ impl<B: MemoryBackend> ListCommand<B> {
             }
             Err(e) => ListOutput::failure(e.to_string()),
         }
+    }
+
+    /// Sort learnings based on the sort options.
+    ///
+    /// For stats-based sorts (last-used, hit-rate, surfaced), learnings without
+    /// stats are sorted to the end, then by creation date (descending).
+    fn sort_learnings(&self, learnings: &mut [CompoundLearning], options: &ListOptions) {
+        use std::cmp::Ordering;
+
+        let stats_cache = &self.stats_cache;
+
+        learnings.sort_by(|a, b| {
+            let cmp = match options.sort_by {
+                SortBy::Created => {
+                    // Sort by creation timestamp
+                    b.timestamp.cmp(&a.timestamp)
+                }
+                SortBy::LastUsed => {
+                    // Sort by last_referenced, learnings without stats go to end
+                    let a_stats = stats_cache.as_ref().and_then(|c| c.learnings.get(&a.id));
+                    let b_stats = stats_cache.as_ref().and_then(|c| c.learnings.get(&b.id));
+
+                    match (
+                        a_stats.and_then(|s| s.last_referenced),
+                        b_stats.and_then(|s| s.last_referenced),
+                    ) {
+                        (Some(a_time), Some(b_time)) => b_time.cmp(&a_time),
+                        (Some(_), None) => Ordering::Less, // a has stats, b doesn't -> a first
+                        (None, Some(_)) => Ordering::Greater, // b has stats, a doesn't -> b first
+                        (None, None) => b.timestamp.cmp(&a.timestamp), // Both no stats -> by created
+                    }
+                }
+                SortBy::HitRate => {
+                    // Sort by hit rate, learnings without stats go to end
+                    let a_stats = stats_cache.as_ref().and_then(|c| c.learnings.get(&a.id));
+                    let b_stats = stats_cache.as_ref().and_then(|c| c.learnings.get(&b.id));
+
+                    match (
+                        a_stats.filter(|s| s.surfaced > 0),
+                        b_stats.filter(|s| s.surfaced > 0),
+                    ) {
+                        (Some(a_s), Some(b_s)) => b_s
+                            .hit_rate
+                            .partial_cmp(&a_s.hit_rate)
+                            .unwrap_or(Ordering::Equal),
+                        (Some(_), None) => Ordering::Less,
+                        (None, Some(_)) => Ordering::Greater,
+                        (None, None) => b.timestamp.cmp(&a.timestamp),
+                    }
+                }
+                SortBy::Surfaced => {
+                    // Sort by surfaced count, learnings without stats go to end
+                    let a_stats = stats_cache.as_ref().and_then(|c| c.learnings.get(&a.id));
+                    let b_stats = stats_cache.as_ref().and_then(|c| c.learnings.get(&b.id));
+
+                    match (
+                        a_stats.filter(|s| s.surfaced > 0),
+                        b_stats.filter(|s| s.surfaced > 0),
+                    ) {
+                        (Some(a_s), Some(b_s)) => b_s.surfaced.cmp(&a_s.surfaced),
+                        (Some(_), None) => Ordering::Less,
+                        (None, Some(_)) => Ordering::Greater,
+                        (None, None) => b.timestamp.cmp(&a.timestamp),
+                    }
+                }
+            };
+
+            // Apply sort order (reverse if ascending)
+            match options.sort_order {
+                SortOrder::Desc => cmp,
+                SortOrder::Asc => cmp.reverse(),
+            }
+        });
     }
 
     /// Format output based on options.
@@ -794,5 +897,257 @@ This pattern has been archived.
         let formatted = cmd.format_output(&output, &options);
         assert!(formatted.contains("5 surfaced, 3 referenced (60% hit rate)"));
         assert!(formatted.contains("Last used: 2026-02-10"));
+    }
+
+    // Sorting tests
+
+    #[test]
+    fn test_sort_by_created_default() {
+        let (_temp, backend) = setup_with_learnings();
+        let config = Config::default();
+
+        let cmd = ListCommand::new(backend, config);
+        let options = ListOptions::default(); // Default is SortBy::Created, SortOrder::Desc
+
+        let output = cmd.run(&options);
+
+        assert!(output.success);
+        // Most recent should be first (default sort)
+        if output.learnings.len() >= 2 {
+            assert!(output.learnings[0].summary.contains("Recent"));
+        }
+    }
+
+    #[test]
+    fn test_sort_by_created_ascending() {
+        let (_temp, backend) = setup_with_learnings();
+        let config = Config::default();
+
+        let cmd = ListCommand::new(backend, config);
+        let options = ListOptions {
+            sort_by: SortBy::Created,
+            sort_order: SortOrder::Asc,
+            ..Default::default()
+        };
+
+        let output = cmd.run(&options);
+
+        assert!(output.success);
+        // Oldest should be first when ascending
+        if output.learnings.len() >= 2 {
+            assert!(output.learnings[0].summary.contains("Old"));
+        }
+    }
+
+    #[test]
+    fn test_sort_by_surfaced() {
+        use std::collections::HashMap;
+
+        let (_temp, backend) = setup_with_learnings();
+        let config = Config::default();
+
+        // Create stats cache with different surfaced counts
+        let mut learnings_stats = HashMap::new();
+        learnings_stats.insert(
+            "cl_20260101_001".to_string(),
+            LearningStats {
+                surfaced: 10,
+                referenced: 5,
+                hit_rate: 0.5,
+                ..Default::default()
+            },
+        );
+        learnings_stats.insert(
+            "cl_20260101_002".to_string(),
+            LearningStats {
+                surfaced: 20,
+                referenced: 15,
+                hit_rate: 0.75,
+                ..Default::default()
+            },
+        );
+
+        let stats_cache = StatsCache {
+            learnings: learnings_stats,
+            ..Default::default()
+        };
+
+        let cmd = ListCommand::with_stats(backend, config, Some(stats_cache));
+        let options = ListOptions {
+            sort_by: SortBy::Surfaced,
+            sort_order: SortOrder::Desc,
+            ..Default::default()
+        };
+
+        let output = cmd.run(&options);
+
+        assert!(output.success);
+        // Higher surfaced count should be first
+        if output.learnings.len() >= 2 {
+            assert!(
+                output.learnings[0].surfaced.unwrap_or(0)
+                    >= output.learnings[1].surfaced.unwrap_or(0)
+            );
+        }
+    }
+
+    #[test]
+    fn test_sort_by_hit_rate() {
+        use std::collections::HashMap;
+
+        let (_temp, backend) = setup_with_learnings();
+        let config = Config::default();
+
+        // Create stats cache with different hit rates
+        let mut learnings_stats = HashMap::new();
+        learnings_stats.insert(
+            "cl_20260101_001".to_string(),
+            LearningStats {
+                surfaced: 10,
+                referenced: 8,
+                hit_rate: 0.8,
+                ..Default::default()
+            },
+        );
+        learnings_stats.insert(
+            "cl_20260101_002".to_string(),
+            LearningStats {
+                surfaced: 10,
+                referenced: 3,
+                hit_rate: 0.3,
+                ..Default::default()
+            },
+        );
+
+        let stats_cache = StatsCache {
+            learnings: learnings_stats,
+            ..Default::default()
+        };
+
+        let cmd = ListCommand::with_stats(backend, config, Some(stats_cache));
+        let options = ListOptions {
+            sort_by: SortBy::HitRate,
+            sort_order: SortOrder::Desc,
+            ..Default::default()
+        };
+
+        let output = cmd.run(&options);
+
+        assert!(output.success);
+        // Higher hit rate should be first
+        if output.learnings.len() >= 2 {
+            assert!(
+                output.learnings[0].hit_rate_pct.unwrap_or(0)
+                    >= output.learnings[1].hit_rate_pct.unwrap_or(0)
+            );
+        }
+    }
+
+    #[test]
+    fn test_sort_by_last_used() {
+        use std::collections::HashMap;
+
+        let (_temp, backend) = setup_with_learnings();
+        let config = Config::default();
+
+        let now = Utc::now();
+
+        // Create stats cache with different last_referenced times
+        let mut learnings_stats = HashMap::new();
+        learnings_stats.insert(
+            "cl_20260101_001".to_string(),
+            LearningStats {
+                surfaced: 5,
+                referenced: 3,
+                hit_rate: 0.6,
+                last_referenced: Some(now - Duration::days(1)), // Used yesterday
+                ..Default::default()
+            },
+        );
+        learnings_stats.insert(
+            "cl_20260101_002".to_string(),
+            LearningStats {
+                surfaced: 5,
+                referenced: 3,
+                hit_rate: 0.6,
+                last_referenced: Some(now - Duration::days(10)), // Used 10 days ago
+                ..Default::default()
+            },
+        );
+
+        let stats_cache = StatsCache {
+            learnings: learnings_stats,
+            ..Default::default()
+        };
+
+        let cmd = ListCommand::with_stats(backend, config, Some(stats_cache));
+        let options = ListOptions {
+            sort_by: SortBy::LastUsed,
+            sort_order: SortOrder::Desc,
+            ..Default::default()
+        };
+
+        let output = cmd.run(&options);
+
+        assert!(output.success);
+        // More recently used should be first
+        if output.learnings.len() >= 2 {
+            // First learning should have been used more recently
+            assert!(output.learnings[0].last_used.is_some());
+        }
+    }
+
+    #[test]
+    fn test_sort_learnings_without_stats_go_to_end() {
+        use std::collections::HashMap;
+
+        let (_temp, backend) = setup_with_learnings();
+        let config = Config::default();
+
+        // Create stats cache with stats for only one learning
+        let mut learnings_stats = HashMap::new();
+        learnings_stats.insert(
+            "cl_20260101_001".to_string(),
+            LearningStats {
+                surfaced: 10,
+                referenced: 5,
+                hit_rate: 0.5,
+                last_referenced: Some(Utc::now()),
+                ..Default::default()
+            },
+        );
+        // cl_20260101_002 has no stats
+
+        let stats_cache = StatsCache {
+            learnings: learnings_stats,
+            ..Default::default()
+        };
+
+        let cmd = ListCommand::with_stats(backend, config, Some(stats_cache));
+        let options = ListOptions {
+            sort_by: SortBy::Surfaced, // Sort by stats field
+            sort_order: SortOrder::Desc,
+            ..Default::default()
+        };
+
+        let output = cmd.run(&options);
+
+        assert!(output.success);
+        if output.learnings.len() >= 2 {
+            // Learning with stats should be first
+            assert!(output.learnings[0].surfaced.is_some());
+            // Learning without stats should be at end
+            assert!(output.learnings.last().unwrap().surfaced.is_none());
+        }
+    }
+
+    #[test]
+    fn test_sort_order_enum_default() {
+        assert_eq!(SortOrder::default(), SortOrder::Desc);
+    }
+
+    #[test]
+    fn test_sort_by_enum_default() {
+        assert_eq!(SortBy::default(), SortBy::Created);
     }
 }

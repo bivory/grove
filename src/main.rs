@@ -151,6 +151,12 @@ enum Commands {
         /// Hide usage statistics
         #[arg(long)]
         no_stats: bool,
+        /// Sort by field
+        #[arg(long, short, value_enum, default_value = "created")]
+        sort: SortByArg,
+        /// Sort in ascending order (default is descending)
+        #[arg(long)]
+        asc: bool,
     },
 
     /// [User] Display quality statistics and insights
@@ -299,6 +305,31 @@ enum HookEvent {
     SessionEnd,
 }
 
+/// Sort field for list command.
+#[derive(Clone, Copy, Default, ValueEnum)]
+enum SortByArg {
+    /// Sort by creation date (default)
+    #[default]
+    Created,
+    /// Sort by last used date
+    LastUsed,
+    /// Sort by hit rate
+    HitRate,
+    /// Sort by surfaced count
+    Surfaced,
+}
+
+impl From<SortByArg> for grove::cli::list::SortBy {
+    fn from(arg: SortByArg) -> Self {
+        match arg {
+            SortByArg::Created => grove::cli::list::SortBy::Created,
+            SortByArg::LastUsed => grove::cli::list::SortBy::LastUsed,
+            SortByArg::HitRate => grove::cli::list::SortBy::HitRate,
+            SortByArg::Surfaced => grove::cli::list::SortBy::Surfaced,
+        }
+    }
+}
+
 impl From<HookEvent> for HookType {
     fn from(event: HookEvent) -> Self {
         match event {
@@ -413,6 +444,8 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
             include_archived,
             stale_days,
             no_stats,
+            sort,
+            asc,
         } => run_list(
             json,
             quiet,
@@ -421,6 +454,8 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
             include_archived,
             stale_days,
             no_stats,
+            sort,
+            asc,
             &cwd,
         ),
         Commands::Stats {
@@ -660,9 +695,11 @@ fn run_list(
     include_archived: bool,
     stale_days: Option<u32>,
     no_stats: bool,
+    sort: SortByArg,
+    asc: bool,
     cwd: &Path,
 ) -> Result<ExitCode, Box<dyn std::error::Error>> {
-    use grove::cli::list::{ListCommand, ListOptions};
+    use grove::cli::list::{ListCommand, ListOptions, SortOrder};
     use grove::config::{project_stats_log_path, stats_cache_path};
     use grove::create_primary_backend;
     use grove::stats::StatsCacheManager;
@@ -690,6 +727,8 @@ fn run_list(
         include_archived,
         stale_days,
         no_stats,
+        sort_by: sort.into(),
+        sort_order: if asc { SortOrder::Asc } else { SortOrder::Desc },
     };
 
     let output = cmd.run(&options);

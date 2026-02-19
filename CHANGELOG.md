@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-02-18
+
+### Added
+
+- Sorting options for `grove list` command
+  (`--sort` flag with name, category, date, hits options)
+- Reverse sort option (`--reverse` flag) for `grove list`
+
+### Changed
+
+- Project root detection now uses `git rev-parse --show-toplevel`
+  instead of raw cwd (more reliable in nested directories)
+
 ## [0.6.0] - 2026-02-17
 
 ### Added
@@ -180,7 +193,8 @@ Initial release of Grove, a compound learning gate for Claude Code.
 - Architecture design documents
 - Implementation task roadmap
 
-[Unreleased]: https://github.com/bivory/grove/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/bivory/grove/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/bivory/grove/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/bivory/grove/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/bivory/grove/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/bivory/grove/compare/v0.3.0...v0.4.0

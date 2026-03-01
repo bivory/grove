@@ -226,20 +226,25 @@ fn recommend_auto_skip_threshold(
 /// Recommend write gate tuning based on WriteGateTooStrict or WriteGateTooLoose insights.
 fn recommend_write_gate_tuning(
     insights: &[Insight],
-    _config: &Config,
+    config: &Config,
 ) -> Option<ConfigRecommendation> {
+    let current_mode = &config.gate.write_gate.mode;
+
     // Check for WriteGateTooStrict
     if let Some(insight) = insights
         .iter()
         .find(|i| i.kind == InsightKind::WriteGateTooStrict)
     {
-        return Some(ConfigRecommendation::aggressive(
-            "write gate criteria",
-            "current",
-            "consider relaxing",
-            insight.message.clone(),
-            "May allow borderline learnings that don't prove valuable",
-        ));
+        // Only recommend if currently strict
+        if current_mode == "strict" {
+            return Some(ConfigRecommendation::aggressive(
+                "gate.write_gate.mode",
+                current_mode.clone(),
+                "lenient",
+                insight.message.clone(),
+                "May allow borderline learnings that don't prove valuable",
+            ));
+        }
     }
 
     // Check for WriteGateTooLoose
@@ -247,13 +252,16 @@ fn recommend_write_gate_tuning(
         .iter()
         .find(|i| i.kind == InsightKind::WriteGateTooLoose)
     {
-        return Some(ConfigRecommendation::aggressive(
-            "write gate criteria",
-            "current",
-            "consider tightening",
-            insight.message.clone(),
-            "May reject borderline learnings that could prove valuable",
-        ));
+        // Only recommend if currently lenient or disabled
+        if current_mode != "strict" {
+            return Some(ConfigRecommendation::aggressive(
+                "gate.write_gate.mode",
+                current_mode.clone(),
+                "strict",
+                insight.message.clone(),
+                "May reject borderline learnings that could prove valuable",
+            ));
+        }
     }
 
     None
@@ -429,15 +437,17 @@ mod tests {
             "Consider relaxing",
             2,
         )];
-        let config = make_config();
+        let config = make_config(); // Default mode is "strict"
 
         let rec = recommend_write_gate_tuning(&insights, &config);
 
         assert!(rec.is_some());
         let rec = rec.unwrap();
+        assert_eq!(rec.config_key, "gate.write_gate.mode");
+        assert_eq!(rec.current_value, "strict");
+        assert_eq!(rec.recommended_value, "lenient");
         assert!(!rec.is_safe); // Should be aggressive
         assert!(rec.risk.is_some());
-        assert!(rec.recommended_value.contains("relaxing"));
     }
 
     #[test]
@@ -448,14 +458,17 @@ mod tests {
             "Consider tightening",
             2,
         )];
-        let config = make_config();
+        let mut config = make_config();
+        config.gate.write_gate.mode = "lenient".to_string(); // Set to lenient to trigger recommendation
 
         let rec = recommend_write_gate_tuning(&insights, &config);
 
         assert!(rec.is_some());
         let rec = rec.unwrap();
+        assert_eq!(rec.config_key, "gate.write_gate.mode");
+        assert_eq!(rec.current_value, "lenient");
+        assert_eq!(rec.recommended_value, "strict");
         assert!(!rec.is_safe);
-        assert!(rec.recommended_value.contains("tightening"));
     }
 
     #[test]

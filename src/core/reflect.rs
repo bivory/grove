@@ -657,25 +657,78 @@ fn assess_criterion_plausibility(
 /// Apply both schema validation and write gate to a batch of candidates.
 ///
 /// Returns learnings that passed both layers, plus all rejected candidates.
+/// Write gate mode from configuration.
+///
+/// Controls how strictly the write gate filters candidate learnings.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum WriteGateMode {
+    /// Reject learnings that don't meet any criteria (default behavior).
+    #[default]
+    Strict,
+    /// Warn but accept learnings that don't meet criteria.
+    /// The learning is accepted but logged as low-confidence.
+    Lenient,
+    /// Accept all learnings without filtering.
+    /// Use with caution - may allow low-value learnings.
+    Disabled,
+}
+
+impl WriteGateMode {
+    /// Parse mode from config string value.
+    pub fn from_config(s: &str) -> Self {
+        match s {
+            "lenient" => Self::Lenient,
+            "disabled" => Self::Disabled,
+            _ => Self::Strict, // Default to strict for unknown values
+        }
+    }
+}
+
 pub fn validate_full(
     candidates: Vec<CandidateLearning>,
     session_id: &str,
 ) -> (Vec<CompoundLearning>, Vec<RejectedCandidate>) {
+    validate_full_with_mode(candidates, session_id, WriteGateMode::Strict)
+}
+
+/// Validate candidates with a specific write gate mode.
+pub fn validate_full_with_mode(
+    candidates: Vec<CandidateLearning>,
+    session_id: &str,
+    write_gate_mode: WriteGateMode,
+) -> (Vec<CompoundLearning>, Vec<RejectedCandidate>) {
     // Layer 1: Schema validation
     let (schema_valid, mut rejected) = validate_batch(candidates, session_id);
 
-    // Layer 2: Write gate filter
+    // Layer 2: Write gate filter (behavior depends on mode)
     let mut fully_valid = Vec::new();
     for learning in schema_valid {
-        let gate_result = validate_write_gate(&learning);
-        if gate_result.passed {
-            fully_valid.push(learning);
-        } else {
-            rejected.push(RejectedCandidate::write_gate_error(
-                &learning.summary,
-                learning.tags.clone(),
-                "no valid criteria claimed",
-            ));
+        match write_gate_mode {
+            WriteGateMode::Disabled => {
+                // Accept all learnings without filtering
+                fully_valid.push(learning);
+            }
+            WriteGateMode::Lenient | WriteGateMode::Strict => {
+                let gate_result = validate_write_gate(&learning);
+                if gate_result.passed {
+                    fully_valid.push(learning);
+                } else if write_gate_mode == WriteGateMode::Lenient {
+                    // Lenient mode: warn but accept
+                    // Log to stderr as a warning (fail-open philosophy)
+                    eprintln!(
+                        "Warning: Learning '{}' accepted despite no valid criteria (lenient mode)",
+                        &learning.summary[..learning.summary.len().min(50)]
+                    );
+                    fully_valid.push(learning);
+                } else {
+                    // Strict mode: reject
+                    rejected.push(RejectedCandidate::write_gate_error(
+                        &learning.summary,
+                        learning.tags.clone(),
+                        "no valid criteria claimed",
+                    ));
+                }
+            }
         }
     }
 
@@ -806,8 +859,23 @@ pub fn validate_with_duplicates(
     session_id: &str,
     existing_learnings: &[CompoundLearning],
 ) -> (Vec<CompoundLearning>, Vec<RejectedCandidate>) {
+    validate_with_duplicates_and_mode(
+        candidates,
+        session_id,
+        existing_learnings,
+        WriteGateMode::Strict,
+    )
+}
+
+/// Apply all validation layers including duplicate detection, with configurable write gate mode.
+pub fn validate_with_duplicates_and_mode(
+    candidates: Vec<CandidateLearning>,
+    session_id: &str,
+    existing_learnings: &[CompoundLearning],
+    write_gate_mode: WriteGateMode,
+) -> (Vec<CompoundLearning>, Vec<RejectedCandidate>) {
     // Layer 1 + 2: Schema + Write gate
-    let (valid, mut rejected) = validate_full(candidates, session_id);
+    let (valid, mut rejected) = validate_full_with_mode(candidates, session_id, write_gate_mode);
 
     // Layer 3: Duplicate detection
     // Track validated learnings to detect duplicates within the same batch
@@ -1805,6 +1873,142 @@ mod tests {
     fn test_validate_full_empty_input() {
         let (valid, rejected) = validate_full(vec![], "session-1");
         assert!(valid.is_empty());
+        assert!(rejected.is_empty());
+    }
+
+    // =========================================================================
+    // Write Gate Mode tests
+    // =========================================================================
+
+    #[test]
+    fn test_write_gate_mode_from_str() {
+        assert_eq!(WriteGateMode::from_config("strict"), WriteGateMode::Strict);
+        assert_eq!(
+            WriteGateMode::from_config("lenient"),
+            WriteGateMode::Lenient
+        );
+        assert_eq!(
+            WriteGateMode::from_config("disabled"),
+            WriteGateMode::Disabled
+        );
+        // Unknown values default to strict
+        assert_eq!(WriteGateMode::from_config("unknown"), WriteGateMode::Strict);
+        assert_eq!(WriteGateMode::from_config(""), WriteGateMode::Strict);
+    }
+
+    #[test]
+    fn test_validate_full_strict_mode_with_valid_criteria() {
+        // Candidate with valid criteria should be accepted in strict mode
+        let candidate = CandidateLearning {
+            category: "pattern".to_string(),
+            summary: "Always validate input before processing".to_string(),
+            detail: "You should never trust user input directly. This changes how we handle data."
+                .to_string(),
+            scope: "project".to_string(),
+            confidence: "high".to_string(),
+            criteria_met: vec!["behavior_changing".to_string()],
+            tags: vec!["test".to_string()],
+            context_files: None,
+        };
+
+        let (valid, rejected) =
+            validate_full_with_mode(vec![candidate], "session-1", WriteGateMode::Strict);
+        assert_eq!(valid.len(), 1);
+        assert!(rejected.is_empty());
+    }
+
+    #[test]
+    fn test_validate_full_lenient_mode_with_valid_criteria() {
+        // Candidate with valid criteria should be accepted in lenient mode
+        let candidate = CandidateLearning {
+            category: "pattern".to_string(),
+            summary: "Always validate input before processing".to_string(),
+            detail: "You should never trust user input directly. This changes how we handle data."
+                .to_string(),
+            scope: "project".to_string(),
+            confidence: "high".to_string(),
+            criteria_met: vec!["behavior_changing".to_string()],
+            tags: vec!["test".to_string()],
+            context_files: None,
+        };
+
+        let (valid, rejected) =
+            validate_full_with_mode(vec![candidate], "session-1", WriteGateMode::Lenient);
+        assert_eq!(valid.len(), 1);
+        assert!(rejected.is_empty());
+    }
+
+    #[test]
+    fn test_validate_full_disabled_mode_with_valid_criteria() {
+        // Candidate with valid criteria should be accepted in disabled mode
+        let candidate = CandidateLearning {
+            category: "pattern".to_string(),
+            summary: "Always validate input before processing".to_string(),
+            detail: "You should never trust user input directly. This changes how we handle data."
+                .to_string(),
+            scope: "project".to_string(),
+            confidence: "high".to_string(),
+            criteria_met: vec!["behavior_changing".to_string()],
+            tags: vec!["test".to_string()],
+            context_files: None,
+        };
+
+        let (valid, rejected) =
+            validate_full_with_mode(vec![candidate], "session-1", WriteGateMode::Disabled);
+        assert_eq!(valid.len(), 1);
+        assert!(rejected.is_empty());
+    }
+
+    #[test]
+    fn test_validate_full_modes_all_reject_no_criteria() {
+        // Candidates with no criteria should be rejected at schema level (before write gate)
+        // regardless of write gate mode - schema validation enforces data integrity
+        let candidate = CandidateLearning {
+            category: "pattern".to_string(),
+            summary: "A test learning about patterns".to_string(),
+            detail: "This is a detailed explanation about why this pattern is important."
+                .to_string(),
+            scope: "project".to_string(),
+            confidence: "high".to_string(),
+            criteria_met: vec![], // No criteria - fails schema validation
+            tags: vec!["test".to_string()],
+            context_files: None,
+        };
+
+        // All modes reject at schema level
+        for mode in [
+            WriteGateMode::Strict,
+            WriteGateMode::Lenient,
+            WriteGateMode::Disabled,
+        ] {
+            let (valid, rejected) =
+                validate_full_with_mode(vec![candidate.clone()], "session-1", mode);
+            assert!(
+                valid.is_empty(),
+                "Mode {:?} should reject no-criteria",
+                mode
+            );
+            assert_eq!(rejected.len(), 1);
+        }
+    }
+
+    #[test]
+    fn test_validate_full_default_is_strict() {
+        // validate_full (without mode) should behave like strict mode
+        let candidate = CandidateLearning {
+            category: "pattern".to_string(),
+            summary: "Always validate input before processing".to_string(),
+            detail: "You should never trust user input directly. This changes how we handle data."
+                .to_string(),
+            scope: "project".to_string(),
+            confidence: "high".to_string(),
+            criteria_met: vec!["behavior_changing".to_string()],
+            tags: vec!["test".to_string()],
+            context_files: None,
+        };
+
+        let (valid, rejected) = validate_full(vec![candidate], "session-1");
+        assert_eq!(valid.len(), 1);
         assert!(rejected.is_empty());
     }
 

@@ -85,10 +85,46 @@ impl Default for BackendsConfig {
 pub struct GateConfig {
     /// Auto-skip configuration for trivial changes.
     pub auto_skip: AutoSkipConfig,
+    /// Write gate configuration for filtering learnings.
+    pub write_gate: WriteGateConfig,
     /// Whether to count skipped sessions as dismissals for unreferenced learnings.
     /// Default is false (skip is "no signal" - doesn't affect learning quality tracking).
     #[serde(default)]
     pub skip_counts_as_dismissal: bool,
+}
+
+/// Write gate configuration for filtering candidate learnings.
+///
+/// The write gate controls how strictly learnings are filtered before being saved.
+/// Each learning must claim at least one criterion (behavior_changing, decision_rationale,
+/// stable_fact, or explicit_request) to pass the write gate.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct WriteGateConfig {
+    /// Write gate mode: "strict", "lenient", or "disabled".
+    ///
+    /// - "strict" (default): Reject learnings that don't meet any criteria
+    /// - "lenient": Warn but accept learnings that don't meet criteria
+    /// - "disabled": Accept all learnings without filtering
+    pub mode: String,
+}
+
+/// Valid values for the write gate mode field.
+pub const VALID_WRITE_GATE_MODES: &[&str] = &["strict", "lenient", "disabled"];
+
+impl WriteGateConfig {
+    /// Check if a mode value is valid.
+    pub fn is_valid_mode(value: &str) -> bool {
+        VALID_WRITE_GATE_MODES.contains(&value)
+    }
+}
+
+impl Default for WriteGateConfig {
+    fn default() -> Self {
+        Self {
+            mode: "strict".to_string(),
+        }
+    }
 }
 
 /// Auto-skip configuration for trivial changes.
@@ -432,6 +468,19 @@ impl Config {
             }
         }
 
+        // GROVE_WRITE_GATE_MODE
+        if let Ok(val) = env::var("GROVE_WRITE_GATE_MODE") {
+            if WriteGateConfig::is_valid_mode(&val) {
+                self.gate.write_gate.mode = val;
+            } else {
+                eprintln!(
+                    "Warning: Invalid GROVE_WRITE_GATE_MODE value '{}'. \
+                    Valid values: {:?}. Using default '{}'.",
+                    val, VALID_WRITE_GATE_MODES, self.gate.write_gate.mode
+                );
+            }
+        }
+
         // GROVE_DECAY_DAYS
         if let Ok(val) = env::var("GROVE_DECAY_DAYS") {
             match val.parse::<u32>() {
@@ -516,6 +565,12 @@ impl Config {
         }
         if other.gate.auto_skip.decider != default_auto_skip.decider {
             self.gate.auto_skip.decider = other.gate.auto_skip.decider;
+        }
+
+        // Gate: merge write_gate settings
+        let default_write_gate = WriteGateConfig::default();
+        if other.gate.write_gate.mode != default_write_gate.mode {
+            self.gate.write_gate.mode = other.gate.write_gate.mode;
         }
 
         // Decay: merge field by field
@@ -630,6 +685,15 @@ impl Config {
                 "gate.auto_skip.decider".to_string(),
                 self.gate.auto_skip.decider.clone(),
                 other.gate.auto_skip.decider.clone(),
+            ));
+        }
+
+        // Write gate mode
+        if self.gate.write_gate.mode != other.gate.write_gate.mode {
+            changes.push((
+                "gate.write_gate.mode".to_string(),
+                self.gate.write_gate.mode.clone(),
+                other.gate.write_gate.mode.clone(),
             ));
         }
 
@@ -1196,6 +1260,7 @@ total-recall = false
                     line_threshold: 10,
                     decider: "never".to_string(),
                 },
+                write_gate: WriteGateConfig::default(),
                 skip_counts_as_dismissal: false,
             },
             decay: DecayConfig {
@@ -1278,6 +1343,7 @@ max_blocks = 10
                     line_threshold: 20,           // different from default (5)
                     decider: "agent".to_string(), // same as default
                 },
+                write_gate: WriteGateConfig::default(),
                 skip_counts_as_dismissal: false,
             },
             decay: DecayConfig {
@@ -1297,6 +1363,7 @@ max_blocks = 10
                     line_threshold: 5,            // same as default
                     decider: "never".to_string(), // different from default
                 },
+                write_gate: WriteGateConfig::default(),
                 skip_counts_as_dismissal: false,
             },
             decay: DecayConfig {
@@ -1335,6 +1402,7 @@ max_blocks = 10
         let user_config = Config {
             gate: GateConfig {
                 auto_skip: AutoSkipConfig::default(),
+                write_gate: WriteGateConfig::default(),
                 skip_counts_as_dismissal: false,
             },
             ..Config::default()
@@ -1348,6 +1416,7 @@ max_blocks = 10
                     line_threshold: 10,           // different from default
                     decider: "agent".to_string(), // same as default
                 },
+                write_gate: WriteGateConfig::default(),
                 skip_counts_as_dismissal: false,
             },
             ..Config::default()
@@ -1616,6 +1685,78 @@ max_blocks = 10
         assert_eq!(config.circuit_breaker.cooldown_seconds, 600);
 
         env::remove_var("GROVE_COOLDOWN_SECONDS");
+    }
+
+    // Write gate config tests
+
+    #[test]
+    fn test_write_gate_default() {
+        let config = WriteGateConfig::default();
+        assert_eq!(config.mode, "strict");
+    }
+
+    #[test]
+    fn test_is_valid_write_gate_mode() {
+        assert!(WriteGateConfig::is_valid_mode("strict"));
+        assert!(WriteGateConfig::is_valid_mode("lenient"));
+        assert!(WriteGateConfig::is_valid_mode("disabled"));
+        assert!(!WriteGateConfig::is_valid_mode("invalid"));
+        assert!(!WriteGateConfig::is_valid_mode(""));
+        assert!(!WriteGateConfig::is_valid_mode("STRICT")); // Case sensitive
+    }
+
+    #[test]
+    fn test_env_var_valid_write_gate_mode_applied() {
+        for valid in VALID_WRITE_GATE_MODES {
+            env::set_var("GROVE_WRITE_GATE_MODE", valid);
+
+            let mut config = Config::default();
+            config.apply_env_overrides();
+
+            assert_eq!(config.gate.write_gate.mode, *valid);
+
+            env::remove_var("GROVE_WRITE_GATE_MODE");
+        }
+    }
+
+    #[test]
+    fn test_env_var_invalid_write_gate_mode_ignored() {
+        env::remove_var("GROVE_WRITE_GATE_MODE");
+
+        let default_mode = Config::default().gate.write_gate.mode.clone();
+
+        env::set_var("GROVE_WRITE_GATE_MODE", "invalid_value");
+
+        let mut config = Config::default();
+        config.apply_env_overrides();
+
+        assert_eq!(config.gate.write_gate.mode, default_mode);
+
+        env::remove_var("GROVE_WRITE_GATE_MODE");
+    }
+
+    #[test]
+    fn test_write_gate_mode_merge() {
+        let base = Config::default();
+        let mut override_config = Config::default();
+        override_config.gate.write_gate.mode = "lenient".to_string();
+
+        let merged = base.merge(override_config);
+
+        assert_eq!(merged.gate.write_gate.mode, "lenient");
+    }
+
+    #[test]
+    fn test_write_gate_mode_diff() {
+        let config1 = Config::default();
+        let mut config2 = Config::default();
+        config2.gate.write_gate.mode = "lenient".to_string();
+
+        let changes = config1.diff(&config2);
+        assert_eq!(changes.len(), 1);
+        assert_eq!(changes[0].0, "gate.write_gate.mode");
+        assert_eq!(changes[0].1, "strict");
+        assert_eq!(changes[0].2, "lenient");
     }
 
     // Category-aware decay threshold tests

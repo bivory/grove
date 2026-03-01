@@ -120,6 +120,9 @@ enabled = true
 line_threshold = 5
 decider = "agent"  # agent, always, or never
 
+[gate.write_gate]
+mode = "strict"  # strict, lenient, or disabled
+
 [decay]
 passive_duration_days = 90
 

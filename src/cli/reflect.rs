@@ -11,8 +11,8 @@ use serde::{Deserialize, Serialize};
 use crate::backends::{MemoryBackend, SearchFilters, SearchQuery};
 use crate::config::{project_stats_log_path, Config};
 use crate::core::{
-    validate_with_duplicates, CandidateLearning, EventType, GateStatus, ReflectionResult,
-    RejectedCandidate, SessionState,
+    validate_with_duplicates_and_mode, CandidateLearning, EventType, GateStatus, ReflectionResult,
+    RejectedCandidate, SessionState, WriteGateMode,
 };
 use crate::error::{FailOpen, Result};
 use crate::stats::StatsLogger;
@@ -140,7 +140,6 @@ impl ReflectOutput {
 pub struct ReflectCommand<S: SessionStore, B: MemoryBackend> {
     store: S,
     backend: B,
-    #[allow(dead_code)]
     config: Config,
 }
 
@@ -190,9 +189,16 @@ impl<S: SessionStore, B: MemoryBackend> ReflectCommand<S, B> {
             .map(|r| r.learning)
             .collect::<Vec<_>>();
 
+        // Get write gate mode from config
+        let write_gate_mode = WriteGateMode::from_config(&self.config.gate.write_gate.mode);
+
         // Validate candidates (schema + write gate + duplicate check)
-        let (mut valid_learnings, rejected) =
-            validate_with_duplicates(input.candidates.clone(), &session_id, &existing);
+        let (mut valid_learnings, rejected) = validate_with_duplicates_and_mode(
+            input.candidates.clone(),
+            &session_id,
+            &existing,
+            write_gate_mode,
+        );
 
         let candidates_submitted = input.candidates.len();
         let learnings_accepted = valid_learnings.len();

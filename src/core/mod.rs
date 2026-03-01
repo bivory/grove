@@ -14,9 +14,9 @@ pub use learning::{
     LearningStatus, WriteGateCriterion, LEARNING_SCHEMA_VERSION, PENDING_LEARNING_ID,
 };
 pub use reflect::{
-    validate_with_duplicates, CandidateLearning, CriterionPlausibility, DuplicateCheckResult,
-    RejectedCandidate, SchemaValidationError, ValidationStage, WriteGateConfidence,
-    WriteGateResult,
+    validate_with_duplicates, validate_with_duplicates_and_mode, CandidateLearning,
+    CriterionPlausibility, DuplicateCheckResult, RejectedCandidate, SchemaValidationError,
+    ValidationStage, WriteGateConfidence, WriteGateMode, WriteGateResult,
 };
 pub use state::{
     CircuitBreakerState, EventType, GateState, GateStatus, InjectedLearning, InjectionOutcome,

@@ -76,17 +76,19 @@ cleanup_test_env() {
 # Trap cleanup on exit
 trap cleanup_test_env EXIT
 
-# Verify grove binary is available
+# Verify grove binary is available and prefer local build
 check_grove() {
-    if ! command -v grove &> /dev/null; then
-        # Try cargo build location
-        if [ -f "$ORIGINAL_DIR/target/debug/grove" ]; then
-            export PATH="$ORIGINAL_DIR/target/debug:$PATH"
-        elif [ -f "$ORIGINAL_DIR/target/release/grove" ]; then
-            export PATH="$ORIGINAL_DIR/target/release:$PATH"
-        else
-            fail "grove binary not found. Run 'cargo build' first."
-        fi
+    # Get project root from script directory (harness is in tests/integration/)
+    local project_root
+    project_root="$(cd "$SCRIPT_DIR/../.." && pwd)"
+
+    # Always prefer local builds over system-installed binary
+    if [ -f "$project_root/target/debug/grove" ]; then
+        export PATH="$project_root/target/debug:$PATH"
+    elif [ -f "$project_root/target/release/grove" ]; then
+        export PATH="$project_root/target/release:$PATH"
+    elif ! command -v grove &> /dev/null; then
+        fail "grove binary not found. Run 'cargo build' first."
     fi
 }
 

@@ -58,6 +58,8 @@ impl std::fmt::Display for ValidationStage {
 pub struct RejectedCandidate {
     /// Summary of the rejected learning (for tracking).
     pub summary: String,
+    /// Tags from the candidate (for pattern analysis).
+    pub tags: Vec<String>,
     /// Why the candidate was rejected.
     pub rejection_reason: String,
     /// At which stage the candidate was rejected.
@@ -68,29 +70,43 @@ impl RejectedCandidate {
     /// Create a new rejected candidate.
     pub fn new(
         summary: impl Into<String>,
+        tags: Vec<String>,
         rejection_reason: impl Into<String>,
         stage: ValidationStage,
     ) -> Self {
         Self {
             summary: summary.into(),
+            tags,
             rejection_reason: rejection_reason.into(),
             stage,
         }
     }
 
     /// Create a schema validation rejection.
-    pub fn schema_error(summary: impl Into<String>, reason: impl Into<String>) -> Self {
-        Self::new(summary, reason, ValidationStage::Schema)
+    pub fn schema_error(
+        summary: impl Into<String>,
+        tags: Vec<String>,
+        reason: impl Into<String>,
+    ) -> Self {
+        Self::new(summary, tags, reason, ValidationStage::Schema)
     }
 
     /// Create a write gate rejection.
-    pub fn write_gate_error(summary: impl Into<String>, reason: impl Into<String>) -> Self {
-        Self::new(summary, reason, ValidationStage::WriteGate)
+    pub fn write_gate_error(
+        summary: impl Into<String>,
+        tags: Vec<String>,
+        reason: impl Into<String>,
+    ) -> Self {
+        Self::new(summary, tags, reason, ValidationStage::WriteGate)
     }
 
     /// Create a duplicate detection rejection.
-    pub fn duplicate_error(summary: impl Into<String>, reason: impl Into<String>) -> Self {
-        Self::new(summary, reason, ValidationStage::Duplicate)
+    pub fn duplicate_error(
+        summary: impl Into<String>,
+        tags: Vec<String>,
+        reason: impl Into<String>,
+    ) -> Self {
+        Self::new(summary, tags, reason, ValidationStage::Duplicate)
     }
 }
 
@@ -348,6 +364,7 @@ pub fn validate_batch(
                 let reasons: Vec<String> = errors.iter().map(|e| e.to_string()).collect();
                 rejected.push(RejectedCandidate::schema_error(
                     &candidate.summary,
+                    candidate.tags.clone(),
                     reasons.join("; "),
                 ));
             }
@@ -656,6 +673,7 @@ pub fn validate_full(
         } else {
             rejected.push(RejectedCandidate::write_gate_error(
                 &learning.summary,
+                learning.tags.clone(),
                 "no valid criteria claimed",
             ));
         }
@@ -801,6 +819,7 @@ pub fn validate_with_duplicates(
         if existing_dup.is_duplicate {
             rejected.push(RejectedCandidate::duplicate_error(
                 &learning.summary,
+                learning.tags.clone(),
                 format!(
                     "duplicate of existing learning: {}",
                     existing_dup.duplicate_of.unwrap_or_default()
@@ -814,6 +833,7 @@ pub fn validate_with_duplicates(
         if batch_dup.is_duplicate {
             rejected.push(RejectedCandidate::duplicate_error(
                 &learning.summary,
+                learning.tags.clone(),
                 format!(
                     "duplicate within batch: {}",
                     batch_dup.duplicate_of.unwrap_or_default()
@@ -901,21 +921,27 @@ mod tests {
 
     #[test]
     fn test_rejected_candidate_new() {
-        let rejected = RejectedCandidate::new("summary", "reason", ValidationStage::Schema);
+        let tags = vec!["tag1".to_string(), "tag2".to_string()];
+        let rejected =
+            RejectedCandidate::new("summary", tags.clone(), "reason", ValidationStage::Schema);
         assert_eq!(rejected.summary, "summary");
+        assert_eq!(rejected.tags, tags);
         assert_eq!(rejected.rejection_reason, "reason");
         assert_eq!(rejected.stage, ValidationStage::Schema);
     }
 
     #[test]
     fn test_rejected_candidate_factories() {
-        let schema = RejectedCandidate::schema_error("s", "r");
-        assert_eq!(schema.stage, ValidationStage::Schema);
+        let tags = vec!["tag".to_string()];
 
-        let write_gate = RejectedCandidate::write_gate_error("s", "r");
+        let schema = RejectedCandidate::schema_error("s", tags.clone(), "r");
+        assert_eq!(schema.stage, ValidationStage::Schema);
+        assert_eq!(schema.tags, tags);
+
+        let write_gate = RejectedCandidate::write_gate_error("s", tags.clone(), "r");
         assert_eq!(write_gate.stage, ValidationStage::WriteGate);
 
-        let duplicate = RejectedCandidate::duplicate_error("s", "r");
+        let duplicate = RejectedCandidate::duplicate_error("s", tags.clone(), "r");
         assert_eq!(duplicate.stage, ValidationStage::Duplicate);
     }
 

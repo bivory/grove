@@ -236,6 +236,19 @@ impl<S: SessionStore, B: MemoryBackend> ReflectCommand<S, B> {
             )
             .fail_open_default("logging reflection stats");
 
+        // Log individual rejected candidates for retrospective analysis
+        for rejected_candidate in &rejected {
+            stats_logger
+                .append_rejected(
+                    &session_id,
+                    &rejected_candidate.summary,
+                    rejected_candidate.tags.clone(),
+                    &rejected_candidate.rejection_reason,
+                    rejected_candidate.stage.to_string(),
+                )
+                .fail_open_default("logging rejected candidate");
+        }
+
         // Detect and log referenced learnings
         let injected_ids: Vec<String> = session
             .gate
@@ -859,8 +872,13 @@ mod tests {
     fn test_rejection_info_from_rejected_candidate() {
         use crate::core::{RejectedCandidate, ValidationStage};
 
-        let rejected =
-            RejectedCandidate::new("test summary", "invalid category", ValidationStage::Schema);
+        let tags = vec!["tag1".to_string()];
+        let rejected = RejectedCandidate::new(
+            "test summary",
+            tags,
+            "invalid category",
+            ValidationStage::Schema,
+        );
         let info = RejectionInfo::from(&rejected);
 
         assert_eq!(info.summary, "test summary");
@@ -990,5 +1008,31 @@ mod tests {
         let referenced = detect_referenced_learnings(&input, &injected);
 
         assert!(referenced.is_empty());
+    }
+
+    // =========================================================================
+    // Rejection logging tests
+    // =========================================================================
+
+    #[test]
+    fn test_rejected_candidate_tags_preserved() {
+        use crate::core::{RejectedCandidate, ValidationStage};
+
+        let tags = vec!["rust".to_string(), "async".to_string()];
+        let rejected = RejectedCandidate::schema_error("test summary", tags.clone(), "too short");
+
+        assert_eq!(rejected.tags, tags);
+        assert_eq!(rejected.summary, "test summary");
+        assert_eq!(rejected.rejection_reason, "too short");
+        assert_eq!(rejected.stage, ValidationStage::Schema);
+    }
+
+    #[test]
+    fn test_rejected_candidate_stage_to_string() {
+        use crate::core::ValidationStage;
+
+        assert_eq!(ValidationStage::Schema.to_string(), "schema");
+        assert_eq!(ValidationStage::WriteGate.to_string(), "write_gate");
+        assert_eq!(ValidationStage::Duplicate.to_string(), "duplicate");
     }
 }

@@ -15,7 +15,7 @@ pub mod tracker;
 
 pub use cache::{
     AggregateStats, CategoryStats, CrossPollinationEdge, LearningStats, ReflectionStats,
-    StatsCache, StatsCacheManager, WriteGateStats,
+    RejectedCandidateSummary, StatsCache, StatsCacheManager, WriteGateStats,
 };
 pub use decay::{
     evaluate as evaluate_decay, get_decay_warnings, get_immune_learnings, run_decay_and_log,

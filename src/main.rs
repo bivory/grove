@@ -140,7 +140,7 @@ enum Commands {
         #[arg(long, short)]
         limit: Option<usize>,
         /// Show only stale learnings
-        #[arg(long)]
+        #[arg(long, conflicts_with = "rejections")]
         stale: bool,
         /// Include archived learnings
         #[arg(long)]
@@ -157,6 +157,9 @@ enum Commands {
         /// Sort in ascending order (default is descending)
         #[arg(long)]
         asc: bool,
+        /// Show rejected candidates instead of accepted learnings
+        #[arg(long, conflicts_with = "stale")]
+        rejections: bool,
     },
 
     /// [User] Display quality statistics and insights
@@ -446,6 +449,7 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
             no_stats,
             sort,
             asc,
+            rejections,
         } => run_list(
             json,
             quiet,
@@ -456,6 +460,7 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
             no_stats,
             sort,
             asc,
+            rejections,
             &cwd,
         ),
         Commands::Stats {
@@ -697,6 +702,7 @@ fn run_list(
     no_stats: bool,
     sort: SortByArg,
     asc: bool,
+    rejections: bool,
     cwd: &Path,
 ) -> Result<ExitCode, Box<dyn std::error::Error>> {
     use grove::cli::list::{ListCommand, ListOptions, SortOrder};
@@ -707,8 +713,8 @@ fn run_list(
     let config = Config::load();
     let backend = create_primary_backend(cwd, Some(&config));
 
-    // Load stats cache if not disabled
-    let stats_cache = if no_stats {
+    // Load stats cache if not disabled (also needed for rejections)
+    let stats_cache = if no_stats && !rejections {
         None
     } else {
         stats_cache_path().and_then(|cache_path| {
@@ -729,6 +735,7 @@ fn run_list(
         no_stats,
         sort_by: sort.into(),
         sort_order: if asc { SortOrder::Asc } else { SortOrder::Desc },
+        rejections,
     };
 
     let output = cmd.run(&options);
@@ -1231,6 +1238,20 @@ mod tests {
     }
 
     #[test]
+    fn test_cli_parse_list_rejections() {
+        let cli = Cli::parse_from(["grove", "list", "--rejections", "--limit", "10"]);
+        match cli.command {
+            Commands::List {
+                rejections, limit, ..
+            } => {
+                assert!(rejections);
+                assert_eq!(limit, Some(10));
+            }
+            _ => panic!("Expected List command"),
+        }
+    }
+
+    #[test]
     fn test_cli_parse_stats() {
         let cli = Cli::parse_from(["grove", "stats", "--detailed", "--rebuild"]);
         match cli.command {
@@ -1241,6 +1262,43 @@ mod tests {
                 assert!(rebuild);
             }
             _ => panic!("Expected Stats command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_list_rejections_conflicts_with_stale() {
+        // --rejections and --stale are mutually exclusive
+        let result = Cli::try_parse_from(["grove", "list", "--rejections", "--stale"]);
+        match result {
+            Err(err) => {
+                let err_str = err.to_string();
+                assert!(
+                    err_str.contains("cannot be used with"),
+                    "error should mention conflict: {}",
+                    err_str
+                );
+            }
+            Ok(_) => panic!("--rejections and --stale should conflict"),
+        }
+    }
+
+    #[test]
+    fn test_cli_list_rejections_with_limit_and_asc() {
+        let cli = Cli::parse_from(["grove", "list", "--rejections", "--limit", "5", "--asc"]);
+        match cli.command {
+            Commands::List {
+                rejections,
+                limit,
+                asc,
+                stale,
+                ..
+            } => {
+                assert!(rejections);
+                assert_eq!(limit, Some(5));
+                assert!(asc);
+                assert!(!stale);
+            }
+            _ => panic!("Expected List command"),
         }
     }
 }

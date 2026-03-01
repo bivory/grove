@@ -22,6 +22,10 @@ pub struct RejectedCandidateSummary {
     pub summary: String,
     /// Tags from the rejected candidate.
     pub tags: Vec<String>,
+    /// Why the candidate was rejected.
+    pub reason: String,
+    /// At which validation stage it was rejected (schema, write_gate, duplicate).
+    pub stage: String,
     /// When the candidate was rejected.
     pub rejected_at: DateTime<Utc>,
 }
@@ -243,11 +247,11 @@ impl StatsCache {
                 session_id: _,
                 summary,
                 tags,
-                reason: _,
-                stage: _,
+                reason,
+                stage,
             } => {
                 // Track rejected candidates for retrospective miss detection
-                self.track_rejected_candidate(summary, tags.clone(), event.ts);
+                self.track_rejected_candidate(summary, tags.clone(), reason, stage, event.ts);
             }
         }
     }
@@ -345,12 +349,14 @@ impl StatsCache {
 
     /// Track a rejected candidate for retrospective miss detection.
     ///
-    /// Stores the summary and tags of rejected candidates to compare
-    /// against future accepted learnings.
+    /// Stores the summary, tags, reason, and stage of rejected candidates
+    /// to compare against future accepted learnings.
     pub fn track_rejected_candidate(
         &mut self,
         summary: &str,
         tags: Vec<String>,
+        reason: &str,
+        stage: &str,
         rejected_at: DateTime<Utc>,
     ) {
         // Keep only the last 100 rejected candidates to limit memory
@@ -359,6 +365,8 @@ impl StatsCache {
         self.recent_rejected.push(RejectedCandidateSummary {
             summary: summary.to_string(),
             tags,
+            reason: reason.to_string(),
+            stage: stage.to_string(),
             rejected_at,
         });
 
@@ -1064,11 +1072,19 @@ mod tests {
         let mut cache = StatsCache::new();
         let ts = Utc::now();
 
-        cache.track_rejected_candidate("test summary", vec!["tag1".to_string()], ts);
+        cache.track_rejected_candidate(
+            "test summary",
+            vec!["tag1".to_string()],
+            "Missing required category",
+            "WriteGate",
+            ts,
+        );
 
         assert_eq!(cache.recent_rejected.len(), 1);
         assert_eq!(cache.recent_rejected[0].summary, "test summary");
         assert_eq!(cache.recent_rejected[0].tags, vec!["tag1".to_string()]);
+        assert_eq!(cache.recent_rejected[0].reason, "Missing required category");
+        assert_eq!(cache.recent_rejected[0].stage, "WriteGate");
     }
 
     #[test]
@@ -1078,7 +1094,13 @@ mod tests {
 
         // Add 150 rejected candidates (max is 100)
         for i in 0..150 {
-            cache.track_rejected_candidate(&format!("summary {}", i), vec![], ts);
+            cache.track_rejected_candidate(
+                &format!("summary {}", i),
+                vec![],
+                "test reason",
+                "Schema",
+                ts,
+            );
         }
 
         // Should be limited to 100
@@ -1093,7 +1115,13 @@ mod tests {
         let mut cache = StatsCache::new();
         let ts = Utc::now();
 
-        cache.track_rejected_candidate("implement authentication", vec!["feature".to_string()], ts);
+        cache.track_rejected_candidate(
+            "implement authentication",
+            vec!["feature".to_string()],
+            "test reason",
+            "WriteGate",
+            ts,
+        );
 
         // New learning with matching tag should be a retrospective miss
         assert!(
@@ -1111,7 +1139,13 @@ mod tests {
         let mut cache = StatsCache::new();
         let ts = Utc::now();
 
-        cache.track_rejected_candidate("implement user authentication flow", vec![], ts);
+        cache.track_rejected_candidate(
+            "implement user authentication flow",
+            vec![],
+            "test reason",
+            "WriteGate",
+            ts,
+        );
 
         // High word overlap should be a match
         assert!(cache.check_retrospective_miss("fixed user authentication flow bug", &[]));
@@ -1125,8 +1159,20 @@ mod tests {
         let mut cache = StatsCache::new();
         let ts = Utc::now();
 
-        cache.track_rejected_candidate("auth flow", vec!["auth".to_string()], ts);
-        cache.track_rejected_candidate("db migration", vec!["db".to_string()], ts);
+        cache.track_rejected_candidate(
+            "auth flow",
+            vec!["auth".to_string()],
+            "test reason",
+            "WriteGate",
+            ts,
+        );
+        cache.track_rejected_candidate(
+            "db migration",
+            vec!["db".to_string()],
+            "test reason",
+            "WriteGate",
+            ts,
+        );
 
         let accepted = vec![
             (
@@ -1446,6 +1492,109 @@ mod tests {
         // Should have the latest value
         let loaded = manager.load().unwrap().unwrap();
         assert_eq!(loaded.log_entries_processed, 20);
+    }
+
+    // =========================================================================
+    // Rejection logging integration tests
+    // =========================================================================
+
+    #[test]
+    fn test_rejected_event_populates_recent_rejected() {
+        let temp = TempDir::new().unwrap();
+        let cache_path = temp.path().join("cache.json");
+        let log_path = temp.path().join("stats.log");
+
+        let logger = StatsLogger::new(&log_path);
+
+        // Log rejected candidates with tags
+        logger
+            .append_rejected(
+                "session-1",
+                "rejected summary 1",
+                vec!["rust".to_string(), "async".to_string()],
+                "summary too short",
+                "schema",
+            )
+            .unwrap();
+        logger
+            .append_rejected(
+                "session-1",
+                "rejected summary 2",
+                vec!["testing".to_string()],
+                "near duplicate",
+                "duplicate",
+            )
+            .unwrap();
+
+        let manager = StatsCacheManager::new(&cache_path, &log_path);
+        let cache = manager.rebuild().unwrap();
+
+        // Should have 2 rejected candidates
+        assert_eq!(cache.recent_rejected.len(), 2);
+
+        // Verify first rejection
+        assert_eq!(cache.recent_rejected[0].summary, "rejected summary 1");
+        assert_eq!(
+            cache.recent_rejected[0].tags,
+            vec!["rust".to_string(), "async".to_string()]
+        );
+        assert_eq!(cache.recent_rejected[0].reason, "summary too short");
+        assert_eq!(cache.recent_rejected[0].stage, "schema");
+
+        // Verify second rejection
+        assert_eq!(cache.recent_rejected[1].summary, "rejected summary 2");
+        assert_eq!(cache.recent_rejected[1].tags, vec!["testing".to_string()]);
+        assert_eq!(cache.recent_rejected[1].reason, "near duplicate");
+        assert_eq!(cache.recent_rejected[1].stage, "duplicate");
+    }
+
+    #[test]
+    fn test_rejected_events_preserved_on_rebuild() {
+        let temp = TempDir::new().unwrap();
+        let cache_path = temp.path().join("cache.json");
+        let log_path = temp.path().join("stats.log");
+
+        let logger = StatsLogger::new(&log_path);
+        logger
+            .append_rejected(
+                "session-1",
+                "test rejection",
+                vec!["tag1".to_string()],
+                "test reason",
+                "schema",
+            )
+            .unwrap();
+
+        let manager = StatsCacheManager::new(&cache_path, &log_path);
+
+        // Initial build
+        let cache1 = manager.load_or_rebuild().unwrap();
+        assert_eq!(cache1.recent_rejected.len(), 1);
+        assert_eq!(cache1.recent_rejected[0].reason, "test reason");
+        assert_eq!(cache1.recent_rejected[0].stage, "schema");
+
+        // Save cache
+        manager.save(&cache1).unwrap();
+
+        // Add more events
+        logger
+            .append_rejected(
+                "session-2",
+                "another rejection",
+                vec!["tag2".to_string()],
+                "another reason",
+                "duplicate",
+            )
+            .unwrap();
+
+        // Rebuild should include all rejections
+        let cache2 = manager.load_or_rebuild().unwrap();
+        assert_eq!(cache2.recent_rejected.len(), 2);
+        // Verify reason/stage preserved through rebuild
+        assert_eq!(cache2.recent_rejected[0].reason, "test reason");
+        assert_eq!(cache2.recent_rejected[0].stage, "schema");
+        assert_eq!(cache2.recent_rejected[1].reason, "another reason");
+        assert_eq!(cache2.recent_rejected[1].stage, "duplicate");
     }
 
     // =========================================================================

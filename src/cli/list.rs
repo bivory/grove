@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use crate::backends::{MemoryBackend, SearchFilters, SearchQuery};
 use crate::config::{Config, DecayConfig};
 use crate::core::CompoundLearning;
-use crate::stats::{LearningStats, StatsCache};
+use crate::stats::{LearningStats, RejectedCandidateSummary, StatsCache};
 
 /// Sort field for list output.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -55,6 +55,8 @@ pub struct ListOptions {
     pub sort_by: SortBy,
     /// Sort direction.
     pub sort_order: SortOrder,
+    /// Show rejected candidates instead of accepted learnings.
+    pub rejections: bool,
 }
 
 /// Output format for the list command.
@@ -69,9 +71,40 @@ pub struct ListOutput {
     /// Number of stale learnings (if stale filter was used).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stale_count: Option<usize>,
+    /// Rejected candidates (when --rejections is used).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rejections: Option<Vec<RejectionInfo>>,
     /// Error message if listing failed.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+}
+
+/// Information about a rejected learning candidate.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RejectionInfo {
+    /// Summary of the rejected candidate.
+    pub summary: String,
+    /// Tags associated with the rejected candidate.
+    pub tags: Vec<String>,
+    /// Why the candidate was rejected.
+    pub reason: String,
+    /// At which validation stage it was rejected.
+    pub stage: String,
+    /// When the candidate was rejected.
+    pub rejected_at: String,
+}
+
+impl RejectionInfo {
+    /// Create from a RejectedCandidateSummary.
+    pub fn from_rejected(rejected: &RejectedCandidateSummary) -> Self {
+        Self {
+            summary: rejected.summary.clone(),
+            tags: rejected.tags.clone(),
+            reason: rejected.reason.clone(),
+            stage: rejected.stage.clone(),
+            rejected_at: rejected.rejected_at.format("%Y-%m-%d %H:%M").to_string(),
+        }
+    }
 }
 
 /// Simplified learning info for output.
@@ -176,6 +209,7 @@ impl ListOutput {
             count,
             learnings,
             stale_count: None,
+            rejections: None,
             error: None,
         }
     }
@@ -188,6 +222,20 @@ impl ListOutput {
             count,
             learnings,
             stale_count: Some(stale_count),
+            rejections: None,
+            error: None,
+        }
+    }
+
+    /// Create a successful output with rejections.
+    pub fn success_rejections(rejections: Vec<RejectionInfo>) -> Self {
+        let count = rejections.len();
+        Self {
+            success: true,
+            count,
+            learnings: Vec::new(),
+            stale_count: None,
+            rejections: Some(rejections),
             error: None,
         }
     }
@@ -199,6 +247,7 @@ impl ListOutput {
             count: 0,
             learnings: Vec::new(),
             stale_count: None,
+            rejections: None,
             error: Some(error.into()),
         }
     }
@@ -232,6 +281,11 @@ impl<B: MemoryBackend> ListCommand<B> {
 
     /// Run the list command.
     pub fn run(&self, options: &ListOptions) -> ListOutput {
+        // Handle rejections mode
+        if options.rejections {
+            return self.run_rejections(options);
+        }
+
         // Use search with empty query to get all learnings
         let filters = if options.include_archived {
             SearchFilters::all()
@@ -377,6 +431,41 @@ impl<B: MemoryBackend> ListCommand<B> {
         });
     }
 
+    /// Run the list command in rejections mode.
+    fn run_rejections(&self, options: &ListOptions) -> ListOutput {
+        let Some(cache) = &self.stats_cache else {
+            return ListOutput::failure(
+                "Stats cache not available. Run 'grove stats --rebuild' first.",
+            );
+        };
+
+        if cache.recent_rejected.is_empty() {
+            return ListOutput::success_rejections(Vec::new());
+        }
+
+        // Convert rejections to RejectionInfo, sorted by most recent first
+        let mut rejections: Vec<RejectionInfo> = cache
+            .recent_rejected
+            .iter()
+            .map(RejectionInfo::from_rejected)
+            .collect();
+
+        // Reverse to show most recent first (cache stores oldest first after trimming)
+        rejections.reverse();
+
+        // Apply sort order (default is desc = most recent first, asc = oldest first)
+        if options.sort_order == SortOrder::Asc {
+            rejections.reverse();
+        }
+
+        // Apply limit
+        if let Some(limit) = options.limit {
+            rejections.truncate(limit);
+        }
+
+        ListOutput::success_rejections(rejections)
+    }
+
     /// Format output based on options.
     pub fn format_output(&self, output: &ListOutput, options: &ListOptions) -> String {
         if options.quiet {
@@ -397,6 +486,11 @@ impl<B: MemoryBackend> ListCommand<B> {
                 "List failed: {}\n",
                 output.error.as_deref().unwrap_or("unknown error")
             );
+        }
+
+        // Handle rejections mode
+        if options.rejections {
+            return self.format_rejections(output);
         }
 
         if output.learnings.is_empty() {
@@ -466,6 +560,42 @@ impl<B: MemoryBackend> ListCommand<B> {
             lines.push(String::new());
         }
 
+        lines.join("\n")
+    }
+
+    /// Format rejections as human-readable text.
+    fn format_rejections(&self, output: &ListOutput) -> String {
+        let rejections = match &output.rejections {
+            Some(r) => r,
+            None => return "No rejections data available.\n".to_string(),
+        };
+
+        if rejections.is_empty() {
+            return "No rejected candidates found.\n\nNote: Only the last 100 rejections are tracked.\n".to_string();
+        }
+
+        let mut lines = Vec::new();
+        lines.push(format!(
+            "Found {} rejected candidate(s):\n",
+            rejections.len()
+        ));
+
+        for (i, rejection) in rejections.iter().enumerate() {
+            lines.push(format!(
+                "{}. [{}] {}",
+                i + 1,
+                rejection.stage,
+                rejection.summary
+            ));
+            lines.push(format!("   Reason: {}", rejection.reason));
+            if !rejection.tags.is_empty() {
+                lines.push(format!("   Tags: {}", rejection.tags.join(", ")));
+            }
+            lines.push(format!("   Rejected: {}", rejection.rejected_at));
+            lines.push(String::new());
+        }
+
+        lines.push("Note: Only the last 100 rejections are tracked.".to_string());
         lines.join("\n")
     }
 }
@@ -1149,5 +1279,440 @@ This pattern has been archived.
     #[test]
     fn test_sort_by_enum_default() {
         assert_eq!(SortBy::default(), SortBy::Created);
+    }
+
+    // Rejections tests
+
+    #[test]
+    fn test_rejections_no_cache() {
+        let (_temp, backend) = setup_with_learnings();
+        let config = Config::default();
+
+        // No stats cache
+        let cmd = ListCommand::new(backend, config);
+        let options = ListOptions {
+            rejections: true,
+            ..Default::default()
+        };
+
+        let output = cmd.run(&options);
+
+        assert!(!output.success);
+        assert!(output.error.is_some());
+        assert!(output.error.unwrap().contains("Stats cache not available"));
+    }
+
+    #[test]
+    fn test_rejections_empty() {
+        let (_temp, backend) = setup_with_learnings();
+        let config = Config::default();
+
+        // Empty stats cache
+        let stats_cache = StatsCache::default();
+
+        let cmd = ListCommand::with_stats(backend, config, Some(stats_cache));
+        let options = ListOptions {
+            rejections: true,
+            ..Default::default()
+        };
+
+        let output = cmd.run(&options);
+
+        assert!(output.success);
+        assert_eq!(output.count, 0);
+        assert!(output.rejections.is_some());
+        assert!(output.rejections.unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_rejections_with_data() {
+        let (_temp, backend) = setup_with_learnings();
+        let config = Config::default();
+
+        // Create stats cache with rejections
+        let mut stats_cache = StatsCache::default();
+        let now = Utc::now();
+        stats_cache.track_rejected_candidate(
+            "First rejection",
+            vec!["tag1".to_string()],
+            "too short",
+            "schema",
+            now,
+        );
+        stats_cache.track_rejected_candidate(
+            "Second rejection",
+            vec!["tag2".to_string(), "tag3".to_string()],
+            "near duplicate",
+            "duplicate",
+            now,
+        );
+
+        let cmd = ListCommand::with_stats(backend, config, Some(stats_cache));
+        let options = ListOptions {
+            rejections: true,
+            ..Default::default()
+        };
+
+        let output = cmd.run(&options);
+
+        assert!(output.success);
+        assert_eq!(output.count, 2);
+        assert!(output.rejections.is_some());
+        let rejections = output.rejections.unwrap();
+        assert_eq!(rejections.len(), 2);
+        // Most recent first (descending order)
+        assert_eq!(rejections[0].summary, "Second rejection");
+        assert_eq!(rejections[0].reason, "near duplicate");
+        assert_eq!(rejections[0].stage, "duplicate");
+        assert_eq!(rejections[1].summary, "First rejection");
+        assert_eq!(rejections[1].reason, "too short");
+        assert_eq!(rejections[1].stage, "schema");
+    }
+
+    #[test]
+    fn test_rejections_with_limit() {
+        let (_temp, backend) = setup_with_learnings();
+        let config = Config::default();
+
+        // Create stats cache with multiple rejections
+        let mut stats_cache = StatsCache::default();
+        let now = Utc::now();
+        for i in 0..10 {
+            stats_cache.track_rejected_candidate(
+                &format!("Rejection {}", i),
+                vec![],
+                "test reason",
+                "schema",
+                now,
+            );
+        }
+
+        let cmd = ListCommand::with_stats(backend, config, Some(stats_cache));
+        let options = ListOptions {
+            rejections: true,
+            limit: Some(3),
+            ..Default::default()
+        };
+
+        let output = cmd.run(&options);
+
+        assert!(output.success);
+        assert_eq!(output.count, 3);
+        assert!(output.rejections.is_some());
+        assert_eq!(output.rejections.unwrap().len(), 3);
+    }
+
+    #[test]
+    fn test_rejections_ascending_order() {
+        let (_temp, backend) = setup_with_learnings();
+        let config = Config::default();
+
+        // Create stats cache with rejections
+        let mut stats_cache = StatsCache::default();
+        let now = Utc::now();
+        stats_cache.track_rejected_candidate("First rejection", vec![], "test", "schema", now);
+        stats_cache.track_rejected_candidate("Second rejection", vec![], "test", "schema", now);
+
+        let cmd = ListCommand::with_stats(backend, config, Some(stats_cache));
+        let options = ListOptions {
+            rejections: true,
+            sort_order: SortOrder::Asc,
+            ..Default::default()
+        };
+
+        let output = cmd.run(&options);
+
+        assert!(output.success);
+        let rejections = output.rejections.unwrap();
+        // Ascending order: oldest first
+        assert_eq!(rejections[0].summary, "First rejection");
+        assert_eq!(rejections[1].summary, "Second rejection");
+    }
+
+    #[test]
+    fn test_rejections_json_output() {
+        let (_temp, backend) = setup_with_learnings();
+        let config = Config::default();
+
+        let mut stats_cache = StatsCache::default();
+        stats_cache.track_rejected_candidate(
+            "Test rejection",
+            vec!["test".to_string()],
+            "too short",
+            "schema",
+            Utc::now(),
+        );
+
+        let cmd = ListCommand::with_stats(backend, config, Some(stats_cache));
+        let options = ListOptions {
+            rejections: true,
+            json: true,
+            ..Default::default()
+        };
+
+        let output = cmd.run(&options);
+        let formatted = cmd.format_output(&output, &options);
+
+        assert!(formatted.contains("\"success\": true"));
+        assert!(formatted.contains("\"rejections\""));
+        assert!(formatted.contains("Test rejection"));
+        assert!(formatted.contains("\"reason\""));
+        assert!(formatted.contains("\"stage\""));
+        assert!(formatted.contains("too short"));
+        assert!(formatted.contains("schema"));
+    }
+
+    #[test]
+    fn test_rejections_human_readable() {
+        let (_temp, backend) = setup_with_learnings();
+        let config = Config::default();
+
+        let mut stats_cache = StatsCache::default();
+        stats_cache.track_rejected_candidate(
+            "Test rejection summary",
+            vec!["tag1".to_string()],
+            "summary too short",
+            "schema",
+            Utc::now(),
+        );
+
+        let cmd = ListCommand::with_stats(backend, config, Some(stats_cache));
+        let options = ListOptions {
+            rejections: true,
+            ..Default::default()
+        };
+
+        let output = cmd.run(&options);
+        let formatted = cmd.format_output(&output, &options);
+
+        assert!(formatted.contains("Found 1 rejected candidate(s)"));
+        assert!(formatted.contains("Test rejection summary"));
+        assert!(formatted.contains("Tags: tag1"));
+        assert!(formatted.contains("Reason: summary too short"));
+        assert!(formatted.contains("[schema]")); // Stage shown in brackets
+        assert!(formatted.contains("Rejected:"));
+    }
+
+    #[test]
+    fn test_rejection_info_from_rejected() {
+        let rejected = RejectedCandidateSummary {
+            summary: "Test summary".to_string(),
+            tags: vec!["tag1".to_string(), "tag2".to_string()],
+            reason: "test reason".to_string(),
+            stage: "schema".to_string(),
+            rejected_at: Utc::now(),
+        };
+
+        let info = RejectionInfo::from_rejected(&rejected);
+
+        assert_eq!(info.summary, "Test summary");
+        assert_eq!(info.tags, vec!["tag1", "tag2"]);
+        assert_eq!(info.reason, "test reason");
+        assert_eq!(info.stage, "schema");
+        assert!(!info.rejected_at.is_empty());
+    }
+
+    #[test]
+    fn test_rejections_quiet_mode() {
+        let (_temp, backend) = setup_with_learnings();
+        let config = Config::default();
+
+        let mut stats_cache = StatsCache::default();
+        stats_cache.track_rejected_candidate(
+            "Test rejection",
+            vec![],
+            "test",
+            "schema",
+            Utc::now(),
+        );
+
+        let cmd = ListCommand::with_stats(backend, config, Some(stats_cache));
+        let options = ListOptions {
+            rejections: true,
+            quiet: true,
+            ..Default::default()
+        };
+
+        let output = cmd.run(&options);
+        let formatted = cmd.format_output(&output, &options);
+
+        assert!(output.success);
+        assert!(
+            formatted.is_empty(),
+            "quiet mode should return empty string"
+        );
+    }
+
+    #[test]
+    fn test_rejections_max_capacity() {
+        let (_temp, backend) = setup_with_learnings();
+        let config = Config::default();
+
+        let mut stats_cache = StatsCache::default();
+        let now = Utc::now();
+
+        // Add 100 rejections (the max stored by stats cache)
+        for i in 0..100 {
+            stats_cache.track_rejected_candidate(
+                &format!("Rejection {}", i),
+                vec![],
+                "test",
+                "schema",
+                now,
+            );
+        }
+
+        let cmd = ListCommand::with_stats(backend, config, Some(stats_cache));
+        let options = ListOptions {
+            rejections: true,
+            ..Default::default()
+        };
+
+        let output = cmd.run(&options);
+
+        assert!(output.success);
+        assert_eq!(output.count, 100);
+        assert!(output.rejections.is_some());
+        assert_eq!(output.rejections.unwrap().len(), 100);
+    }
+
+    #[test]
+    fn test_rejections_output_has_empty_learnings() {
+        let (_temp, backend) = setup_with_learnings();
+        let config = Config::default();
+
+        let mut stats_cache = StatsCache::default();
+        stats_cache.track_rejected_candidate(
+            "Test rejection",
+            vec![],
+            "test",
+            "schema",
+            Utc::now(),
+        );
+
+        let cmd = ListCommand::with_stats(backend, config, Some(stats_cache));
+        let options = ListOptions {
+            rejections: true,
+            ..Default::default()
+        };
+
+        let output = cmd.run(&options);
+
+        assert!(output.success);
+        assert!(
+            output.learnings.is_empty(),
+            "learnings should be empty in rejections mode"
+        );
+        assert!(output.rejections.is_some());
+    }
+
+    #[test]
+    fn test_rejections_error_message_contains_guidance() {
+        let (_temp, backend) = setup_with_learnings();
+        let config = Config::default();
+
+        // No stats cache
+        let cmd = ListCommand::new(backend, config);
+        let options = ListOptions {
+            rejections: true,
+            ..Default::default()
+        };
+
+        let output = cmd.run(&options);
+
+        assert!(!output.success);
+        let error = output.error.unwrap();
+        assert!(
+            error.contains("grove stats --rebuild"),
+            "error message should contain helpful guidance"
+        );
+    }
+
+    #[test]
+    fn test_rejections_with_empty_tags() {
+        let (_temp, backend) = setup_with_learnings();
+        let config = Config::default();
+
+        let mut stats_cache = StatsCache::default();
+        stats_cache.track_rejected_candidate(
+            "No tags rejection",
+            vec![],
+            "test",
+            "schema",
+            Utc::now(),
+        );
+
+        let cmd = ListCommand::with_stats(backend, config, Some(stats_cache));
+        let options = ListOptions {
+            rejections: true,
+            ..Default::default()
+        };
+
+        let output = cmd.run(&options);
+        let formatted = cmd.format_output(&output, &options);
+
+        assert!(output.success);
+        // Should not include "Tags:" line when tags are empty
+        assert!(
+            !formatted.contains("Tags:"),
+            "should not show Tags line when tags are empty"
+        );
+    }
+
+    #[test]
+    fn test_rejections_ignores_include_archived() {
+        let (_temp, backend) = setup_with_learnings();
+        let config = Config::default();
+
+        let mut stats_cache = StatsCache::default();
+        stats_cache.track_rejected_candidate(
+            "Test rejection",
+            vec![],
+            "test",
+            "schema",
+            Utc::now(),
+        );
+
+        let cmd = ListCommand::with_stats(backend, config, Some(stats_cache));
+        let options = ListOptions {
+            rejections: true,
+            include_archived: true, // Should be ignored in rejections mode
+            ..Default::default()
+        };
+
+        let output = cmd.run(&options);
+
+        // Should still work and return rejections, not learnings
+        assert!(output.success);
+        assert!(output.rejections.is_some());
+        assert!(output.learnings.is_empty());
+    }
+
+    #[test]
+    fn test_rejections_special_characters() {
+        let (_temp, backend) = setup_with_learnings();
+        let config = Config::default();
+
+        let mut stats_cache = StatsCache::default();
+        stats_cache.track_rejected_candidate(
+            "Summary with \"quotes\" and <brackets>",
+            vec!["tag-with-dash".to_string()],
+            "test reason",
+            "schema",
+            Utc::now(),
+        );
+
+        let cmd = ListCommand::with_stats(backend, config, Some(stats_cache));
+        let options = ListOptions {
+            rejections: true,
+            ..Default::default()
+        };
+
+        let output = cmd.run(&options);
+        let formatted = cmd.format_output(&output, &options);
+
+        assert!(output.success);
+        assert!(formatted.contains("\"quotes\""));
+        assert!(formatted.contains("<brackets>"));
     }
 }

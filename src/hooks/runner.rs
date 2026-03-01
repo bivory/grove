@@ -264,6 +264,52 @@ impl<S: SessionStore> HookRunner<S> {
             );
         }
 
+        // Check if gate is in blocking state and inject context
+        // This ensures subagents see why they're blocked when the stop hook fires
+        if session.gate.status.requires_reflection() {
+            // requires_reflection() only returns true for Pending/Blocked
+            let status_str = match session.gate.status {
+                GateStatus::Pending => "Pending",
+                GateStatus::Blocked => "Blocked",
+                _ => unreachable!("requires_reflection() returned true for non-blocking state"),
+            };
+
+            let mut gate_notice = format!(
+                "## Grove Gate Active\n\n\
+                 **Status:** {} (reflection required before exit)\n\n",
+                status_str
+            );
+
+            // Add ticket context if available
+            if let Some(ref ticket) = session.gate.ticket {
+                gate_notice.push_str(&format!(
+                    "**Ticket:** {} - {}\n\n",
+                    ticket.ticket_id, ticket.title
+                ));
+            }
+
+            gate_notice.push_str(&format!(
+                "To resolve, run one of:\n\
+                 - `grove reflect --session-id {}` - capture learnings\n\
+                 - `grove skip <reason> --session-id {}` - skip with reason\n",
+                session.id, session.id
+            ));
+
+            // Prepend gate notice to any existing context
+            additional_context = Some(match additional_context.take() {
+                Some(ctx) => format!("{}\n\n{}", gate_notice, ctx),
+                None => gate_notice,
+            });
+
+            session.add_trace(
+                EventType::GateStatusChanged,
+                Some(format!(
+                    "injected blocking notice: {:?}",
+                    session.gate.status
+                )),
+            );
+        }
+
         // Decay check is handled separately via grove maintain (Stage 2)
         // We don't run it here to keep session-start fast
 
@@ -1954,5 +2000,289 @@ mod tests {
         } else {
             panic!("Expected Dismissed event");
         }
+    }
+
+    // Blocking gate context injection tests
+
+    #[test]
+    fn test_session_start_injects_blocking_gate_context_pending() {
+        let runner = test_runner();
+
+        // 1. Create a session
+        let start_input = r#"{
+            "session_id": "blocking-context-test",
+            "transcript_path": "/tmp/transcript.jsonl",
+            "cwd": "/tmp/project"
+        }"#;
+        runner
+            .run_with_input(HookType::SessionStart, start_input)
+            .unwrap();
+
+        // 2. Set session to Pending state with a ticket
+        let mut session = runner.store.get("blocking-context-test").unwrap().unwrap();
+        session.gate.status = GateStatus::Pending;
+        session.gate.ticket = Some(TicketContext::new(
+            "GROVE-123",
+            "github",
+            "Fix blocking bug",
+        ));
+        runner.store.put(&session).unwrap();
+
+        // 3. Call session-start again (simulates subagent starting)
+        let result = runner
+            .run_with_input(HookType::SessionStart, start_input)
+            .unwrap();
+
+        // 4. Verify additionalContext contains gate notice
+        let output: SessionStartOutput = serde_json::from_str(&result).unwrap();
+        assert!(output.additional_context.is_some());
+
+        let context = output.additional_context.unwrap();
+        assert!(
+            context.contains("## Grove Gate Active"),
+            "Should contain gate notice header"
+        );
+        assert!(
+            context.contains("Pending"),
+            "Should contain status: {:?}",
+            context
+        );
+        assert!(
+            context.contains("GROVE-123"),
+            "Should contain ticket ID: {:?}",
+            context
+        );
+        assert!(
+            context.contains("grove reflect"),
+            "Should contain reflect command: {:?}",
+            context
+        );
+        assert!(
+            context.contains("grove skip"),
+            "Should contain skip command: {:?}",
+            context
+        );
+        assert!(
+            context.contains("blocking-context-test"),
+            "Should contain session ID: {:?}",
+            context
+        );
+    }
+
+    #[test]
+    fn test_session_start_injects_blocking_gate_context_blocked() {
+        let runner = test_runner();
+
+        // 1. Create a session in Blocked state
+        let start_input = r#"{
+            "session_id": "blocked-context-test",
+            "transcript_path": "/tmp/transcript.jsonl",
+            "cwd": "/tmp/project"
+        }"#;
+        runner
+            .run_with_input(HookType::SessionStart, start_input)
+            .unwrap();
+
+        // Set to Blocked state
+        let mut session = runner.store.get("blocked-context-test").unwrap().unwrap();
+        session.gate.status = GateStatus::Blocked;
+        runner.store.put(&session).unwrap();
+
+        // 2. Call session-start again
+        let result = runner
+            .run_with_input(HookType::SessionStart, start_input)
+            .unwrap();
+
+        // 3. Verify context contains Blocked status
+        let output: SessionStartOutput = serde_json::from_str(&result).unwrap();
+        assert!(output.additional_context.is_some());
+
+        let context = output.additional_context.unwrap();
+        assert!(
+            context.contains("Blocked"),
+            "Should contain Blocked status: {:?}",
+            context
+        );
+    }
+
+    #[test]
+    fn test_session_start_no_blocking_context_for_idle() {
+        let runner = test_runner();
+
+        // 1. Create a session (defaults to Idle)
+        let start_input = r#"{
+            "session_id": "idle-no-context-test",
+            "transcript_path": "/tmp/transcript.jsonl",
+            "cwd": "/tmp/project"
+        }"#;
+        let result = runner
+            .run_with_input(HookType::SessionStart, start_input)
+            .unwrap();
+
+        // 2. Verify no gate blocking context (Idle doesn't require reflection)
+        let output: SessionStartOutput = serde_json::from_str(&result).unwrap();
+        // Context might be None or might contain learnings, but should NOT contain gate notice
+        if let Some(context) = output.additional_context {
+            assert!(
+                !context.contains("## Grove Gate Active"),
+                "Idle session should NOT have gate notice"
+            );
+        }
+    }
+
+    #[test]
+    fn test_session_start_no_blocking_context_for_reflected() {
+        let runner = test_runner();
+
+        // 1. Create a session in Reflected state
+        let start_input = r#"{
+            "session_id": "reflected-no-context-test",
+            "transcript_path": "/tmp/transcript.jsonl",
+            "cwd": "/tmp/project"
+        }"#;
+        runner
+            .run_with_input(HookType::SessionStart, start_input)
+            .unwrap();
+
+        let mut session = runner
+            .store
+            .get("reflected-no-context-test")
+            .unwrap()
+            .unwrap();
+        session.gate.status = GateStatus::Reflected;
+        runner.store.put(&session).unwrap();
+
+        // 2. Call session-start again
+        let result = runner
+            .run_with_input(HookType::SessionStart, start_input)
+            .unwrap();
+
+        // 3. Verify no gate blocking context (Reflected is terminal)
+        let output: SessionStartOutput = serde_json::from_str(&result).unwrap();
+        if let Some(context) = output.additional_context {
+            assert!(
+                !context.contains("## Grove Gate Active"),
+                "Reflected session should NOT have gate notice"
+            );
+        }
+    }
+
+    #[test]
+    fn test_session_start_blocking_context_adds_trace() {
+        let runner = test_runner();
+
+        // 1. Create a session and set to Pending
+        let start_input = r#"{
+            "session_id": "blocking-trace-test",
+            "transcript_path": "/tmp/transcript.jsonl",
+            "cwd": "/tmp/project"
+        }"#;
+        runner
+            .run_with_input(HookType::SessionStart, start_input)
+            .unwrap();
+
+        let mut session = runner.store.get("blocking-trace-test").unwrap().unwrap();
+        session.gate.status = GateStatus::Pending;
+        runner.store.put(&session).unwrap();
+
+        // 2. Call session-start again
+        runner
+            .run_with_input(HookType::SessionStart, start_input)
+            .unwrap();
+
+        // 3. Verify trace event was added
+        let session = runner.store.get("blocking-trace-test").unwrap().unwrap();
+        let blocking_trace = session.trace.iter().find(|t| {
+            t.event_type == EventType::GateStatusChanged
+                && t.details
+                    .as_ref()
+                    .is_some_and(|d| d.contains("injected blocking notice"))
+        });
+        assert!(
+            blocking_trace.is_some(),
+            "Should have trace event for blocking notice injection"
+        );
+    }
+
+    #[test]
+    fn test_session_start_no_blocking_context_for_skipped() {
+        let runner = test_runner();
+
+        // 1. Create a session in Skipped state (another terminal state)
+        let start_input = r#"{
+            "session_id": "skipped-no-context-test",
+            "transcript_path": "/tmp/transcript.jsonl",
+            "cwd": "/tmp/project"
+        }"#;
+        runner
+            .run_with_input(HookType::SessionStart, start_input)
+            .unwrap();
+
+        let mut session = runner
+            .store
+            .get("skipped-no-context-test")
+            .unwrap()
+            .unwrap();
+        session.gate.status = GateStatus::Skipped;
+        runner.store.put(&session).unwrap();
+
+        // 2. Call session-start again
+        let result = runner
+            .run_with_input(HookType::SessionStart, start_input)
+            .unwrap();
+
+        // 3. Verify no gate blocking context (Skipped is terminal)
+        let output: SessionStartOutput = serde_json::from_str(&result).unwrap();
+        if let Some(context) = output.additional_context {
+            assert!(
+                !context.contains("## Grove Gate Active"),
+                "Skipped session should NOT have gate notice"
+            );
+        }
+    }
+
+    #[test]
+    fn test_session_start_blocking_context_without_ticket() {
+        let runner = test_runner();
+
+        // 1. Create a session in Pending state WITHOUT a ticket
+        let start_input = r#"{
+            "session_id": "no-ticket-test",
+            "transcript_path": "/tmp/transcript.jsonl",
+            "cwd": "/tmp/project"
+        }"#;
+        runner
+            .run_with_input(HookType::SessionStart, start_input)
+            .unwrap();
+
+        let mut session = runner.store.get("no-ticket-test").unwrap().unwrap();
+        session.gate.status = GateStatus::Pending;
+        // Explicitly no ticket: session.gate.ticket = None (default)
+        runner.store.put(&session).unwrap();
+
+        // 2. Call session-start again
+        let result = runner
+            .run_with_input(HookType::SessionStart, start_input)
+            .unwrap();
+
+        // 3. Verify context has gate notice but NO ticket line
+        let output: SessionStartOutput = serde_json::from_str(&result).unwrap();
+        assert!(output.additional_context.is_some());
+
+        let context = output.additional_context.unwrap();
+        assert!(
+            context.contains("## Grove Gate Active"),
+            "Should have gate notice"
+        );
+        assert!(context.contains("Pending"), "Should show Pending status");
+        assert!(
+            !context.contains("**Ticket:**"),
+            "Should NOT have Ticket line when no ticket: {:?}",
+            context
+        );
+        assert!(
+            context.contains("grove reflect"),
+            "Should still have resolution commands"
+        );
     }
 }

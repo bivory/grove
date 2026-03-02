@@ -45,13 +45,13 @@ jobs:
           sha256sum grove-${{ matrix.target }} > grove-${{ matrix.target }}.sha256
 
       - name: Upload binary
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: grove-${{ matrix.target }}
           path: dist/grove-${{ matrix.target }}
 
       - name: Upload checksum
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: grove-${{ matrix.target }}.sha256
           path: dist/grove-${{ matrix.target }}.sha256

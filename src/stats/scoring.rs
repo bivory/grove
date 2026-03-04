@@ -9,7 +9,7 @@
 //! - Exact tag match: 1.0
 //! - Partial tag match: 0.5
 //! - File path overlap: 0.8
-//! - Keyword in summary: 0.3
+//! - Keyword in summary: 0.5
 //!
 //! ## Composite Scoring
 //!
@@ -61,7 +61,7 @@ pub mod weights {
     /// Weight for file path overlap.
     pub const FILE_OVERLAP: f64 = 0.8;
     /// Weight for keyword in summary.
-    pub const KEYWORD_SUMMARY: f64 = 0.3;
+    pub const KEYWORD_SUMMARY: f64 = 0.5;
     /// Weight for keyword in detail (lower than summary to avoid overweighting verbose text).
     pub const KEYWORD_DETAIL: f64 = 0.2;
 }
@@ -949,8 +949,8 @@ mod tests {
 
     #[test]
     fn test_score_additive_with_diminishing_returns() {
-        // Query matches on both tags (1.0) and keywords (0.3)
-        // Additive: 1.0 + 0.3*0.3 = 1.09 -> capped at 1.0
+        // Query matches on both tags (1.0) and keywords (0.5)
+        // Additive: 1.0 + 0.3*0.5 = 1.15 -> capped at 1.0
         let query = SearchQuery::new()
             .tags(vec!["rust".to_string()])
             .keywords(vec!["error".to_string()]);
@@ -977,8 +977,8 @@ mod tests {
             multi_score > single_score,
             "Multi-signal ({multi_score}) should beat single-signal ({single_score})"
         );
-        // file(0.8) + 0.3*keyword(0.3) = 0.8 + 0.09 = 0.89
-        let expected = 0.8 + 0.3 * 0.3;
+        // file(0.8) + 0.3*keyword(0.5) = 0.8 + 0.15 = 0.95
+        let expected = 0.8 + 0.3 * 0.5;
         assert!(
             (multi_score - expected).abs() < f64::EPSILON,
             "Expected {expected}, got {multi_score}"

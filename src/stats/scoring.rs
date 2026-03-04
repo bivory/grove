@@ -62,6 +62,8 @@ pub mod weights {
     pub const FILE_OVERLAP: f64 = 0.8;
     /// Weight for keyword in summary.
     pub const KEYWORD_SUMMARY: f64 = 0.3;
+    /// Weight for keyword in detail (lower than summary to avoid overweighting verbose text).
+    pub const KEYWORD_DETAIL: f64 = 0.2;
 }
 
 /// Constants for recency weight calculation.
@@ -213,6 +215,14 @@ pub fn score(query: &SearchQuery, learning: &CompoundLearning) -> f64 {
 
     // Score keyword matches in summary
     max_score = max_score.max(score_keywords(&query.keywords, &learning.summary));
+
+    // Score keyword matches in detail (lower weight than summary)
+    if !learning.detail.is_empty() {
+        let detail_score = score_keywords(&query.keywords, &learning.detail);
+        if detail_score > 0.0 {
+            max_score = max_score.max(weights::KEYWORD_DETAIL);
+        }
+    }
 
     max_score
 }
@@ -831,6 +841,46 @@ mod tests {
             (score(&query, &matches) - weights::KEYWORD_SUMMARY).abs() < f64::EPSILON,
             "Should match hyphenated words"
         );
+    }
+
+    // Keyword in detail tests
+
+    #[test]
+    fn test_score_keyword_in_detail_only() {
+        let query = SearchQuery::with_keywords(vec!["ecto".to_string()]);
+        let mut learning =
+            make_learning("Repo.transaction wraps return values", vec!["test"], None);
+        learning.detail = "In Ecto, Repo.transaction double-wraps the return value.".to_string();
+
+        let s = score(&query, &learning);
+        assert!(
+            (s - weights::KEYWORD_DETAIL).abs() < f64::EPSILON,
+            "Keyword in detail should score KEYWORD_DETAIL (0.2), got {s}"
+        );
+    }
+
+    #[test]
+    fn test_score_keyword_in_summary_beats_detail() {
+        // When keyword appears in both summary and detail, summary weight wins
+        let query = SearchQuery::with_keywords(vec!["ecto".to_string()]);
+        let mut learning = make_learning("Ecto transaction wrapping", vec!["test"], None);
+        learning.detail = "In Ecto, Repo.transaction double-wraps.".to_string();
+
+        let s = score(&query, &learning);
+        assert!(
+            (s - weights::KEYWORD_SUMMARY).abs() < f64::EPSILON,
+            "Summary match should win over detail match, got {s}"
+        );
+    }
+
+    #[test]
+    fn test_score_keyword_no_match_in_detail() {
+        let query = SearchQuery::with_keywords(vec!["database".to_string()]);
+        let mut learning = make_learning("Handle error gracefully", vec!["test"], None);
+        learning.detail = "This error occurs during file parsing.".to_string();
+
+        let s = score(&query, &learning);
+        assert!(s.abs() < f64::EPSILON, "No match in summary or detail");
     }
 
     // Combined scoring tests

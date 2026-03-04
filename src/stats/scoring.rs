@@ -307,17 +307,36 @@ fn files_overlap(path1: &str, path2: &str) -> bool {
 
 /// Score keyword matches in the summary.
 ///
-/// Case-insensitive whole word matching.
+/// Case-insensitive whole word matching. A keyword matches only at word
+/// boundaries (whitespace or punctuation), so "error" matches "Handle error"
+/// but not "terror" or "errorhandling". Multi-word keywords like "eager loading"
+/// match when all constituent words appear as whole words in the summary.
 fn score_keywords(keywords: &[String], summary: &str) -> f64 {
     if keywords.is_empty() {
         return 0.0;
     }
 
-    let summary_lower = summary.to_lowercase();
+    // Split summary into lowercase word tokens at non-alphanumeric boundaries
+    let summary_words: Vec<String> = summary
+        .to_lowercase()
+        .split(|c: char| !c.is_alphanumeric() && c != '-' && c != '_')
+        .filter(|w| !w.is_empty())
+        .map(|w| w.to_string())
+        .collect();
 
     for keyword in keywords {
         let keyword_lower = keyword.to_lowercase();
-        if summary_lower.contains(&keyword_lower) {
+        // Split keyword into sub-words; all must be present as whole words
+        let keyword_parts: Vec<&str> = keyword_lower
+            .split_whitespace()
+            .filter(|w| !w.is_empty())
+            .collect();
+
+        if !keyword_parts.is_empty()
+            && keyword_parts
+                .iter()
+                .all(|part| summary_words.iter().any(|w| w == part))
+        {
             return weights::KEYWORD_SUMMARY;
         }
     }
@@ -738,6 +757,61 @@ mod tests {
 
         let s = score(&query, &learning);
         assert!(s.abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_score_keyword_whole_word_no_substring() {
+        // "error" should NOT match "terror" or "errorhandling"
+        let query = SearchQuery::with_keywords(vec!["error".to_string()]);
+
+        let no_match1 = make_learning("Avoid terror in production", vec!["test"], None);
+        assert!(
+            score(&query, &no_match1).abs() < f64::EPSILON,
+            "Should not match 'terror' (substring)"
+        );
+
+        let no_match2 = make_learning("Use errorhandling patterns", vec!["test"], None);
+        assert!(
+            score(&query, &no_match2).abs() < f64::EPSILON,
+            "Should not match 'errorhandling' (prefix)"
+        );
+
+        // But should match "error" as a standalone word
+        let matches = make_learning("Handle error gracefully", vec!["test"], None);
+        assert!(
+            (score(&query, &matches) - weights::KEYWORD_SUMMARY).abs() < f64::EPSILON,
+            "Should match 'error' as whole word"
+        );
+    }
+
+    #[test]
+    fn test_score_keyword_at_punctuation_boundary() {
+        let query = SearchQuery::with_keywords(vec!["auth".to_string()]);
+
+        // "auth" at punctuation boundary should match
+        let matches = make_learning("Fix auth: timeout issue", vec!["test"], None);
+        assert!(
+            (score(&query, &matches) - weights::KEYWORD_SUMMARY).abs() < f64::EPSILON,
+            "Should match at colon boundary"
+        );
+
+        // "auth" inside "oauth" should NOT match
+        let no_match = make_learning("Use oauth2 for login", vec!["test"], None);
+        assert!(
+            score(&query, &no_match).abs() < f64::EPSILON,
+            "Should not match 'oauth2' (embedded)"
+        );
+    }
+
+    #[test]
+    fn test_score_keyword_hyphenated_words() {
+        // Hyphenated tokens should be preserved for matching
+        let query = SearchQuery::with_keywords(vec!["cross-origin".to_string()]);
+        let matches = make_learning("Handle cross-origin requests", vec!["test"], None);
+        assert!(
+            (score(&query, &matches) - weights::KEYWORD_SUMMARY).abs() < f64::EPSILON,
+            "Should match hyphenated words"
+        );
     }
 
     // Combined scoring tests

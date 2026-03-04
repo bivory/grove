@@ -277,12 +277,35 @@ impl MarkdownBackend {
             }
         }
 
-        // Keyword matching (in summary and detail)
-        let summary_lower = learning.summary.to_lowercase();
-        let detail_lower = learning.detail.to_lowercase();
+        // Keyword matching (whole word in summary and detail)
+        let summary_words: Vec<String> = learning
+            .summary
+            .to_lowercase()
+            .split(|c: char| !c.is_alphanumeric() && c != '-' && c != '_')
+            .filter(|w| !w.is_empty())
+            .map(|w| w.to_string())
+            .collect();
+        let detail_words: Vec<String> = learning
+            .detail
+            .to_lowercase()
+            .split(|c: char| !c.is_alphanumeric() && c != '-' && c != '_')
+            .filter(|w| !w.is_empty())
+            .map(|w| w.to_string())
+            .collect();
         for keyword in &query.keywords {
             let keyword_lower = keyword.to_lowercase();
-            if summary_lower.contains(&keyword_lower) || detail_lower.contains(&keyword_lower) {
+            // Split keyword into sub-words; all must be present as whole words
+            let keyword_parts: Vec<&str> = keyword_lower
+                .split_whitespace()
+                .filter(|w| !w.is_empty())
+                .collect();
+
+            if !keyword_parts.is_empty()
+                && keyword_parts.iter().all(|part| {
+                    summary_words.iter().any(|w| w == part)
+                        || detail_words.iter().any(|w| w == part)
+                })
+            {
                 score += scores::KEYWORD;
                 matches += 1;
             }

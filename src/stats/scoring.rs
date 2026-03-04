@@ -274,10 +274,13 @@ fn score_files(query_files: &[String], context_files: &[String]) -> f64 {
 ///
 /// Returns true if:
 /// - Paths are exactly equal (and non-empty)
-/// - Same filename (last path component)
+/// - One path is filename-only and matches the other's filename
 /// - One path ends with the other at a path separator boundary
+///
+/// When both paths have directory components, filename-only matching is
+/// disabled to avoid false positives (e.g., `src/auth/mod.rs` should NOT
+/// match `src/stats/mod.rs` just because both are `mod.rs`).
 fn files_overlap(path1: &str, path2: &str) -> bool {
-    // Empty paths don't match
     if path1.is_empty() || path2.is_empty() {
         return false;
     }
@@ -286,20 +289,24 @@ fn files_overlap(path1: &str, path2: &str) -> bool {
         return true;
     }
 
-    // Compare filenames (last path component)
     let name1 = path1.rsplit('/').next().unwrap_or(path1);
     let name2 = path2.rsplit('/').next().unwrap_or(path2);
 
-    if name1 == name2 && !name1.is_empty() {
+    // Different filenames can never overlap
+    if name1 != name2 || name1.is_empty() {
+        return false;
+    }
+
+    // If either path is just a filename (no directory), filename match suffices
+    if !path1.contains('/') || !path2.contains('/') {
         return true;
     }
 
-    // Check suffix match at path separator boundary
-    // e.g., "foo/bar/main.rs" should match "bar/main.rs" but NOT "r/main.rs"
+    // Both paths have directory components: require suffix match at path
+    // boundary to avoid false positives like src/auth/mod.rs vs src/stats/mod.rs
     let normalized1 = path1.trim_start_matches('/');
     let normalized2 = path2.trim_start_matches('/');
 
-    // Either they're equal after normalization, or one ends with "/" + the other
     normalized1 == normalized2
         || normalized1.ends_with(&format!("/{normalized2}"))
         || normalized2.ends_with(&format!("/{normalized1}"))
@@ -695,12 +702,24 @@ mod tests {
     }
 
     #[test]
-    fn test_score_filename_match() {
-        let query = SearchQuery::with_files(vec!["src/main.rs".to_string()]);
+    fn test_score_filename_match_no_dir() {
+        // Filename-only path matches when one side has no directory
+        let query = SearchQuery::with_files(vec!["main.rs".to_string()]);
         let learning = make_learning("Test", vec!["test"], Some(vec!["other/main.rs"]));
 
         let s = score(&query, &learning);
         assert!((s - weights::FILE_OVERLAP).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_score_filename_match_different_dirs_no_match() {
+        // Both paths have directories but no shared path components —
+        // should NOT match (prevents mod.rs false positives)
+        let query = SearchQuery::with_files(vec!["src/main.rs".to_string()]);
+        let learning = make_learning("Test", vec!["test"], Some(vec!["other/main.rs"]));
+
+        let s = score(&query, &learning);
+        assert!(s.abs() < f64::EPSILON);
     }
 
     #[test]
@@ -931,8 +950,19 @@ mod tests {
     }
 
     #[test]
-    fn test_files_overlap_filename_only() {
-        assert!(files_overlap("a/b/main.rs", "x/y/main.rs"));
+    fn test_files_overlap_filename_only_no_dir() {
+        // Filename-only path matches any path with same filename
+        assert!(files_overlap("main.rs", "x/y/main.rs"));
+        assert!(files_overlap("a/b/main.rs", "main.rs"));
+    }
+
+    #[test]
+    fn test_files_overlap_filename_only_both_dirs_no_match() {
+        // Both paths have directories but share no path components beyond
+        // the filename — should NOT match (prevents mod.rs false positives)
+        assert!(!files_overlap("a/b/main.rs", "x/y/main.rs"));
+        assert!(!files_overlap("src/auth/mod.rs", "src/stats/mod.rs"));
+        assert!(!files_overlap("src/auth/tests.rs", "src/cli/tests.rs"));
     }
 
     #[test]
@@ -952,11 +982,11 @@ mod tests {
     }
 
     #[test]
-    fn test_files_overlap_partial_directory_same_filename() {
-        // Even though "r/main.rs" is a partial directory path, both have "main.rs"
-        // as their filename, so they should match based on filename equality
-        assert!(files_overlap("foo/bar/main.rs", "r/main.rs"));
-        assert!(files_overlap("foo/bar/main.rs", "ar/main.rs"));
+    fn test_files_overlap_partial_directory_no_match() {
+        // Both paths have directories. "r/main.rs" is not a path-boundary
+        // suffix of "foo/bar/main.rs", so this should NOT match.
+        assert!(!files_overlap("foo/bar/main.rs", "r/main.rs"));
+        assert!(!files_overlap("foo/bar/main.rs", "ar/main.rs"));
     }
 
     #[test]

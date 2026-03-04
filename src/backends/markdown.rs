@@ -485,6 +485,10 @@ impl MemoryBackend for MarkdownBackend {
 }
 
 /// Check if two file paths overlap (same file or one contains the other).
+///
+/// When both paths have directory components, filename-only matching is
+/// disabled to avoid false positives (e.g., `src/auth/mod.rs` should NOT
+/// match `src/stats/mod.rs` just because both are `mod.rs`).
 fn files_overlap(path1: &str, path2: &str) -> bool {
     let p1 = Path::new(path1);
     let p2 = Path::new(path2);
@@ -494,17 +498,30 @@ fn files_overlap(path1: &str, path2: &str) -> bool {
         return true;
     }
 
-    // Check if file names match (for cases like "src/foo.rs" vs "foo.rs")
-    if let (Some(name1), Some(name2)) = (p1.file_name(), p2.file_name()) {
-        if name1 == name2 {
-            return true;
-        }
+    let name1 = p1.file_name();
+    let name2 = p2.file_name();
+
+    // Different filenames can never overlap
+    match (name1, name2) {
+        (Some(n1), Some(n2)) if n1 != n2 => return false,
+        (None, _) | (_, None) => return false,
+        _ => {}
     }
 
-    // Check if one path ends with the other
+    // If either path is just a filename (no directory), filename match suffices
+    if p1.parent().is_none_or(|p| p.as_os_str().is_empty())
+        || p2.parent().is_none_or(|p| p.as_os_str().is_empty())
+    {
+        return true;
+    }
+
+    // Both paths have directory components: require suffix match at path boundary
     let s1 = path1.replace('\\', "/");
     let s2 = path2.replace('\\', "/");
-    s1.ends_with(&s2) || s2.ends_with(&s1)
+    let n1 = s1.trim_start_matches('/');
+    let n2 = s2.trim_start_matches('/');
+
+    n1 == n2 || n1.ends_with(&format!("/{n2}")) || n2.ends_with(&format!("/{n1}"))
 }
 
 /// Sanitize a learning before writing.
@@ -1417,6 +1434,14 @@ mod tests {
     #[test]
     fn test_files_no_overlap() {
         assert!(!files_overlap("src/lib.rs", "src/main.rs"));
+    }
+
+    #[test]
+    fn test_files_overlap_same_filename_different_dirs() {
+        // Both paths have directories but share no path components beyond
+        // the filename — should NOT match (prevents mod.rs false positives)
+        assert!(!files_overlap("src/auth/mod.rs", "src/stats/mod.rs"));
+        assert!(!files_overlap("a/b/main.rs", "x/y/main.rs"));
     }
 
     // Combined query test

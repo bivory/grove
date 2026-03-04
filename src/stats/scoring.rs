@@ -68,7 +68,10 @@ pub mod weights {
 
 /// Constants for recency weight calculation.
 pub mod recency {
-    /// Decay constant λ, tuned so 90-day-old learning has weight ~0.3.
+    /// Default half-life in days (at which recency weight reaches ~0.3).
+    pub const DEFAULT_HALF_LIFE_DAYS: u32 = 90;
+
+    /// Decay constant λ derived from the default half-life.
     ///
     /// Derived from: e^(-λ × 90) = 0.3
     /// Therefore: λ = -ln(0.3) / 90 ≈ 0.01338
@@ -83,6 +86,17 @@ pub mod recency {
     /// Days threshold for "recent" learnings in aggressive mode.
     /// Aggressive mode includes learnings from the last 30 days even without a match.
     pub const AGGRESSIVE_RECENT_DAYS: i64 = 30;
+
+    /// Compute lambda from a half-life in days.
+    ///
+    /// The half-life is the number of days at which recency weight drops to ~0.3.
+    /// Formula: λ = -ln(0.3) / half_life_days
+    pub fn lambda_from_half_life(half_life_days: u32) -> f64 {
+        if half_life_days == 0 {
+            return LAMBDA; // Fall back to default
+        }
+        -(0.3_f64.ln()) / half_life_days as f64
+    }
 }
 
 /// Constants for reference boost calculation.
@@ -462,12 +476,16 @@ pub fn rank_learnings(
 /// Uses exponential decay: e^(-λ × days_since_creation)
 ///
 /// - 1-day-old learning: ~1.0
-/// - 90-day-old learning: ~0.3
+/// - 90-day-old learning: ~0.3 (with default lambda)
 /// - Very old learnings: clamped to MIN_WEIGHT (0.1)
-pub fn recency_weight(created_at: DateTime<Utc>, now: DateTime<Utc>) -> f64 {
+///
+/// The `lambda` parameter controls the decay rate. Use
+/// [`recency::lambda_from_half_life`] to derive it from a half-life in days,
+/// or [`recency::LAMBDA`] for the default.
+pub fn recency_weight(created_at: DateTime<Utc>, now: DateTime<Utc>, lambda: f64) -> f64 {
     let days = (now - created_at).num_days().max(0) as f64;
 
-    let weight = (-recency::LAMBDA * days).exp();
+    let weight = (-lambda * days).exp();
 
     // Clamp to valid range
     weight.clamp(recency::MIN_WEIGHT, recency::MAX_WEIGHT)
@@ -577,6 +595,7 @@ impl CompositeScore {
 /// * `strategy` - The scoring strategy to use
 /// * `now` - The current time (for recency calculation)
 /// * `limit` - Maximum number of results to return (capped by strategy default)
+/// * `lambda` - Recency decay rate (use `recency::LAMBDA` for default)
 pub fn composite_rank<F>(
     query: &SearchQuery,
     learnings: &[CompoundLearning],
@@ -584,6 +603,7 @@ pub fn composite_rank<F>(
     strategy: Strategy,
     now: DateTime<Utc>,
     limit: usize,
+    lambda: f64,
 ) -> Vec<CompositeScore>
 where
     F: Fn(&str) -> LearningStats,
@@ -613,7 +633,7 @@ where
             }
 
             // Calculate recency
-            let recency = recency_weight(l.timestamp, now);
+            let recency = recency_weight(l.timestamp, now, lambda);
 
             // Get stats and calculate reference boost
             let learning_stats = stats(&l.id);
@@ -658,10 +678,18 @@ pub fn composite_rank_learnings<F>(
 where
     F: Fn(&str) -> LearningStats,
 {
-    composite_rank(query, learnings, stats, strategy, now, limit)
-        .into_iter()
-        .map(|cs| cs.learning)
-        .collect()
+    composite_rank(
+        query,
+        learnings,
+        stats,
+        strategy,
+        now,
+        limit,
+        recency::LAMBDA,
+    )
+    .into_iter()
+    .map(|cs| cs.learning)
+    .collect()
 }
 
 #[cfg(test)]
@@ -1145,7 +1173,7 @@ mod tests {
         let now = Utc::now();
         let created = now; // Just created
 
-        let weight = recency_weight(created, now);
+        let weight = recency_weight(created, now, recency::LAMBDA);
         assert!((weight - 1.0).abs() < 0.01); // ~1.0
     }
 
@@ -1154,7 +1182,7 @@ mod tests {
         let now = Utc::now();
         let created = now - chrono::Duration::days(1);
 
-        let weight = recency_weight(created, now);
+        let weight = recency_weight(created, now, recency::LAMBDA);
         // e^(-0.01338 * 1) ≈ 0.987
         assert!(weight > 0.98 && weight < 1.0);
     }
@@ -1164,7 +1192,7 @@ mod tests {
         let now = Utc::now();
         let created = now - chrono::Duration::days(90);
 
-        let weight = recency_weight(created, now);
+        let weight = recency_weight(created, now, recency::LAMBDA);
         // e^(-0.01338 * 90) ≈ 0.3
         assert!(weight > 0.25 && weight < 0.35);
     }
@@ -1174,7 +1202,7 @@ mod tests {
         let now = Utc::now();
         let created = now - chrono::Duration::days(365);
 
-        let weight = recency_weight(created, now);
+        let weight = recency_weight(created, now, recency::LAMBDA);
         // Should be clamped to MIN_WEIGHT (0.1)
         assert!(weight >= recency::MIN_WEIGHT);
     }
@@ -1184,9 +1212,48 @@ mod tests {
         let now = Utc::now();
         let created = now + chrono::Duration::days(1); // Future date
 
-        let weight = recency_weight(created, now);
+        let weight = recency_weight(created, now, recency::LAMBDA);
         // Should treat as 0 days old
         assert!((weight - 1.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_lambda_from_half_life_default() {
+        let lambda = recency::lambda_from_half_life(90);
+        // Should be close to the hardcoded LAMBDA constant
+        assert!(
+            (lambda - recency::LAMBDA).abs() < 0.001,
+            "Default half-life should produce ~LAMBDA, got {lambda}"
+        );
+    }
+
+    #[test]
+    fn test_lambda_from_half_life_shorter() {
+        // Shorter half-life → larger lambda → faster decay
+        let lambda_30 = recency::lambda_from_half_life(30);
+        let lambda_90 = recency::lambda_from_half_life(90);
+        assert!(
+            lambda_30 > lambda_90,
+            "30-day half-life ({lambda_30}) should decay faster than 90-day ({lambda_90})"
+        );
+
+        // Verify: 30-day-old learning with 30-day half-life should have weight ~0.3
+        let now = Utc::now();
+        let created = now - chrono::Duration::days(30);
+        let weight = recency_weight(created, now, lambda_30);
+        assert!(
+            (weight - 0.3).abs() < 0.05,
+            "30-day-old with 30-day half-life should be ~0.3, got {weight}"
+        );
+    }
+
+    #[test]
+    fn test_lambda_from_half_life_zero_fallback() {
+        let lambda = recency::lambda_from_half_life(0);
+        assert!(
+            (lambda - recency::LAMBDA).abs() < f64::EPSILON,
+            "Zero half-life should fall back to default LAMBDA"
+        );
     }
 
     // =======================================================================
@@ -1419,7 +1486,15 @@ mod tests {
         let now = Utc::now();
         let stats = |_: &str| LearningStats::new(10, 5);
 
-        let ranked = composite_rank(&query, &learnings, stats, Strategy::Moderate, now, 10);
+        let ranked = composite_rank(
+            &query,
+            &learnings,
+            stats,
+            Strategy::Moderate,
+            now,
+            10,
+            recency::LAMBDA,
+        );
 
         assert_eq!(ranked.len(), 1);
         assert_eq!(ranked[0].learning.summary, "Match");
@@ -1442,7 +1517,15 @@ mod tests {
         // Same stats for both
         let stats = |_: &str| LearningStats::new(10, 5);
 
-        let ranked = composite_rank(&query, &learnings, stats, Strategy::Moderate, now, 10);
+        let ranked = composite_rank(
+            &query,
+            &learnings,
+            stats,
+            Strategy::Moderate,
+            now,
+            10,
+            recency::LAMBDA,
+        );
 
         assert_eq!(ranked.len(), 2);
         // Recent learning should rank higher
@@ -1462,7 +1545,15 @@ mod tests {
         let now = Utc::now();
         let stats = |_: &str| LearningStats::new(10, 5);
 
-        let ranked = composite_rank(&query, &learnings, stats, Strategy::Moderate, now, 2);
+        let ranked = composite_rank(
+            &query,
+            &learnings,
+            stats,
+            Strategy::Moderate,
+            now,
+            2,
+            recency::LAMBDA,
+        );
 
         assert_eq!(ranked.len(), 2);
     }
@@ -1491,7 +1582,15 @@ mod tests {
             }
         };
 
-        let ranked = composite_rank(&query, &learnings, stats, Strategy::Moderate, now, 10);
+        let ranked = composite_rank(
+            &query,
+            &learnings,
+            stats,
+            Strategy::Moderate,
+            now,
+            10,
+            recency::LAMBDA,
+        );
 
         assert_eq!(ranked.len(), 2);
         // Higher hit rate should rank higher
@@ -1532,7 +1631,15 @@ mod tests {
         let now = Utc::now();
         let stats = |_: &str| LearningStats::new(10, 5);
 
-        let ranked = composite_rank(&query, &learnings, stats, Strategy::Conservative, now, 10);
+        let ranked = composite_rank(
+            &query,
+            &learnings,
+            stats,
+            Strategy::Conservative,
+            now,
+            10,
+            recency::LAMBDA,
+        );
 
         // Only exact match should pass
         assert_eq!(ranked.len(), 1);
@@ -1551,7 +1658,15 @@ mod tests {
         let now = Utc::now();
         let stats = |_: &str| LearningStats::new(10, 5);
 
-        let ranked = composite_rank(&query, &learnings, stats, Strategy::Conservative, now, 10);
+        let ranked = composite_rank(
+            &query,
+            &learnings,
+            stats,
+            Strategy::Conservative,
+            now,
+            10,
+            recency::LAMBDA,
+        );
 
         assert_eq!(ranked.len(), 1);
         assert_eq!(ranked[0].learning.summary, "File match");
@@ -1571,7 +1686,15 @@ mod tests {
         let now = Utc::now();
         let stats = |_: &str| LearningStats::new(10, 5);
 
-        let ranked = composite_rank(&query, &learnings, stats, Strategy::Conservative, now, 10);
+        let ranked = composite_rank(
+            &query,
+            &learnings,
+            stats,
+            Strategy::Conservative,
+            now,
+            10,
+            recency::LAMBDA,
+        );
 
         // Keyword-only match (0.3) should be filtered by conservative (threshold 0.8)
         assert_eq!(ranked.len(), 0);
@@ -1589,7 +1712,15 @@ mod tests {
         let now = Utc::now();
         let stats = |_: &str| LearningStats::new(10, 5);
 
-        let ranked = composite_rank(&query, &learnings, stats, Strategy::Moderate, now, 10);
+        let ranked = composite_rank(
+            &query,
+            &learnings,
+            stats,
+            Strategy::Moderate,
+            now,
+            10,
+            recency::LAMBDA,
+        );
 
         assert_eq!(ranked.len(), 1);
     }
@@ -1607,7 +1738,15 @@ mod tests {
         let now = Utc::now();
         let stats = |_: &str| LearningStats::new(10, 5);
 
-        let ranked = composite_rank(&query, &learnings, stats, Strategy::Moderate, now, 10);
+        let ranked = composite_rank(
+            &query,
+            &learnings,
+            stats,
+            Strategy::Moderate,
+            now,
+            10,
+            recency::LAMBDA,
+        );
 
         // Keyword match (0.3) should pass for moderate (threshold 0.0)
         assert_eq!(ranked.len(), 1);
@@ -1632,7 +1771,15 @@ mod tests {
         let learnings = vec![recent_no_match, old_no_match, matching];
         let stats = |_: &str| LearningStats::new(10, 5);
 
-        let ranked = composite_rank(&query, &learnings, stats, Strategy::Aggressive, now, 10);
+        let ranked = composite_rank(
+            &query,
+            &learnings,
+            stats,
+            Strategy::Aggressive,
+            now,
+            10,
+            recency::LAMBDA,
+        );
 
         // Aggressive should include: matching (any) + recent_no_match (within 30 days)
         // But NOT old_no_match (outside 30 days and no match)
@@ -1659,7 +1806,15 @@ mod tests {
         let learnings = vec![at_boundary, beyond_boundary];
         let stats = |_: &str| LearningStats::new(10, 5);
 
-        let ranked = composite_rank(&query, &learnings, stats, Strategy::Aggressive, now, 10);
+        let ranked = composite_rank(
+            &query,
+            &learnings,
+            stats,
+            Strategy::Aggressive,
+            now,
+            10,
+            recency::LAMBDA,
+        );
 
         assert_eq!(ranked.len(), 1);
         assert_eq!(ranked[0].learning.summary, "At boundary");
@@ -1677,7 +1832,15 @@ mod tests {
         let learnings = vec![recent_no_match];
         let stats = |_: &str| LearningStats::new(10, 5);
 
-        let ranked = composite_rank(&query, &learnings, stats, Strategy::Moderate, now, 10);
+        let ranked = composite_rank(
+            &query,
+            &learnings,
+            stats,
+            Strategy::Moderate,
+            now,
+            10,
+            recency::LAMBDA,
+        );
 
         // Moderate should NOT include learnings without a match
         assert_eq!(ranked.len(), 0);
@@ -1695,7 +1858,15 @@ mod tests {
         let learnings = vec![recent_no_match];
         let stats = |_: &str| LearningStats::new(10, 5);
 
-        let ranked = composite_rank(&query, &learnings, stats, Strategy::Conservative, now, 10);
+        let ranked = composite_rank(
+            &query,
+            &learnings,
+            stats,
+            Strategy::Conservative,
+            now,
+            10,
+            recency::LAMBDA,
+        );
 
         // Conservative should NOT include learnings without a match
         assert_eq!(ranked.len(), 0);
@@ -1716,7 +1887,15 @@ mod tests {
         let stats = |_: &str| LearningStats::new(10, 5);
 
         // Request 10 but conservative should cap at 3
-        let ranked = composite_rank(&query, &learnings, stats, Strategy::Conservative, now, 10);
+        let ranked = composite_rank(
+            &query,
+            &learnings,
+            stats,
+            Strategy::Conservative,
+            now,
+            10,
+            recency::LAMBDA,
+        );
 
         assert_eq!(ranked.len(), 3);
     }
@@ -1732,7 +1911,15 @@ mod tests {
         let stats = |_: &str| LearningStats::new(10, 5);
 
         // Request 10 but moderate should cap at 5
-        let ranked = composite_rank(&query, &learnings, stats, Strategy::Moderate, now, 10);
+        let ranked = composite_rank(
+            &query,
+            &learnings,
+            stats,
+            Strategy::Moderate,
+            now,
+            10,
+            recency::LAMBDA,
+        );
 
         assert_eq!(ranked.len(), 5);
     }
@@ -1748,7 +1935,15 @@ mod tests {
         let stats = |_: &str| LearningStats::new(10, 5);
 
         // Request 15 but aggressive should cap at 10
-        let ranked = composite_rank(&query, &learnings, stats, Strategy::Aggressive, now, 15);
+        let ranked = composite_rank(
+            &query,
+            &learnings,
+            stats,
+            Strategy::Aggressive,
+            now,
+            15,
+            recency::LAMBDA,
+        );
 
         assert_eq!(ranked.len(), 10);
     }
@@ -1764,7 +1959,15 @@ mod tests {
         let stats = |_: &str| LearningStats::new(10, 5);
 
         // Request 2 - should respect user limit even though aggressive allows 10
-        let ranked = composite_rank(&query, &learnings, stats, Strategy::Aggressive, now, 2);
+        let ranked = composite_rank(
+            &query,
+            &learnings,
+            stats,
+            Strategy::Aggressive,
+            now,
+            2,
+            recency::LAMBDA,
+        );
 
         assert_eq!(ranked.len(), 2);
     }

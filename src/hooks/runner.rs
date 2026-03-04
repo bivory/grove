@@ -146,6 +146,7 @@ impl<S: SessionStore> HookRunner<S> {
         // Get retrieval settings from config
         let max_injections = self.config.retrieval.max_injections;
         let mut strategy = Strategy::parse(&self.config.retrieval.strategy).unwrap_or_default();
+        let lambda = recency::lambda_from_half_life(self.config.retrieval.recency_half_life_days);
 
         // Create primary backend and search for learnings
         let backend = create_primary_backend(cwd, Some(&self.config));
@@ -210,7 +211,7 @@ impl<S: SessionStore> HookRunner<S> {
                         .map(|stats| (stats.surfaced, stats.referenced))
                         .unwrap_or((0, 0));
 
-                    let recency = recency_weight(result.learning.timestamp, now);
+                    let recency = recency_weight(result.learning.timestamp, now, lambda);
                     let hit_rate = if surfaced == 0 {
                         0.0
                     } else {

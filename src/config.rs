@@ -243,6 +243,8 @@ pub struct RetrievalConfig {
     pub strategy: String,
     /// Below this number of active learnings, conservative downgrades to moderate.
     pub min_pool_size: u32,
+    /// Days at which recency weight drops to ~0.3 (controls decay speed).
+    pub recency_half_life_days: u32,
 }
 
 impl RetrievalConfig {
@@ -258,6 +260,7 @@ impl Default for RetrievalConfig {
             max_injections: 5,
             strategy: "moderate".to_string(),
             min_pool_size: 20,
+            recency_half_life_days: 90,
         }
     }
 }
@@ -595,6 +598,9 @@ impl Config {
         }
         if other.retrieval.min_pool_size != default_retrieval.min_pool_size {
             self.retrieval.min_pool_size = other.retrieval.min_pool_size;
+        }
+        if other.retrieval.recency_half_life_days != default_retrieval.recency_half_life_days {
+            self.retrieval.recency_half_life_days = other.retrieval.recency_half_life_days;
         }
 
         // Circuit breaker: merge field by field
@@ -1279,6 +1285,7 @@ total-recall = false
                 max_injections: 10,
                 strategy: "conservative".to_string(),
                 min_pool_size: 20,
+                recency_half_life_days: 90,
             },
             circuit_breaker: CircuitBreakerConfig {
                 max_blocks: 5,

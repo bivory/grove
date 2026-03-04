@@ -36,10 +36,10 @@
 //! Learnings with proven value get boosted:
 //!
 //! ```text
-//! reference_boost = 0.5 + (hit_rate × 0.5)
+//! reference_boost = 0.3 + (hit_rate × 0.7)
 //! ```
 //!
-//! Range: 0.5 (never referenced) to 1.0 (always referenced).
+//! Range: 0.3 (never referenced) to 1.0 (always referenced).
 //!
 //! ## Strategy Modes
 //!
@@ -102,10 +102,10 @@ pub mod recency {
 /// Constants for reference boost calculation.
 pub mod reference {
     /// Base boost for learnings with no references.
-    pub const BASE_BOOST: f64 = 0.5;
+    pub const BASE_BOOST: f64 = 0.3;
 
     /// Maximum additional boost from hit rate.
-    pub const MAX_ADDITIONAL: f64 = 0.5;
+    pub const MAX_ADDITIONAL: f64 = 0.7;
 }
 
 /// Retrieval strategy mode for composite scoring.
@@ -495,8 +495,8 @@ pub fn recency_weight(created_at: DateTime<Utc>, now: DateTime<Utc>, lambda: f64
 ///
 /// Hit rate is: referenced / surfaced (or 0.0 if never surfaced).
 ///
-/// Returns: 0.5 + (hit_rate × 0.5)
-/// Range: 0.5 (never referenced) to 1.0 (always referenced)
+/// Returns: 0.3 + (hit_rate × 0.7)
+/// Range: 0.3 (never referenced) to 1.0 (always referenced)
 pub fn reference_boost(hit_rate: f64) -> f64 {
     let clamped_rate = hit_rate.clamp(0.0, 1.0);
     reference::BASE_BOOST + (clamped_rate * reference::MAX_ADDITIONAL)
@@ -1263,7 +1263,7 @@ mod tests {
     #[test]
     fn test_reference_boost_never_referenced() {
         let boost = reference_boost(0.0);
-        assert!((boost - 0.5).abs() < f64::EPSILON);
+        assert!((boost - reference::BASE_BOOST).abs() < f64::EPSILON);
     }
 
     #[test]
@@ -1275,13 +1275,14 @@ mod tests {
     #[test]
     fn test_reference_boost_half_referenced() {
         let boost = reference_boost(0.5);
-        assert!((boost - 0.75).abs() < f64::EPSILON);
+        let expected = reference::BASE_BOOST + 0.5 * reference::MAX_ADDITIONAL;
+        assert!((boost - expected).abs() < f64::EPSILON);
     }
 
     #[test]
     fn test_reference_boost_clamps_negative() {
         let boost = reference_boost(-0.5);
-        assert!((boost - 0.5).abs() < f64::EPSILON);
+        assert!((boost - reference::BASE_BOOST).abs() < f64::EPSILON);
     }
 
     #[test]

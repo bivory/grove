@@ -541,7 +541,7 @@ pub struct CompositeScore {
     pub relevance: f64,
     /// The recency weight component (0.1 to 1.0).
     pub recency: f64,
-    /// The reference boost component (0.5 to 1.0).
+    /// The reference boost component (0.3 to 1.0).
     pub reference: f64,
     /// The final composite score.
     pub score: f64,
@@ -962,7 +962,7 @@ mod tests {
 
     #[test]
     fn test_score_multi_signal_beats_single_signal() {
-        // A learning matching on file (0.8) AND keyword (0.3) should score
+        // A learning matching on file (0.8) AND keyword (0.5) should score
         // higher than one matching only on file (0.8)
         let query = SearchQuery::new()
             .files(vec!["src/main.rs".to_string()])
@@ -1675,7 +1675,7 @@ mod tests {
 
     #[test]
     fn test_conservative_filters_keyword_only_matches() {
-        // Keyword matches (0.3) are below conservative threshold (0.8)
+        // Keyword matches (0.5) are below conservative threshold (0.8)
         let query = SearchQuery::with_keywords(vec!["database".to_string()]);
 
         let learnings = vec![make_learning(
@@ -1697,7 +1697,7 @@ mod tests {
             recency::LAMBDA,
         );
 
-        // Keyword-only match (0.3) should be filtered by conservative (threshold 0.8)
+        // Keyword-only match (0.5) should be filtered by conservative (threshold 0.8)
         assert_eq!(ranked.len(), 0);
     }
 
@@ -1749,7 +1749,7 @@ mod tests {
             recency::LAMBDA,
         );
 
-        // Keyword match (0.3) should pass for moderate (threshold 0.0)
+        // Keyword match (0.5) should pass for moderate (threshold 0.0)
         assert_eq!(ranked.len(), 1);
     }
 

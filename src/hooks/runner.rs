@@ -650,15 +650,22 @@ impl<S: SessionStore> HookRunner<S> {
         };
 
         // Log dismissed events for unreferenced learnings.
-        // By default, only reflected sessions log dismissals. Skip is treated as
-        // no-signal because the user might skip for many reasons unrelated to
-        // learning quality (urgent meeting, context switch, etc.).
-        // However, if skip_counts_as_dismissal is enabled, skipped sessions also
-        // log dismissals (opt-in for users who want the old behavior).
-        let should_log_dismissals = match session.gate.status {
-            crate::core::state::GateStatus::Reflected => true,
-            crate::core::state::GateStatus::Skipped => self.config.gate.skip_counts_as_dismissal,
-            _ => false,
+        // Per design (01-architecture.md §SessionEnd), dismissed events are emitted
+        // for ALL sessions that had learnings injected. Any learning still in Pending
+        // state was surfaced but never referenced — that's a dismissal signal.
+        //
+        // Exception: if gate status is Skipped and skip_counts_as_dismissal is false,
+        // we skip dismissal logging because the user explicitly skipped reflection
+        // (e.g., urgent meeting) and the skip is treated as no-signal.
+        let should_log_dismissals = if !session.gate.injected_learnings.is_empty() {
+            match session.gate.status {
+                crate::core::state::GateStatus::Skipped => {
+                    self.config.gate.skip_counts_as_dismissal
+                }
+                _ => true,
+            }
+        } else {
+            false
         };
 
         if should_log_dismissals {
@@ -2141,6 +2148,192 @@ This is a test learning that will be injected and also flagged as corrected.
             assert_eq!(learning_id, "L001");
         } else {
             panic!("Expected Dismissed event");
+        }
+    }
+
+    #[test]
+    fn test_session_end_idle_does_dismiss_unreferenced_learnings() {
+        // Idle sessions (no ticket closed) should still emit dismissed events
+        // for injected learnings. This is the primary source of feedback data.
+        use crate::core::state::{InjectedLearning, InjectionOutcome};
+
+        let runner = test_runner();
+
+        let start_input = r#"{
+            "session_id": "idle-dismiss-test",
+            "transcript_path": "/tmp/transcript.jsonl",
+            "cwd": "/tmp/project"
+        }"#;
+        runner
+            .run_with_input(HookType::SessionStart, start_input)
+            .unwrap();
+
+        // Set up session with injected learnings in Idle state (default)
+        let mut session = runner.store.get("idle-dismiss-test").unwrap().unwrap();
+        assert_eq!(session.gate.status, GateStatus::Idle);
+        session.gate.injected_learnings.push(InjectedLearning {
+            learning_id: "L001".to_string(),
+            score: 0.8,
+            outcome: InjectionOutcome::Pending,
+        });
+        session.gate.injected_learnings.push(InjectedLearning {
+            learning_id: "L002".to_string(),
+            score: 0.7,
+            outcome: InjectionOutcome::Referenced,
+        });
+        runner.store.put(&session).unwrap();
+
+        let end_input = r#"{
+            "session_id": "idle-dismiss-test",
+            "transcript_path": "/tmp/transcript.jsonl",
+            "cwd": "/tmp/project",
+            "reason": "user_exit"
+        }"#;
+        runner
+            .run_with_input(HookType::SessionEnd, end_input)
+            .unwrap();
+
+        // Session state preserved
+        let session = runner.store.get("idle-dismiss-test").unwrap().unwrap();
+        assert_eq!(session.gate.injected_learnings.len(), 2);
+    }
+
+    #[test]
+    fn test_session_end_idle_writes_dismissed_events_to_log() {
+        // Integration test: verify stats log IS written for idle sessions
+        use crate::core::state::{InjectedLearning, InjectionOutcome};
+        use crate::storage::FileSessionStore;
+
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let session_dir = temp_dir.path().join("sessions");
+        let grove_dir = temp_dir.path().join(".grove");
+        std::fs::create_dir_all(&grove_dir).unwrap();
+
+        let store = FileSessionStore::with_dir(&session_dir).unwrap();
+        let runner = HookRunner::new(store, Config::default());
+        let cwd = temp_dir.path().to_str().unwrap();
+
+        let start_input = format!(
+            r#"{{
+            "session_id": "idle-log-test",
+            "transcript_path": "/tmp/transcript.jsonl",
+            "cwd": "{}"
+        }}"#,
+            cwd
+        );
+        runner
+            .run_with_input(HookType::SessionStart, &start_input)
+            .unwrap();
+
+        // Session stays in Idle state — no ticket was closed
+        let mut session = runner.store.get("idle-log-test").unwrap().unwrap();
+        assert_eq!(session.gate.status, GateStatus::Idle);
+        session.gate.injected_learnings.push(InjectedLearning {
+            learning_id: "L001".to_string(),
+            score: 0.8,
+            outcome: InjectionOutcome::Pending,
+        });
+        session.gate.injected_learnings.push(InjectedLearning {
+            learning_id: "L002".to_string(),
+            score: 0.7,
+            outcome: InjectionOutcome::Referenced,
+        });
+        runner.store.put(&session).unwrap();
+
+        let end_input = format!(
+            r#"{{
+            "session_id": "idle-log-test",
+            "transcript_path": "/tmp/transcript.jsonl",
+            "cwd": "{}",
+            "reason": "user_exit"
+        }}"#,
+            cwd
+        );
+        runner
+            .run_with_input(HookType::SessionEnd, &end_input)
+            .unwrap();
+
+        // Verify dismissed event was logged for L001 only
+        let stats_path = grove_dir.join("stats.log");
+        assert!(
+            stats_path.exists(),
+            "Stats log should exist after idle session with injected learnings"
+        );
+
+        let events = crate::stats::StatsLogger::new(&stats_path)
+            .read_all()
+            .unwrap();
+        let dismissed: Vec<_> = events
+            .iter()
+            .filter(|e| e.data.event_name() == "dismissed")
+            .collect();
+
+        assert_eq!(
+            dismissed.len(),
+            1,
+            "Should have exactly 1 dismissed event (L001 pending, L002 referenced)"
+        );
+
+        if let crate::stats::StatsEventType::Dismissed { learning_id, .. } = &dismissed[0].data {
+            assert_eq!(learning_id, "L001");
+        } else {
+            panic!("Expected Dismissed event");
+        }
+    }
+
+    #[test]
+    fn test_session_end_no_injected_learnings_no_dismissed_events() {
+        // When no learnings were injected, no dismissed events should be emitted
+        use crate::storage::FileSessionStore;
+
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let session_dir = temp_dir.path().join("sessions");
+        let grove_dir = temp_dir.path().join(".grove");
+        std::fs::create_dir_all(&grove_dir).unwrap();
+
+        let store = FileSessionStore::with_dir(&session_dir).unwrap();
+        let runner = HookRunner::new(store, Config::default());
+        let cwd = temp_dir.path().to_str().unwrap();
+
+        let start_input = format!(
+            r#"{{
+            "session_id": "no-inject-test",
+            "transcript_path": "/tmp/transcript.jsonl",
+            "cwd": "{}"
+        }}"#,
+            cwd
+        );
+        runner
+            .run_with_input(HookType::SessionStart, &start_input)
+            .unwrap();
+
+        // No injected learnings — session ends normally
+        let end_input = format!(
+            r#"{{
+            "session_id": "no-inject-test",
+            "transcript_path": "/tmp/transcript.jsonl",
+            "cwd": "{}",
+            "reason": "user_exit"
+        }}"#,
+            cwd
+        );
+        runner
+            .run_with_input(HookType::SessionEnd, &end_input)
+            .unwrap();
+
+        let stats_path = grove_dir.join("stats.log");
+        if stats_path.exists() {
+            let events = crate::stats::StatsLogger::new(&stats_path)
+                .read_all()
+                .unwrap_or_default();
+            let dismissed: Vec<_> = events
+                .iter()
+                .filter(|e| e.data.event_name() == "dismissed")
+                .collect();
+            assert!(
+                dismissed.is_empty(),
+                "No dismissed events without injected learnings"
+            );
         }
     }
 

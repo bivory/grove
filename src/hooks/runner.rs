@@ -241,6 +241,14 @@ impl<S: SessionStore> HookRunner<S> {
 
                 for cs in &top_learnings {
                     let learning = &cs.learning;
+
+                    // Per-session dedup: skip learnings already surfaced in this session
+                    let already_injected = session
+                        .gate
+                        .injected_learnings
+                        .iter()
+                        .any(|il| il.learning_id == learning.id);
+
                     context_parts.push(format!(
                         "\n### {} [{}]\n**{}**\n{}\n",
                         learning.category.display_name(),
@@ -249,15 +257,20 @@ impl<S: SessionStore> HookRunner<S> {
                         learning.detail
                     ));
 
-                    // Record surfaced event with category for category-aware decay
-                    let _ =
-                        logger.append_surfaced(&learning.id, &session.id, Some(learning.category));
+                    if !already_injected {
+                        // Record surfaced event only once per session
+                        let _ = logger.append_surfaced(
+                            &learning.id,
+                            &session.id,
+                            Some(learning.category),
+                        );
 
-                    // Add to session's injected learnings
-                    session
-                        .gate
-                        .injected_learnings
-                        .push(InjectedLearning::new(&learning.id, cs.score));
+                        // Add to session's injected learnings
+                        session
+                            .gate
+                            .injected_learnings
+                            .push(InjectedLearning::new(&learning.id, cs.score));
+                    }
                 }
 
                 // Add citation guidance
@@ -2879,6 +2892,85 @@ This is a test learning that will be injected and also flagged as corrected.
             "Should respect min(config, strategy), got {}",
             session.gate.injected_learnings.len()
         );
+    }
+
+    // Per-session surfacing dedup tests
+
+    #[test]
+    fn test_session_start_deduplicates_surfaced_events() {
+        // When session-start is called twice, learnings already in
+        // injected_learnings should not get duplicate surfaced events
+        use crate::storage::FileSessionStore;
+
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let session_dir = temp_dir.path().join("sessions");
+        let grove_dir = temp_dir.path().join(".grove");
+        std::fs::create_dir_all(&grove_dir).unwrap();
+
+        let content = make_learnings_md(2, "2026-01-15T00:00:00Z");
+        std::fs::write(grove_dir.join("learnings.md"), &content).unwrap();
+
+        let store = FileSessionStore::with_dir(&session_dir).unwrap();
+        let runner = HookRunner::new(store, Config::default());
+        let cwd = temp_dir.path().to_str().unwrap();
+
+        let input = format!(
+            r#"{{"session_id":"dedup-test","transcript_path":"/tmp/t.jsonl","cwd":"{}"}}"#,
+            cwd
+        );
+
+        // First session-start: learnings are surfaced normally
+        runner
+            .run_with_input(HookType::SessionStart, &input)
+            .unwrap();
+
+        let session = runner.store.get("dedup-test").unwrap().unwrap();
+        let first_count = session.gate.injected_learnings.len();
+        assert!(first_count > 0, "Should have injected learnings");
+
+        // Second session-start (same session): should not duplicate
+        runner
+            .run_with_input(HookType::SessionStart, &input)
+            .unwrap();
+
+        let session = runner.store.get("dedup-test").unwrap().unwrap();
+        assert_eq!(
+            session.gate.injected_learnings.len(),
+            first_count,
+            "Should not duplicate injected learnings on re-entry"
+        );
+
+        // Verify stats log has each learning surfaced only once
+        let stats_path = grove_dir.join("stats.log");
+        if stats_path.exists() {
+            let events = crate::stats::StatsLogger::new(&stats_path)
+                .read_all()
+                .unwrap_or_default();
+            let surfaced: Vec<_> = events
+                .iter()
+                .filter(|e| e.data.event_name() == "surfaced")
+                .collect();
+
+            // Each learning should appear exactly once, not twice
+            for il in &session.gate.injected_learnings {
+                let count = surfaced
+                    .iter()
+                    .filter(|e| {
+                        if let crate::stats::StatsEventType::Surfaced { learning_id, .. } = &e.data
+                        {
+                            learning_id == &il.learning_id
+                        } else {
+                            false
+                        }
+                    })
+                    .count();
+                assert_eq!(
+                    count, 1,
+                    "Learning {} should be surfaced exactly once, got {}",
+                    il.learning_id, count
+                );
+            }
+        }
     }
 
     // Git context extraction tests

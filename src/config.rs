@@ -241,6 +241,8 @@ pub struct RetrievalConfig {
     pub max_injections: u32,
     /// Retrieval strategy: "conservative", "moderate", or "aggressive".
     pub strategy: String,
+    /// Below this number of active learnings, conservative downgrades to moderate.
+    pub min_pool_size: u32,
 }
 
 impl RetrievalConfig {
@@ -255,6 +257,7 @@ impl Default for RetrievalConfig {
         Self {
             max_injections: 5,
             strategy: "moderate".to_string(),
+            min_pool_size: 20,
         }
     }
 }
@@ -589,6 +592,9 @@ impl Config {
         }
         if other.retrieval.strategy != default_retrieval.strategy {
             self.retrieval.strategy = other.retrieval.strategy;
+        }
+        if other.retrieval.min_pool_size != default_retrieval.min_pool_size {
+            self.retrieval.min_pool_size = other.retrieval.min_pool_size;
         }
 
         // Circuit breaker: merge field by field
@@ -1272,6 +1278,7 @@ total-recall = false
             retrieval: RetrievalConfig {
                 max_injections: 10,
                 strategy: "conservative".to_string(),
+                min_pool_size: 20,
             },
             circuit_breaker: CircuitBreakerConfig {
                 max_blocks: 5,
@@ -1849,6 +1856,7 @@ max_blocks = 10
             retrieval: RetrievalConfig {
                 max_injections: 10,
                 strategy: "aggressive".to_string(),
+                ..Default::default()
             },
             ..Config::default()
         };

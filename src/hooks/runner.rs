@@ -145,7 +145,7 @@ impl<S: SessionStore> HookRunner<S> {
 
         // Get retrieval settings from config
         let max_injections = self.config.retrieval.max_injections;
-        let strategy = Strategy::parse(&self.config.retrieval.strategy).unwrap_or_default();
+        let mut strategy = Strategy::parse(&self.config.retrieval.strategy).unwrap_or_default();
 
         // Create primary backend and search for learnings
         let backend = create_primary_backend(cwd, Some(&self.config));
@@ -173,6 +173,13 @@ impl<S: SessionStore> HookRunner<S> {
 
         // Search and score learnings
         if let Ok(results) = backend.search(&query, &filters) {
+            // Downgrade conservative to moderate when pool is too small
+            if strategy == Strategy::Conservative
+                && (results.len() as u32) < self.config.retrieval.min_pool_size
+            {
+                strategy = Strategy::Moderate;
+            }
+
             let now = chrono::Utc::now();
             let logger = StatsLogger::new(&stats_path);
 
@@ -2736,6 +2743,8 @@ This is a test learning that will be injected and also flagged as corrected.
         config.retrieval.strategy = strategy.to_string();
         // Set max_injections high so only strategy cap limits results
         config.retrieval.max_injections = 20;
+        // Disable pool size relaxation so we test pure strategy behavior
+        config.retrieval.min_pool_size = 0;
         HookRunner::new(MemorySessionStore::new(), config)
     }
 
@@ -2890,6 +2899,85 @@ This is a test learning that will be injected and also flagged as corrected.
         assert!(
             session.gate.injected_learnings.len() <= 2,
             "Should respect min(config, strategy), got {}",
+            session.gate.injected_learnings.len()
+        );
+    }
+
+    #[test]
+    fn test_conservative_downgrades_to_moderate_below_min_pool_size() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let project_dir = temp.path();
+        let grove_dir = project_dir.join(".grove");
+        std::fs::create_dir_all(&grove_dir).unwrap();
+
+        // Create 5 learnings — well below default min_pool_size of 20
+        let content = make_learnings_md(5, "2026-01-15T00:00:00Z");
+        std::fs::write(grove_dir.join("learnings.md"), &content).unwrap();
+
+        // Conservative normally caps at 3, but with only 5 learnings
+        // (below min_pool_size=20), should downgrade to moderate (cap 5)
+        let mut config = Config::default();
+        config.retrieval.strategy = "conservative".to_string();
+        config.retrieval.max_injections = 20;
+        let runner = HookRunner::new(MemorySessionStore::new(), config);
+
+        let cwd = project_dir.to_str().unwrap();
+        let input = format!(
+            r#"{{"session_id":"pool-small","transcript_path":"/tmp/t.jsonl","cwd":"{}"}}"#,
+            cwd
+        );
+
+        let result = runner
+            .run_with_input(HookType::SessionStart, &input)
+            .unwrap();
+        let _output: SessionStartOutput = serde_json::from_str(&result).unwrap();
+
+        let session = runner.store.get("pool-small").unwrap().unwrap();
+        // With moderate behavior, should inject up to 5 (moderate cap)
+        // rather than just 3 (conservative cap)
+        assert!(
+            session.gate.injected_learnings.len() <= 5,
+            "Should use moderate cap (5), got {}",
+            session.gate.injected_learnings.len()
+        );
+        assert!(
+            session.gate.injected_learnings.len() > 3,
+            "Should have been relaxed from conservative cap of 3, got {}",
+            session.gate.injected_learnings.len()
+        );
+    }
+
+    #[test]
+    fn test_conservative_stays_conservative_above_min_pool_size() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let project_dir = temp.path();
+        let grove_dir = project_dir.join(".grove");
+        std::fs::create_dir_all(&grove_dir).unwrap();
+
+        // Create 25 learnings — above default min_pool_size of 20
+        let content = make_learnings_md(25, "2026-01-15T00:00:00Z");
+        std::fs::write(grove_dir.join("learnings.md"), &content).unwrap();
+
+        let mut config = Config::default();
+        config.retrieval.strategy = "conservative".to_string();
+        config.retrieval.max_injections = 20;
+        let runner = HookRunner::new(MemorySessionStore::new(), config);
+
+        let cwd = project_dir.to_str().unwrap();
+        let input = format!(
+            r#"{{"session_id":"pool-large","transcript_path":"/tmp/t.jsonl","cwd":"{}"}}"#,
+            cwd
+        );
+
+        let result = runner
+            .run_with_input(HookType::SessionStart, &input)
+            .unwrap();
+        let _output: SessionStartOutput = serde_json::from_str(&result).unwrap();
+
+        let session = runner.store.get("pool-large").unwrap().unwrap();
+        assert!(
+            session.gate.injected_learnings.len() <= 3,
+            "Should stay conservative (cap 3) with large pool, got {}",
             session.gate.injected_learnings.len()
         );
     }

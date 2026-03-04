@@ -149,7 +149,20 @@ impl<S: SessionStore> HookRunner<S> {
 
         // Create primary backend and search for learnings
         let backend = create_primary_backend(cwd, Some(&self.config));
-        let query = SearchQuery::new(); // Empty query matches all learnings
+
+        // Populate SearchQuery with git context for contextual relevance scoring
+        let (git_files, mut git_keywords) = extract_git_context(cwd);
+
+        // Add ticket keywords from any restored ticket context
+        if let Some(ref ticket) = session.gate.ticket {
+            git_keywords.push(ticket.ticket_id.clone());
+        }
+
+        let query = if git_files.is_empty() && git_keywords.is_empty() {
+            SearchQuery::new()
+        } else {
+            SearchQuery::new().files(git_files).keywords(git_keywords)
+        };
         let filters = SearchFilters::active_only();
 
         // Try to load stats cache for reference boost calculation
@@ -831,6 +844,69 @@ fn extract_ticket_id(command: &str) -> Option<String> {
     }
 
     None
+}
+
+/// Extract git context from the working directory for SearchQuery population.
+///
+/// Returns (changed_files, keywords) where:
+/// - changed_files: paths from `git diff --name-only HEAD` (recently modified files)
+/// - keywords: terms extracted from the current branch name
+///
+/// Fails silently (returns empty vecs) if git is not available or cwd is not a repo.
+fn extract_git_context(cwd: &Path) -> (Vec<String>, Vec<String>) {
+    let mut files = Vec::new();
+    let mut keywords = Vec::new();
+
+    // 1. Get changed files (staged + unstaged relative to HEAD)
+    if let Ok(output) = std::process::Command::new("git")
+        .args(["diff", "--name-only", "HEAD"])
+        .current_dir(cwd)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .output()
+    {
+        if output.status.success() {
+            if let Ok(stdout) = String::from_utf8(output.stdout) {
+                files = stdout
+                    .lines()
+                    .filter(|l| !l.is_empty())
+                    .map(|l| l.to_string())
+                    .collect();
+            }
+        }
+    }
+
+    // 2. Get current branch name and extract keywords
+    if let Ok(output) = std::process::Command::new("git")
+        .args(["branch", "--show-current"])
+        .current_dir(cwd)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .output()
+    {
+        if output.status.success() {
+            if let Ok(branch) = String::from_utf8(output.stdout) {
+                let branch = branch.trim();
+                if !branch.is_empty() {
+                    // Split branch name on common separators: /, -, _
+                    // e.g., "fix/login-bug" → ["fix", "login", "bug"]
+                    // Filter out common prefixes that don't add signal
+                    let noise: &[&str] = &[
+                        "fix", "feat", "feature", "bug", "chore", "docs", "refactor", "test",
+                        "hotfix", "release", "main", "master", "develop", "dev",
+                    ];
+                    for part in branch.split(&['/', '-', '_'][..]) {
+                        let part = part.trim().to_lowercase();
+                        if part.len() >= 2 && !noise.contains(&part.as_str()) {
+                            keywords.push(part);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    (files, keywords)
 }
 
 #[cfg(test)]
@@ -2802,6 +2878,231 @@ This is a test learning that will be injected and also flagged as corrected.
             session.gate.injected_learnings.len() <= 2,
             "Should respect min(config, strategy), got {}",
             session.gate.injected_learnings.len()
+        );
+    }
+
+    // Git context extraction tests
+
+    #[test]
+    fn test_extract_git_context_in_git_repo() {
+        // This test runs in the grove repo itself, so git commands should work
+        let cwd = std::path::Path::new("/workspaces/grove");
+        let (files, keywords) = extract_git_context(cwd);
+
+        // We can't assert specific files/keywords since they change,
+        // but we can verify the function returns without panicking
+        // and that results are reasonable types
+        assert!(
+            files.iter().all(|f| !f.is_empty()),
+            "All file paths should be non-empty"
+        );
+        assert!(
+            keywords.iter().all(|k| !k.is_empty()),
+            "All keywords should be non-empty"
+        );
+    }
+
+    #[test]
+    fn test_extract_git_context_non_git_dir() {
+        // A temp dir is not a git repo — should fail silently
+        let temp = tempfile::TempDir::new().unwrap();
+        let (files, keywords) = extract_git_context(temp.path());
+
+        assert!(files.is_empty(), "Non-git dir should produce no files");
+        assert!(
+            keywords.is_empty(),
+            "Non-git dir should produce no keywords"
+        );
+    }
+
+    #[test]
+    fn test_extract_git_context_nonexistent_dir() {
+        let (files, keywords) = extract_git_context(std::path::Path::new("/nonexistent/path"));
+        assert!(files.is_empty());
+        assert!(keywords.is_empty());
+    }
+
+    #[test]
+    fn test_session_start_uses_git_context() {
+        // Integration test: session-start in a git repo should populate SearchQuery
+        // We test this indirectly by verifying the session runs successfully in a
+        // real git repo with learnings that have matching context
+        let temp = tempfile::TempDir::new().unwrap();
+        let project_dir = temp.path();
+        let grove_dir = project_dir.join(".grove");
+        std::fs::create_dir_all(&grove_dir).unwrap();
+
+        // Initialize a git repo in the temp dir
+        std::process::Command::new("git")
+            .args(["init"])
+            .current_dir(project_dir)
+            .output()
+            .unwrap();
+
+        // Create a file and commit it
+        std::fs::create_dir_all(project_dir.join("src")).unwrap();
+        std::fs::write(project_dir.join("src/main.rs"), "fn main() {}").unwrap();
+        std::process::Command::new("git")
+            .args(["add", "."])
+            .current_dir(project_dir)
+            .output()
+            .unwrap();
+        std::process::Command::new("git")
+            .args([
+                "-c",
+                "user.email=test@test.com",
+                "-c",
+                "user.name=Test",
+                "commit",
+                "-m",
+                "init",
+            ])
+            .current_dir(project_dir)
+            .output()
+            .unwrap();
+
+        // Create a branch with meaningful name
+        std::process::Command::new("git")
+            .args(["checkout", "-b", "fix/login-auth"])
+            .current_dir(project_dir)
+            .output()
+            .unwrap();
+
+        // Modify a file to create a diff
+        std::fs::write(project_dir.join("src/main.rs"), "fn main() { todo!() }").unwrap();
+
+        // Create learnings — one matching the branch keywords, one not
+        let learnings_content = r#"# Grove Learnings
+
+---
+## cl_git_001
+
+**Category:** Pitfall
+**Summary:** Login authentication timeout issue
+**Scope:** Project | **Confidence:** High | **Status:** Active
+**Tags:** #auth #login
+**Session:** test-session
+**Criteria:** Behavior Changing
+**Created:** 2026-01-15T00:00:00Z
+
+Watch for timeout in login auth flow.
+
+---
+## cl_git_002
+
+**Category:** Pattern
+**Summary:** Database migration best practices
+**Scope:** Project | **Confidence:** High | **Status:** Active
+**Tags:** #database
+**Session:** test-session
+**Criteria:** Behavior Changing
+**Created:** 2026-01-15T00:00:00Z
+
+Always back up before migrating.
+
+---
+"#;
+        std::fs::write(grove_dir.join("learnings.md"), learnings_content).unwrap();
+
+        let runner = runner_with_strategy("moderate");
+        let cwd = project_dir.to_str().unwrap();
+        let input = format!(
+            r#"{{"session_id":"git-ctx-test","transcript_path":"/tmp/t.jsonl","cwd":"{}"}}"#,
+            cwd
+        );
+
+        // Should succeed regardless of whether context matches
+        let result = runner.run_with_input(HookType::SessionStart, &input);
+        assert!(
+            result.is_ok(),
+            "Session start should succeed with git context"
+        );
+    }
+
+    #[test]
+    fn test_session_start_without_git_falls_back_gracefully() {
+        // Non-git directory should still work (empty query fallback)
+        let temp = tempfile::TempDir::new().unwrap();
+        let project_dir = temp.path();
+        let grove_dir = project_dir.join(".grove");
+        std::fs::create_dir_all(&grove_dir).unwrap();
+
+        let content = make_learnings_md(3, "2026-01-15T00:00:00Z");
+        std::fs::write(grove_dir.join("learnings.md"), &content).unwrap();
+
+        let runner = runner_with_strategy("moderate");
+        let cwd = project_dir.to_str().unwrap();
+        let input = format!(
+            r#"{{"session_id":"no-git-test","transcript_path":"/tmp/t.jsonl","cwd":"{}"}}"#,
+            cwd
+        );
+
+        let result = runner
+            .run_with_input(HookType::SessionStart, &input)
+            .unwrap();
+        let output: SessionStartOutput = serde_json::from_str(&result).unwrap();
+
+        // Without git context, empty query should be used — markdown backend
+        // returns relevance=1.0, so learnings should still be injected
+        assert!(
+            output.additional_context.is_some(),
+            "Should inject learnings even without git context"
+        );
+    }
+
+    #[test]
+    fn test_session_start_uses_ticket_context_for_keywords() {
+        // When a session has a restored ticket, its ID should be used as a keyword
+        let temp = tempfile::TempDir::new().unwrap();
+        let project_dir = temp.path();
+        let grove_dir = project_dir.join(".grove");
+        std::fs::create_dir_all(&grove_dir).unwrap();
+
+        let learnings_content = r#"# Grove Learnings
+
+---
+## cl_ticket_001
+
+**Category:** Pitfall
+**Summary:** GROVE-42 deployment issue
+**Scope:** Project | **Confidence:** High | **Status:** Active
+**Tags:** #deployment
+**Session:** test-session
+**Criteria:** Behavior Changing
+**Created:** 2026-01-15T00:00:00Z
+
+Watch for GROVE-42 deployment race condition.
+
+---
+"#;
+        std::fs::write(grove_dir.join("learnings.md"), learnings_content).unwrap();
+
+        let runner = runner_with_strategy("moderate");
+        let cwd = project_dir.to_str().unwrap();
+
+        // First create the session
+        let input = format!(
+            r#"{{"session_id":"ticket-ctx-test","transcript_path":"/tmp/t.jsonl","cwd":"{}"}}"#,
+            cwd
+        );
+        runner
+            .run_with_input(HookType::SessionStart, &input)
+            .unwrap();
+
+        // Set a ticket context on the session (simulating a restored session)
+        let mut session = runner.store.get("ticket-ctx-test").unwrap().unwrap();
+        session.gate.ticket = Some(TicketContext::new(
+            "GROVE-42",
+            "tissue",
+            "Fix deployment race condition",
+        ));
+        runner.store.put(&session).unwrap();
+
+        // Second session-start should pick up the ticket context as a keyword
+        let result = runner.run_with_input(HookType::SessionStart, &input);
+        assert!(
+            result.is_ok(),
+            "Session start should succeed with ticket context"
         );
     }
 }

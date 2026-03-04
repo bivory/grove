@@ -192,10 +192,23 @@ impl Strategy {
     }
 }
 
+/// Diminishing return multipliers for multi-signal scoring.
+///
+/// When multiple signals match, secondary and tertiary signals contribute
+/// at reduced rates to break ties without inflating scores.
+mod diminishing {
+    pub const SECONDARY: f64 = 0.3;
+    pub const TERTIARY: f64 = 0.1;
+}
+
 /// Calculate the relevance score of a learning for a given query.
 ///
-/// Uses max-based combination: returns the highest score among all
-/// matching criteria rather than summing scores.
+/// Uses additive scoring with diminishing returns: the strongest signal
+/// gets full weight, the second-strongest gets 30%, and the third gets 10%.
+/// Result is capped at 1.0 to maintain a normalized [0, 1] range.
+///
+/// This gives multi-signal matches a tiebreaking advantage over single-signal
+/// matches while preserving relative ordering.
 ///
 /// Returns 0.0 if no criteria match.
 pub fn score(query: &SearchQuery, learning: &CompoundLearning) -> f64 {
@@ -203,28 +216,49 @@ pub fn score(query: &SearchQuery, learning: &CompoundLearning) -> f64 {
         return 0.0;
     }
 
-    let mut max_score = 0.0f64;
+    let mut signals = Vec::new();
 
     // Score tag matches
-    max_score = max_score.max(score_tags(&query.tags, &learning.tags));
+    let tag_score = score_tags(&query.tags, &learning.tags);
+    if tag_score > 0.0 {
+        signals.push(tag_score);
+    }
 
     // Score file path overlaps
     if let Some(context_files) = &learning.context_files {
-        max_score = max_score.max(score_files(&query.files, context_files));
-    }
-
-    // Score keyword matches in summary
-    max_score = max_score.max(score_keywords(&query.keywords, &learning.summary));
-
-    // Score keyword matches in detail (lower weight than summary)
-    if !learning.detail.is_empty() {
-        let detail_score = score_keywords(&query.keywords, &learning.detail);
-        if detail_score > 0.0 {
-            max_score = max_score.max(weights::KEYWORD_DETAIL);
+        let file_score = score_files(&query.files, context_files);
+        if file_score > 0.0 {
+            signals.push(file_score);
         }
     }
 
-    max_score
+    // Score keyword matches (best of summary and detail)
+    let mut keyword_score = score_keywords(&query.keywords, &learning.summary);
+    if !learning.detail.is_empty() && keyword_score < weights::KEYWORD_SUMMARY {
+        let detail_score = score_keywords(&query.keywords, &learning.detail);
+        if detail_score > 0.0 {
+            keyword_score = keyword_score.max(weights::KEYWORD_DETAIL);
+        }
+    }
+    if keyword_score > 0.0 {
+        signals.push(keyword_score);
+    }
+
+    if signals.is_empty() {
+        return 0.0;
+    }
+
+    // Sort descending so strongest signal is first
+    signals.sort_by(|a, b| b.partial_cmp(a).unwrap_or(std::cmp::Ordering::Equal));
+
+    let multipliers = [1.0, diminishing::SECONDARY, diminishing::TERTIARY];
+    let combined: f64 = signals
+        .iter()
+        .zip(multipliers.iter())
+        .map(|(score, mult)| score * mult)
+        .sum();
+
+    combined.min(1.0)
 }
 
 /// Score tag matches between query tags and learning tags.
@@ -886,16 +920,41 @@ mod tests {
     // Combined scoring tests
 
     #[test]
-    fn test_score_uses_max_not_sum() {
+    fn test_score_additive_with_diminishing_returns() {
         // Query matches on both tags (1.0) and keywords (0.3)
-        // Should return max (1.0), not sum (1.3)
+        // Additive: 1.0 + 0.3*0.3 = 1.09 -> capped at 1.0
         let query = SearchQuery::new()
             .tags(vec!["rust".to_string()])
             .keywords(vec!["error".to_string()]);
         let learning = make_learning("Handle error", vec!["rust"], None);
 
         let s = score(&query, &learning);
-        assert!((s - weights::TAG_EXACT).abs() < f64::EPSILON);
+        assert!((s - 1.0).abs() < f64::EPSILON, "Should cap at 1.0, got {s}");
+    }
+
+    #[test]
+    fn test_score_multi_signal_beats_single_signal() {
+        // A learning matching on file (0.8) AND keyword (0.3) should score
+        // higher than one matching only on file (0.8)
+        let query = SearchQuery::new()
+            .files(vec!["src/main.rs".to_string()])
+            .keywords(vec!["error".to_string()]);
+
+        let multi = make_learning("Handle error", vec!["test"], Some(vec!["src/main.rs"]));
+        let single = make_learning("Other thing", vec!["test"], Some(vec!["src/main.rs"]));
+
+        let multi_score = score(&query, &multi);
+        let single_score = score(&query, &single);
+        assert!(
+            multi_score > single_score,
+            "Multi-signal ({multi_score}) should beat single-signal ({single_score})"
+        );
+        // file(0.8) + 0.3*keyword(0.3) = 0.8 + 0.09 = 0.89
+        let expected = 0.8 + 0.3 * 0.3;
+        assert!(
+            (multi_score - expected).abs() < f64::EPSILON,
+            "Expected {expected}, got {multi_score}"
+        );
     }
 
     #[test]
@@ -908,16 +967,20 @@ mod tests {
     }
 
     #[test]
-    fn test_score_multiple_matches_picks_highest() {
+    fn test_score_multiple_matches_additive() {
         // Query matches partial tag (0.5) and file (0.8)
-        // Should return 0.8
+        // Additive: 0.8 + 0.3*0.5 = 0.95
         let query = SearchQuery::new()
             .tags(vec!["err".to_string()])
             .files(vec!["src/main.rs".to_string()]);
         let learning = make_learning("Test", vec!["error"], Some(vec!["src/main.rs"]));
 
         let s = score(&query, &learning);
-        assert!((s - weights::FILE_OVERLAP).abs() < f64::EPSILON);
+        let expected = weights::FILE_OVERLAP + diminishing::SECONDARY * weights::TAG_PARTIAL;
+        assert!(
+            (s - expected).abs() < f64::EPSILON,
+            "Expected {expected}, got {s}"
+        );
     }
 
     // Ranking tests

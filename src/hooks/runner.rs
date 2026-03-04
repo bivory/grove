@@ -257,7 +257,12 @@ impl<S: SessionStore> HookRunner<S> {
                 "[CORRECTION NOTICE] The following learnings have been corrected since you may have last seen them:\n{}",
                 correction_notices.join("\n")
             );
-            additional_context = Some(notice);
+            // Append correction notices to any existing context (e.g., injected learnings)
+            // rather than overwriting it
+            additional_context = Some(match additional_context.take() {
+                Some(ctx) => format!("{}\n\n{}", ctx, notice),
+                None => notice,
+            });
             session.add_trace(
                 EventType::CorrectionNotice,
                 Some(format!("count: {}", correction_notices.len())),
@@ -1449,6 +1454,126 @@ mod tests {
         // since injected_learnings are set after session creation)
         //
         // The actual integration is tested via the trace event check above.
+    }
+
+    #[test]
+    fn test_correction_notices_append_to_learning_injections() {
+        use crate::stats::StatsLogger;
+        use tempfile::TempDir;
+
+        let temp = TempDir::new().unwrap();
+        let project_dir = temp.path();
+        let grove_dir = project_dir.join(".grove");
+        std::fs::create_dir_all(&grove_dir).unwrap();
+
+        // Create a learnings.md file with one learning
+        let learnings_content = r#"# Grove Learnings
+
+---
+## cl_test_001
+
+**Category:** Pitfall
+**Summary:** Test learning for correction notice test
+**Scope:** Project | **Confidence:** High | **Status:** Active
+**Tags:** #testing
+**Session:** test-session
+**Criteria:** Behavior Changing
+**Created:** 2026-01-01T00:00:00Z
+
+This is a test learning that will be injected and also flagged as corrected.
+
+---
+"#;
+        std::fs::write(grove_dir.join("learnings.md"), learnings_content).unwrap();
+
+        // Create stats log with a corrected event for this learning
+        let stats_log_path = grove_dir.join("stats.log");
+        let logger = StatsLogger::new(&stats_log_path);
+        logger
+            .append_surfaced("cl_test_001", "old-session", None)
+            .unwrap();
+        logger
+            .append_corrected("cl_test_001", "correction-session", None)
+            .unwrap();
+
+        // Build cache so correction notices can be detected
+        let cache_path = grove_dir.join("stats-cache.json");
+        let cache_manager = crate::stats::StatsCacheManager::new(&cache_path, &stats_log_path);
+        let _ = cache_manager.load_or_rebuild().unwrap();
+
+        // Create a runner with default config (markdown backend)
+        let runner = test_runner();
+        let cwd = project_dir.to_str().unwrap();
+
+        // First session-start: injects the learning
+        let input = format!(
+            r#"{{
+                "session_id": "correction-append-test",
+                "transcript_path": "/tmp/transcript.jsonl",
+                "cwd": "{}"
+            }}"#,
+            cwd
+        );
+        let result = runner
+            .run_with_input(HookType::SessionStart, &input)
+            .unwrap();
+        let output: SessionStartOutput = serde_json::from_str(&result).unwrap();
+
+        // The learning should be injected (additional_context should have it)
+        assert!(
+            output.additional_context.is_some(),
+            "Should have additional context from learning injection"
+        );
+
+        let context = output.additional_context.unwrap();
+
+        // Verify learning injection content is present
+        assert!(
+            context.contains("Relevant Learnings"),
+            "Should contain learning injection header, got: {:?}",
+            context
+        );
+        assert!(
+            context.contains("cl_test_001"),
+            "Should contain the learning ID, got: {:?}",
+            context
+        );
+
+        // Now the session should have cl_test_001 in injected_learnings.
+        // When session-start runs again, it will:
+        // 1. Restore the session (which has injected_learnings from first run)
+        // 2. Re-inject learnings (overwriting injected_learnings)
+        // 3. Check correction notices against session.gate.injected_learnings
+        //
+        // Since cl_test_001 is both injected AND corrected, correction notice fires.
+        let result2 = runner
+            .run_with_input(HookType::SessionStart, &input)
+            .unwrap();
+        let output2: SessionStartOutput = serde_json::from_str(&result2).unwrap();
+
+        assert!(
+            output2.additional_context.is_some(),
+            "Should have additional context on second call"
+        );
+
+        let context2 = output2.additional_context.unwrap();
+
+        // Verify BOTH learning injection AND correction notice are present
+        assert!(
+            context2.contains("Relevant Learnings"),
+            "Should still contain learning injection, got: {:?}",
+            context2
+        );
+        assert!(
+            context2.contains("CORRECTION NOTICE"),
+            "Should also contain correction notice, got: {:?}",
+            context2
+        );
+        assert!(
+            context2.contains("cl_test_001"),
+            "Should contain the learning ID in context, got: {:?}",
+            context2
+        );
     }
 
     // Additional ticketing system tests

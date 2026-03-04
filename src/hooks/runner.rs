@@ -21,7 +21,7 @@ use crate::hooks::input::{
     parse_input, HookInput, PostToolUseInput, PreToolUseInput, SessionEndInput, TaskCompletedInput,
 };
 use crate::hooks::output::{PreToolUseOutput, SessionEndOutput, SessionStartOutput, StopOutput};
-use crate::stats::scoring::{recency_weight, reference_boost, CompositeScore, Strategy};
+use crate::stats::scoring::{recency, recency_weight, reference_boost, CompositeScore, Strategy};
 use crate::stats::{StatsCacheManager, StatsLogger};
 use crate::storage::SessionStore;
 use tracing::warn;
@@ -163,10 +163,26 @@ impl<S: SessionStore> HookRunner<S> {
             let now = chrono::Utc::now();
             let logger = StatsLogger::new(&stats_path);
 
-            // Build composite scores
+            // Build composite scores with strategy-aware filtering
+            let min_threshold = strategy.min_relevance_threshold();
             let mut scored: Vec<CompositeScore> = results
                 .into_iter()
-                .map(|result| {
+                .filter_map(|result| {
+                    // Check if this learning qualifies based on strategy
+                    let qualifies = if result.relevance >= min_threshold && result.relevance > 0.0 {
+                        true
+                    } else if strategy.includes_recent_without_match() {
+                        // Aggressive mode: include recent learnings even without match
+                        let days_old = (now - result.learning.timestamp).num_days();
+                        (0..=recency::AGGRESSIVE_RECENT_DAYS).contains(&days_old)
+                    } else {
+                        false
+                    };
+
+                    if !qualifies {
+                        return None;
+                    }
+
                     // Get reference stats from cache
                     let (surfaced, referenced) = cache
                         .as_ref()
@@ -182,13 +198,13 @@ impl<S: SessionStore> HookRunner<S> {
                     };
                     let ref_boost = reference_boost(hit_rate);
 
-                    CompositeScore::new(
+                    Some(CompositeScore::new(
                         result.learning,
                         result.relevance,
                         recency,
                         ref_boost,
                         strategy,
-                    )
+                    ))
                 })
                 .collect();
 
@@ -199,8 +215,9 @@ impl<S: SessionStore> HookRunner<S> {
                     .unwrap_or(std::cmp::Ordering::Equal)
             });
 
-            // Take top N
-            let top_learnings: Vec<_> = scored.into_iter().take(max_injections as usize).collect();
+            // Take top N, respecting strategy cap
+            let effective_limit = (max_injections as usize).min(strategy.default_max_injections());
+            let top_learnings: Vec<_> = scored.into_iter().take(effective_limit).collect();
 
             if !top_learnings.is_empty() {
                 // Build injection context
@@ -2408,6 +2425,190 @@ This is a test learning that will be injected and also flagged as corrected.
         assert!(
             context.contains("grove reflect"),
             "Should still have resolution commands"
+        );
+    }
+
+    // Strategy-aware injection tests
+
+    /// Helper: create N learnings in markdown format with controllable timestamps.
+    fn make_learnings_md(count: usize, created: &str) -> String {
+        let mut md = "# Grove Learnings\n".to_string();
+        for i in 1..=count {
+            md.push_str(&format!(
+                "\n---\n## cl_cap_{i:03}\n\n\
+                 **Category:** Pattern\n\
+                 **Summary:** Strategy test learning {i}\n\
+                 **Scope:** Project | **Confidence:** High | **Status:** Active\n\
+                 **Tags:** #testing\n\
+                 **Session:** test-session\n\
+                 **Criteria:** Behavior Changing\n\
+                 **Created:** {created}\n\n\
+                 Detail for learning {i}.\n\n---\n"
+            ));
+        }
+        md
+    }
+
+    fn runner_with_strategy(strategy: &str) -> HookRunner<MemorySessionStore> {
+        let mut config = Config::default();
+        config.retrieval.strategy = strategy.to_string();
+        // Set max_injections high so only strategy cap limits results
+        config.retrieval.max_injections = 20;
+        HookRunner::new(MemorySessionStore::new(), config)
+    }
+
+    #[test]
+    fn test_conservative_strategy_caps_at_3() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let project_dir = temp.path();
+        let grove_dir = project_dir.join(".grove");
+        std::fs::create_dir_all(&grove_dir).unwrap();
+
+        // Create 6 learnings — more than conservative's cap of 3
+        let content = make_learnings_md(6, "2026-01-15T00:00:00Z");
+        std::fs::write(grove_dir.join("learnings.md"), &content).unwrap();
+
+        let runner = runner_with_strategy("conservative");
+        let cwd = project_dir.to_str().unwrap();
+        let input = format!(
+            r#"{{"session_id":"cap-cons","transcript_path":"/tmp/t.jsonl","cwd":"{}"}}"#,
+            cwd
+        );
+
+        let result = runner
+            .run_with_input(HookType::SessionStart, &input)
+            .unwrap();
+        let output: SessionStartOutput = serde_json::from_str(&result).unwrap();
+
+        // With empty query, markdown backend returns relevance=1.0 for all,
+        // which exceeds conservative's threshold (0.8). Cap should limit to 3.
+        if let Some(ctx) = &output.additional_context {
+            let injection_count = ctx.matches("cl_cap_").count();
+            assert!(
+                injection_count <= 3,
+                "Conservative should cap at 3, got {injection_count}"
+            );
+        }
+        // Verify via injected_learnings on the session
+        let session = runner.store.get("cap-cons").unwrap().unwrap();
+        assert!(
+            session.gate.injected_learnings.len() <= 3,
+            "Conservative should inject at most 3, got {}",
+            session.gate.injected_learnings.len()
+        );
+    }
+
+    #[test]
+    fn test_moderate_strategy_caps_at_5() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let project_dir = temp.path();
+        let grove_dir = project_dir.join(".grove");
+        std::fs::create_dir_all(&grove_dir).unwrap();
+
+        // Create 8 learnings — more than moderate's cap of 5
+        let content = make_learnings_md(8, "2026-01-15T00:00:00Z");
+        std::fs::write(grove_dir.join("learnings.md"), &content).unwrap();
+
+        let runner = runner_with_strategy("moderate");
+        let cwd = project_dir.to_str().unwrap();
+        let input = format!(
+            r#"{{"session_id":"cap-mod","transcript_path":"/tmp/t.jsonl","cwd":"{}"}}"#,
+            cwd
+        );
+
+        let result = runner
+            .run_with_input(HookType::SessionStart, &input)
+            .unwrap();
+        let output: SessionStartOutput = serde_json::from_str(&result).unwrap();
+
+        if let Some(ctx) = &output.additional_context {
+            let injection_count = ctx.matches("cl_cap_").count();
+            assert!(
+                injection_count <= 5,
+                "Moderate should cap at 5, got {injection_count}"
+            );
+        }
+        let session = runner.store.get("cap-mod").unwrap().unwrap();
+        assert!(
+            session.gate.injected_learnings.len() <= 5,
+            "Moderate should inject at most 5, got {}",
+            session.gate.injected_learnings.len()
+        );
+    }
+
+    #[test]
+    fn test_aggressive_strategy_includes_recent_without_match() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let project_dir = temp.path();
+        let grove_dir = project_dir.join(".grove");
+        std::fs::create_dir_all(&grove_dir).unwrap();
+
+        // Create learnings with a recent timestamp (within 30 days of now)
+        let recent = chrono::Utc::now()
+            .checked_sub_signed(chrono::Duration::days(5))
+            .unwrap()
+            .format("%Y-%m-%dT%H:%M:%SZ")
+            .to_string();
+        let content = make_learnings_md(2, &recent);
+        std::fs::write(grove_dir.join("learnings.md"), &content).unwrap();
+
+        let runner = runner_with_strategy("aggressive");
+        let cwd = project_dir.to_str().unwrap();
+        let input = format!(
+            r#"{{"session_id":"cap-agg","transcript_path":"/tmp/t.jsonl","cwd":"{}"}}"#,
+            cwd
+        );
+
+        let result = runner
+            .run_with_input(HookType::SessionStart, &input)
+            .unwrap();
+        let output: SessionStartOutput = serde_json::from_str(&result).unwrap();
+
+        // Aggressive mode should include recent learnings
+        assert!(
+            output.additional_context.is_some(),
+            "Aggressive should inject recent learnings"
+        );
+        let ctx = output.additional_context.unwrap();
+        assert!(
+            ctx.contains("cl_cap_"),
+            "Aggressive should include recent learnings in context"
+        );
+    }
+
+    #[test]
+    fn test_config_max_injections_respected_alongside_strategy() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let project_dir = temp.path();
+        let grove_dir = project_dir.join(".grove");
+        std::fs::create_dir_all(&grove_dir).unwrap();
+
+        // Create 8 learnings
+        let content = make_learnings_md(8, "2026-01-15T00:00:00Z");
+        std::fs::write(grove_dir.join("learnings.md"), &content).unwrap();
+
+        // Aggressive caps at 10, but config max_injections=2 should win
+        let mut config = Config::default();
+        config.retrieval.strategy = "aggressive".to_string();
+        config.retrieval.max_injections = 2;
+        let runner = HookRunner::new(MemorySessionStore::new(), config);
+
+        let cwd = project_dir.to_str().unwrap();
+        let input = format!(
+            r#"{{"session_id":"cap-minmax","transcript_path":"/tmp/t.jsonl","cwd":"{}"}}"#,
+            cwd
+        );
+
+        let result = runner
+            .run_with_input(HookType::SessionStart, &input)
+            .unwrap();
+        let _output: SessionStartOutput = serde_json::from_str(&result).unwrap();
+
+        let session = runner.store.get("cap-minmax").unwrap().unwrap();
+        assert!(
+            session.gate.injected_learnings.len() <= 2,
+            "Should respect min(config, strategy), got {}",
+            session.gate.injected_learnings.len()
         );
     }
 }

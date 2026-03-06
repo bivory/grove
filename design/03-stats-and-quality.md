@@ -44,7 +44,7 @@ All events include a `v` (version) field for schema evolution.
 | Event | Fields | Written By |
 |-------|--------|------------|
 | `surfaced` | learning_id, session_id | `grove hook session-start` |
-| `referenced` | learning_id, session_id, ticket_id? | `grove reflect` |
+| `referenced` | learning_id, session_id, ticket_id? | `grove ref` or `grove reflect` |
 | `dismissed` | learning_id, session_id | `grove hook session-end` |
 | `corrected` | learning_id, session_id, superseded_by? | `grove reflect` or `grove maintain` |
 | `reflection` | session_id, candidates, accepted, categories[], ticket_id?, backend | `grove reflect` |
@@ -138,7 +138,7 @@ learning ID.
 | Event | How Detected | Hook |
 |-------|--------------|------|
 | **Surfaced** | `session-start` injects learning, appends event | SessionStart |
-| **Referenced** | `grove reflect` output includes "applied learning [ID]" | grove reflect |
+| **Referenced** | Agent runs `grove ref <ID>` or reflect includes "applied learning [ID]" | grove ref, grove reflect |
 | **Dismissed** | Injected learning not referenced by session end | SessionEnd |
 | **Corrected** | `grove reflect` output includes "corrected [ID]", or `grove maintain` | grove reflect / maintain |
 

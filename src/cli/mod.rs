@@ -8,6 +8,7 @@
 
 // Core commands
 pub mod observe;
+pub mod ref_cmd;
 pub mod reflect;
 pub mod skip;
 
@@ -33,6 +34,7 @@ pub use init::InitCommand;
 pub use list::ListCommand;
 pub use maintain::MaintainCommand;
 pub use observe::ObserveCommand;
+pub use ref_cmd::RefCommand;
 pub use reflect::ReflectCommand;
 pub use search::SearchCommand;
 pub use sessions::SessionsCommand;

@@ -561,6 +561,7 @@ Fallback mechanism — may not fire reliably in all configurations.
 | `grove hook <event>` | `cli/hook` | Hook runner, reads stdin JSON |
 | `grove reflect` | `cli/reflect` | Schema-validate reflection output, write gate filter, near-duplicate check, route to backend, append stats events |
 | `grove skip <reason>` | `cli/skip` | Record skip decision, set gate to Skipped |
+| `grove ref <ids>` | `cli/ref_cmd` | Record referenced learnings, append stats events |
 | `grove observe <note>` | `cli/observe` | Append subagent observation to session |
 | `grove search <query>` | `cli/search` | Search across all active backends |
 | `grove list` | `cli/list` | List recent learnings from active backend |

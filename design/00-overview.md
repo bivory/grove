@@ -119,6 +119,7 @@ Invoked by Claude Code via skills during a session.
 ```text
 grove reflect                  # Run compound reflection (structured extraction)
 grove skip "typo fix"          # Skip reflection with reason (logged to stats)
+grove ref <id> --session-id X  # Record that a surfaced learning was useful
 grove observe "auth ordering"  # Log subagent observation (no gate, append-only)
 ```
 

@@ -39,6 +39,6 @@ pub use util::{read_to_string_limited, read_to_string_with_limit, MAX_FILE_SIZE}
 // CLI commands
 pub use cli::{
     BackendsCommand, CleanCommand, DebugCommand, InitCommand, ListCommand, MaintainCommand,
-    ObserveCommand, ReflectCommand, SearchCommand, SkipCommand, StatsCommand, TicketsCommand,
-    TraceCommand,
+    ObserveCommand, RefCommand, ReflectCommand, SearchCommand, SkipCommand, StatsCommand,
+    TicketsCommand, TraceCommand,
 };

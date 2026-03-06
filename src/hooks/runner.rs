@@ -281,14 +281,11 @@ impl<S: SessionStore> HookRunner<S> {
                     }
                 }
 
-                // Add citation guidance
+                // Add citation guidance with session_id and grove ref command
                 context_parts.push("\n---\n".to_string());
+                context_parts.push(format!("*Session: {}*\n", session.id));
                 context_parts.push(
-                    "*If any of these learnings help you, mention them in your reflection:*\n"
-                        .to_string(),
-                );
-                context_parts.push(
-                    "*\"applied learning [ID]\" or use the `learnings_used` field.*\n".to_string(),
+                    format!("*When a learning above helps your work, run: `grove ref <ID> --session-id {}`*\n", session.id),
                 );
 
                 additional_context = Some(context_parts.join(""));
@@ -1657,6 +1654,23 @@ This is a test learning that will be injected and also flagged as corrected.
         assert!(
             context.contains("cl_test_001"),
             "Should contain the learning ID, got: {:?}",
+            context
+        );
+
+        // Verify citation guidance includes grove ref command and session ID
+        assert!(
+            context.contains("grove ref"),
+            "Should contain grove ref command in citation guidance, got: {:?}",
+            context
+        );
+        assert!(
+            context.contains("--session-id"),
+            "Should contain --session-id flag in citation guidance, got: {:?}",
+            context
+        );
+        assert!(
+            context.contains("correction-append-test"),
+            "Should contain session ID in citation guidance, got: {:?}",
             context
         );
 

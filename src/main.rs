@@ -95,6 +95,24 @@ enum Commands {
         lines_changed: Option<u32>,
     },
 
+    /// [Agent] Record that surfaced learnings were referenced
+    Ref {
+        /// Learning IDs that were referenced
+        learning_ids: Vec<String>,
+        /// Session ID to use
+        #[arg(long)]
+        session_id: String,
+        /// How the learning was used (optional context)
+        #[arg(long)]
+        how: Option<String>,
+        /// Output as JSON
+        #[arg(long, short)]
+        json: bool,
+        /// Suppress output
+        #[arg(long, short)]
+        quiet: bool,
+    },
+
     /// [Agent] Record a subagent observation
     Observe {
         /// The observation note
@@ -426,6 +444,13 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
             decider,
             lines_changed,
         } => run_skip(&session_id, &reason, json, quiet, decider, lines_changed),
+        Commands::Ref {
+            learning_ids,
+            session_id,
+            how,
+            json,
+            quiet,
+        } => run_ref(&session_id, &learning_ids, json, quiet, how),
         Commands::Observe {
             note,
             session_id,
@@ -626,6 +651,31 @@ fn run_skip(
     };
 
     let output = cmd.run(session_id, reason, &options);
+    let formatted = cmd.format_output(&output, &options);
+
+    if !formatted.is_empty() {
+        println!("{}", formatted);
+    }
+
+    Ok(success_to_exit_code(output.success))
+}
+
+fn run_ref(
+    session_id: &str,
+    learning_ids: &[String],
+    json: bool,
+    quiet: bool,
+    how: Option<String>,
+) -> Result<ExitCode, Box<dyn std::error::Error>> {
+    use grove::cli::ref_cmd::{RefCommand, RefOptions};
+
+    let config = Config::load();
+    let store = FileSessionStore::new()?;
+
+    let cmd = RefCommand::new(store, config);
+    let options = RefOptions { json, quiet, how };
+
+    let output = cmd.run(session_id, learning_ids, &options);
     let formatted = cmd.format_output(&output, &options);
 
     if !formatted.is_empty() {
@@ -1176,6 +1226,36 @@ mod tests {
                 }
             }
             _ => panic!("Expected Maintain command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_ref() {
+        let cli = Cli::parse_from([
+            "grove",
+            "ref",
+            "cl_001",
+            "cl_002",
+            "--session-id",
+            "test-123",
+            "--how",
+            "followed auth pattern",
+        ]);
+        match cli.command {
+            Commands::Ref {
+                learning_ids,
+                session_id,
+                how,
+                json,
+                quiet,
+            } => {
+                assert_eq!(learning_ids, vec!["cl_001", "cl_002"]);
+                assert_eq!(session_id, "test-123");
+                assert_eq!(how, Some("followed auth pattern".to_string()));
+                assert!(!json);
+                assert!(!quiet);
+            }
+            _ => panic!("Expected Ref command"),
         }
     }
 

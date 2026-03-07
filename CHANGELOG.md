@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-03-07
+
+### Added
+
+- `grove ref` command for agents to record when surfaced learnings are useful,
+  closing the scoring feedback loop (reference_boost) that previously had no signal
+- `--how` flag on `grove ref` for optional usage context (stored in trace events)
+- Git context injection at session-start: SearchQuery populated with recent
+  file paths and keywords from `git diff` for contextual relevance scoring
+- Keyword matching against learning detail text (not just summary/tags)
+- Configurable `recency_half_life_days` for tuning recency decay lambda
+- Configurable `min_pool_size` to relax strategy filtering when few learnings exist
+- Integration test for `grove ref` lifecycle
+- Skill documentation for `grove ref`
+
+### Changed
+
+- Session-start injection footer now shows session ID and `grove ref` command
+  instead of asking agents to mention learnings in reflections
+- Scoring model switched to additive with diminishing returns
+  (keyword summary weight raised from 0.3 to 0.5)
+- Reference boost range widened from [0.5, 1.0] to [0.3, 1.0]
+- Strategy system wired up for learning injection caps
+
+### Fixed
+
+- Whole-word matching for keyword relevance scoring (prevents partial matches)
+- Shared path component requirement for file matching (reduces false positives)
+- Per-session surfacing deduplication (prevents duplicate stats events)
+- Dismissed events now emitted for all sessions with injected learnings
+- Correction notices appended to learning context instead of overwriting
+- Stale comments referencing old constant values in scoring module
+
 ## [0.7.0] - 2026-02-18
 
 ### Added
@@ -193,7 +226,8 @@ Initial release of Grove, a compound learning gate for Claude Code.
 - Architecture design documents
 - Implementation task roadmap
 
-[Unreleased]: https://github.com/bivory/grove/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/bivory/grove/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/bivory/grove/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/bivory/grove/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/bivory/grove/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/bivory/grove/compare/v0.4.0...v0.5.0

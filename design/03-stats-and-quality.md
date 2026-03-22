@@ -39,6 +39,7 @@ All events include a `v` (version) field for schema evolution.
 {"v":1,"ts":"2026-02-06T11:00:00Z","event":"skip","session_id":"abc","reason":"auto: 2 lines, version bump","decider":"agent","lines_changed":2,"ticket_id":"T042"}
 {"v":1,"ts":"2026-02-06T11:00:00Z","event":"archived","learning_id":"L002","reason":"passive_decay"}
 {"v":1,"ts":"2026-02-06T11:00:00Z","event":"restored","learning_id":"L002"}
+{"v":1,"ts":"2026-02-06T12:00:00Z","event":"retroflect","session_id":"abc","claude_session_id":"550e8400-e29b-41d4-a716-446655440000","candidates":4,"accepted":2,"project_path":"/Users/dev/my-project"}
 ```
 
 | Event | Fields | Written By |
@@ -51,6 +52,7 @@ All events include a `v` (version) field for schema evolution.
 | `skip` | session_id, reason, decider, lines_changed, ticket_id? | `grove skip` |
 | `archived` | learning_id, reason | Passive decay check |
 | `restored` | learning_id | `grove maintain` |
+| `retroflect` | session_id, claude_session_id, candidates, accepted, project_path | `grove retroflect` |
 
 ### 1.3 Materialized Cache
 
@@ -231,8 +233,10 @@ backend:
 | Keyword in summary | 0.3 |
 | No match | 0.0 |
 
-Multiple matches are combined (max, not sum) to avoid over-weighting
-learnings that happen to match on many axes.
+Multiple matches are combined additively (`score +=`), capped at 1.0.
+The `stats::scoring::score` function uses a sorted-additive approach
+with diminishing returns: the strongest signal gets full weight (1.0×),
+the second gets 0.3×, and the third gets 0.1×, capped at 1.0.
 
 The query is a structured object containing: ticket title, ticket
 description, file paths from the current diff (or recent git log), and

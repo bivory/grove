@@ -85,6 +85,9 @@ echo '{"session_id":"test"}' \
 | Backend detection | markdown probe, priority ordering | Medium |
 | Retrieval scoring | Tag match, file match, keyword match, combined | Medium |
 | Decay evaluation | Under threshold, over threshold, immunity | Medium |
+| Session parsing | JSONL entry type filtering, cwd extraction, file path extraction | High |
+| Transcript condensation | Pair preservation, priority selection, small session pass-through | Medium |
+| LLM output parsing | Valid JSON, malformed JSON, empty response | High |
 
 ### 2.2 Integration Tests
 
@@ -100,6 +103,10 @@ echo '{"session_id":"test"}' \
 | Session listing | Empty dir, single session, multiple sessions, sort order | Medium |
 | Session cleanup | Age filter, orphan detection | Medium |
 | CLI commands | `grove reflect`, `grove skip`, `grove stats`, `grove list` | Medium |
+| Retroflect discovery | Project/current-dir/all modes, session grouping | Medium |
+| Retroflect filtering | Min-turns, already-analyzed skip, force override, subagent skip | Medium |
+| Retroflect cross-session dedup | Batch accumulation prevents duplicates across sessions | Medium |
+| Retroflect end-to-end | Mock LLM → validate → write → stats event | High |
 
 ### 2.3 Property-Based Tests (Phase 2)
 
@@ -1016,6 +1023,325 @@ rm -rf "$GROVE_HOME"
 | `hooks/*` | 75% |
 | `cli/*` | 60% |
 | Overall | 70% |
+
+## 7. Retroflect Tests
+
+### 7.1 Session Parsing Tests
+
+```rust
+#[cfg(test)]
+mod session_parsing_tests {
+    use super::*;
+
+    #[test]
+    fn extracts_user_text_skipping_tool_results() {
+        // JSONL with user message containing both text and tool_result blocks
+        // Should extract only text blocks
+    }
+
+    #[test]
+    fn extracts_assistant_text_skipping_thinking_and_tool_use() {
+        // JSONL with assistant message containing text, thinking, and tool_use
+        // Should extract only text blocks
+    }
+
+    #[test]
+    fn skips_queue_operation_entries() {
+        // JSONL with queue-operation entries mixed in
+        // Should produce no content from these entries
+    }
+
+    #[test]
+    fn skips_progress_entries() {
+        // JSONL with progress entries
+        // Should produce no content from these entries
+    }
+
+    #[test]
+    fn skips_system_entries() {
+        // JSONL with system entries
+        // Should produce no content from these entries
+    }
+
+    #[test]
+    fn skips_file_history_snapshot_entries() {
+        // JSONL with file-history-snapshot entries
+        // Should produce no content from these entries
+    }
+
+    #[test]
+    fn extracts_cwd_from_first_entry() {
+        // JSONL with cwd field in first entry
+        // Should populate project_cwd in SessionSummary
+    }
+
+    #[test]
+    fn extracts_file_paths_from_tool_inputs() {
+        // JSONL with Read/Write/Edit/Grep/Glob tool_use blocks
+        // Should extract file paths into file_paths vec
+    }
+
+    #[test]
+    fn counts_user_turns_correctly() {
+        // JSONL with N user messages
+        // user_turns should equal N
+    }
+
+    #[test]
+    fn handles_empty_session_file() {
+        // Empty JSONL file → None
+    }
+
+    #[test]
+    fn handles_malformed_jsonl_lines() {
+        // JSONL with some invalid JSON lines
+        // Should skip bad lines and parse the rest
+    }
+}
+```
+
+### 7.2 Transcript Condensation Tests
+
+```rust
+#[cfg(test)]
+mod condensation_tests {
+    use super::*;
+
+    #[test]
+    fn preserves_user_assistant_pairs() {
+        // When applying sliding window, pairs are never split
+    }
+
+    #[test]
+    fn prioritizes_longest_assistant_responses() {
+        // Window selection keeps pairs with longest assistant text
+    }
+
+    #[test]
+    fn small_session_sent_entirely() {
+        // Session under token budget is not truncated
+    }
+}
+```
+
+### 7.3 Path Encoding Tests
+
+```rust
+#[cfg(test)]
+mod path_encoding_tests {
+    use super::*;
+
+    #[test]
+    fn forward_encodes_known_paths() {
+        // /Users/dev/my-project → -Users-dev-my-project
+        // Verify correct session dir name
+    }
+
+    #[test]
+    fn handles_paths_with_dots_and_underscores() {
+        // /Users/dev/my.project_v2 → encoding is lossy
+        // Verify forward encoding matches Claude Code's behavior
+    }
+}
+```
+
+### 7.4 Discovery Tests
+
+```rust
+#[cfg(test)]
+mod discovery_tests {
+    use super::*;
+
+    #[test]
+    fn all_mode_discovers_multiple_projects() {
+        // Mock ~/.claude/projects/ with multiple dirs
+        // Each containing JSONL with different cwd values
+        // Should group sessions by project
+    }
+
+    #[test]
+    fn project_mode_finds_session_dir() {
+        // --project /path/to/project finds matching session dir
+    }
+
+    #[test]
+    fn current_dir_mode_requires_grove_init() {
+        // Current dir without .grove/ → error or prompt
+    }
+}
+```
+
+### 7.5 Filtering Tests
+
+```rust
+#[cfg(test)]
+mod filtering_tests {
+    use super::*;
+
+    #[test]
+    fn skips_sessions_below_min_turns() {
+        // Session with 2 user turns, min_turns=3 → skipped
+    }
+
+    #[test]
+    fn skips_already_retroflected_sessions() {
+        // Session with existing Retroflect stats event → skipped
+    }
+
+    #[test]
+    fn force_overrides_already_retroflected() {
+        // --force flag allows re-analysis of retroflected sessions
+    }
+
+    #[test]
+    fn skips_subagent_session_files() {
+        // Files in subdirectories are ignored
+        // Only top-level *.jsonl files are processed
+    }
+
+    #[test]
+    fn applies_limit() {
+        // --limit 5 with 20 eligible sessions → processes only 5
+    }
+}
+```
+
+### 7.6 LLM Output Parsing Tests
+
+```rust
+#[cfg(test)]
+mod llm_output_tests {
+    use super::*;
+
+    #[test]
+    fn parses_valid_json_candidates() {
+        // Well-formed JSON array of CandidateLearning → Vec<CandidateLearning>
+    }
+
+    #[test]
+    fn handles_malformed_json_gracefully() {
+        // Invalid JSON → session skipped with warning, no panic
+    }
+
+    #[test]
+    fn handles_empty_response() {
+        // LLM returns empty or "no learnings" → 0 candidates
+    }
+
+    #[test]
+    fn handles_partial_json() {
+        // JSON with some valid and some invalid candidates
+        // Valid ones should still be extracted
+    }
+}
+```
+
+### 7.7 Cross-Session Dedup Tests
+
+```rust
+#[cfg(test)]
+mod cross_session_dedup_tests {
+    use super::*;
+
+    #[test]
+    fn batch_accumulation_prevents_duplicates() {
+        // Session 1 produces learning A
+        // Session 2 produces learning A again
+        // Second instance should be rejected as duplicate
+    }
+
+    #[test]
+    fn dedup_includes_existing_learnings() {
+        // Existing learnings.md contains learning B
+        // Retroflect session produces learning B → rejected
+    }
+}
+```
+
+### 7.8 Provenance Tag Tests
+
+```rust
+#[cfg(test)]
+mod provenance_tests {
+    use super::*;
+
+    #[test]
+    fn injects_retroflect_tag_when_missing() {
+        // LLM output with tags ["rust", "async"] but no "retroflect"
+        // After injection → tags should include "retroflect"
+    }
+
+    #[test]
+    fn preserves_retroflect_tag_when_present() {
+        // LLM output already includes "retroflect" tag
+        // Should not duplicate → still exactly one "retroflect" tag
+    }
+}
+```
+
+### 7.9 Dry Run and Init Tests
+
+```rust
+#[cfg(test)]
+mod cli_flag_tests {
+    use super::*;
+
+    #[test]
+    fn dry_run_shows_candidates_without_writing() {
+        // --dry-run flag → no learnings written, no stats events
+    }
+
+    #[test]
+    fn init_flag_auto_creates_grove_dir() {
+        // --all --init → .grove/ created without per-project prompt
+    }
+
+    #[test]
+    fn all_without_init_prompts_per_project() {
+        // --all without --init → confirmation required for each
+        // project missing .grove/
+    }
+}
+```
+
+### 7.10 Retroflect Stats Event Tests
+
+```rust
+#[cfg(test)]
+mod retroflect_stats_tests {
+    use super::*;
+
+    #[test]
+    fn logs_retroflect_event_with_correct_fields() {
+        // After processing a session → stats.log contains retroflect event
+        // with claude_session_id, candidates, accepted, project_path
+    }
+
+    #[test]
+    fn parses_retroflect_event_from_jsonl() {
+        // Retroflect JSONL line → StatsEventType::Retroflect with all fields
+    }
+}
+```
+
+### 7.11 Cost Estimation Tests
+
+```rust
+#[cfg(test)]
+mod cost_estimation_tests {
+    use super::*;
+
+    #[test]
+    fn estimates_token_count_per_session() {
+        // N sessions → estimate displayed before confirmation
+    }
+
+    #[test]
+    fn yes_flag_skips_confirmation() {
+        // --yes flag bypasses cost prompt
+    }
+}
+```
 
 ## Related Documents
 

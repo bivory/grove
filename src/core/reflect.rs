@@ -11,6 +11,16 @@ use crate::core::learning::{
 };
 
 // =============================================================================
+// Type aliases
+// =============================================================================
+
+/// Type alias for the LLM judge function used to rescue borderline learnings.
+///
+/// Takes a `CompoundLearning` reference and returns an optional score (1-5).
+/// Returns `None` on failure (fail-open: accept).
+pub type JudgeFn = dyn Fn(&CompoundLearning) -> Option<f64>;
+
+// =============================================================================
 // Constants
 // =============================================================================
 
@@ -210,6 +220,9 @@ pub struct CandidateLearning {
     /// Optional context files.
     #[serde(default)]
     pub context_files: Option<Vec<String>>,
+    /// When/where this learning should be surfaced during retrieval.
+    #[serde(default)]
+    pub relevance_context: Option<String>,
 }
 
 fn default_scope() -> String {
@@ -346,6 +359,10 @@ pub fn validate_schema(
         learning = learning.with_context_files(files.clone());
     }
 
+    if let Some(ref ctx) = candidate.relevance_context {
+        learning = learning.with_relevance_context(ctx.clone());
+    }
+
     Ok(learning)
 }
 
@@ -389,6 +406,8 @@ pub struct WriteGateResult {
     pub plausibility: Vec<CriterionPlausibility>,
     /// Overall confidence in the criteria claims.
     pub confidence: WriteGateConfidence,
+    /// Specificity score from quality heuristics (if assessed).
+    pub specificity: Option<crate::core::quality::SpecificityScore>,
 }
 
 /// Plausibility assessment for a single criterion claim.
@@ -411,6 +430,8 @@ pub enum WriteGateConfidence {
     Medium,
     /// Weak evidence, but passing anyway (fail-open).
     Low,
+    /// Learning rejected due to low specificity score.
+    Rejected,
 }
 
 impl WriteGateResult {
@@ -425,6 +446,7 @@ impl WriteGateResult {
             criteria_claimed,
             plausibility,
             confidence,
+            specificity: None,
         }
     }
 
@@ -435,7 +457,14 @@ impl WriteGateResult {
             criteria_claimed: Vec::new(),
             plausibility: Vec::new(),
             confidence: WriteGateConfidence::Low,
+            specificity: None,
         }
+    }
+
+    /// Attach a specificity score to this result.
+    pub fn with_specificity(mut self, score: crate::core::quality::SpecificityScore) -> Self {
+        self.specificity = Some(score);
+        self
     }
 }
 
@@ -445,6 +474,25 @@ impl WriteGateResult {
 /// This is a heuristic check - the primary defense is stats tracking, not
 /// strict rejection. Therefore, this function is lenient and rarely rejects.
 pub fn validate_write_gate(learning: &CompoundLearning) -> WriteGateResult {
+    validate_write_gate_with_quality(
+        learning,
+        crate::core::quality::QualityCheckMode::Disabled,
+        crate::core::quality::DEFAULT_MIN_SPECIFICITY_SCORE,
+    )
+}
+
+/// Validate a learning against the write gate criteria with quality check.
+///
+/// When quality_mode is Enforce, learnings below min_specificity are rejected.
+/// When quality_mode is Warn, low-specificity learnings pass but are flagged.
+/// When quality_mode is Disabled, specificity is not checked.
+pub fn validate_write_gate_with_quality(
+    learning: &CompoundLearning,
+    quality_mode: crate::core::quality::QualityCheckMode,
+    min_specificity: f64,
+) -> WriteGateResult {
+    use crate::core::quality::{assess_specificity, QualityCheckMode};
+
     if learning.criteria_met.is_empty() {
         return WriteGateResult::fail();
     }
@@ -459,7 +507,7 @@ pub fn validate_write_gate(learning: &CompoundLearning) -> WriteGateResult {
 
     // Calculate confidence based on plausibility assessments
     let plausible_count = plausibility.iter().filter(|p| p.plausible).count();
-    let confidence = if plausible_count == learning.criteria_met.len() {
+    let mut confidence = if plausible_count == learning.criteria_met.len() {
         WriteGateConfidence::High
     } else if plausible_count > 0 {
         WriteGateConfidence::Medium
@@ -469,9 +517,60 @@ pub fn validate_write_gate(learning: &CompoundLearning) -> WriteGateResult {
         WriteGateConfidence::Low
     };
 
-    // Fail-open: only fail if no criteria were claimed at all
-    // (which shouldn't happen if schema validation passed)
-    WriteGateResult::pass(learning.criteria_met.clone(), plausibility, confidence)
+    // Assess specificity if quality check is not disabled
+    let specificity = match quality_mode {
+        QualityCheckMode::Disabled => None,
+        QualityCheckMode::Enforce | QualityCheckMode::Warn => {
+            // Fail-open: any error in specificity scoring -> pass the learning
+            let score = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                assess_specificity(learning)
+            }));
+            match score {
+                Ok(s) => Some(s),
+                Err(_) => {
+                    eprintln!("Warning: Specificity scoring failed, passing learning (fail-open)");
+                    None
+                }
+            }
+        }
+    };
+
+    // Apply specificity-based confidence adjustments
+    if let Some(ref score) = specificity {
+        match quality_mode {
+            QualityCheckMode::Enforce => {
+                if score.composite < min_specificity {
+                    confidence = WriteGateConfidence::Rejected;
+                } else if score.composite < 3.0 {
+                    confidence = WriteGateConfidence::Low;
+                }
+                // If composite >= 3.0, don't change the existing confidence
+            }
+            QualityCheckMode::Warn => {
+                if score.composite < min_specificity {
+                    eprintln!(
+                        "Warning: Learning '{}' has low specificity score ({:.2}), accepting anyway (warn mode)",
+                        crate::core::judge::truncate_str(&learning.summary, 50),
+                        score.composite,
+                    );
+                    confidence = WriteGateConfidence::Low;
+                } else if score.composite < 3.0 {
+                    confidence = WriteGateConfidence::Low;
+                }
+            }
+            QualityCheckMode::Disabled => {}
+        }
+    }
+
+    let passed = confidence != WriteGateConfidence::Rejected;
+
+    WriteGateResult {
+        passed,
+        criteria_claimed: learning.criteria_met.clone(),
+        plausibility,
+        confidence,
+        specificity,
+    }
 }
 
 /// Check if text contains a word (not a substring of another word).
@@ -697,6 +796,33 @@ pub fn validate_full_with_mode(
     session_id: &str,
     write_gate_mode: WriteGateMode,
 ) -> (Vec<CompoundLearning>, Vec<RejectedCandidate>) {
+    validate_full_with_quality(
+        candidates,
+        session_id,
+        write_gate_mode,
+        crate::core::quality::QualityCheckMode::Disabled,
+        crate::core::quality::DEFAULT_MIN_SPECIFICITY_SCORE,
+        None,
+        (0.0, 0.0, 0.0),
+    )
+}
+
+/// Validate candidates with a specific write gate mode and quality check settings.
+///
+/// The optional `judge_fn` parameter enables LLM-based rescue of borderline learnings.
+/// When a learning's composite specificity score falls in `judge_borderline` range
+/// (min_score..=max_score), the judge is called. If the judge score meets the
+/// rescue threshold, the learning is accepted despite low heuristic score.
+/// If the judge is unavailable (returns None), fail-open: accept the learning.
+pub fn validate_full_with_quality(
+    candidates: Vec<CandidateLearning>,
+    session_id: &str,
+    write_gate_mode: WriteGateMode,
+    quality_mode: crate::core::quality::QualityCheckMode,
+    min_specificity: f64,
+    judge_fn: Option<&JudgeFn>,
+    judge_borderline: (f64, f64, f64), // (min_score, max_score, rescue_threshold)
+) -> (Vec<CompoundLearning>, Vec<RejectedCandidate>) {
     // Layer 1: Schema validation
     let (schema_valid, mut rejected) = validate_batch(candidates, session_id);
 
@@ -709,15 +835,72 @@ pub fn validate_full_with_mode(
                 fully_valid.push(learning);
             }
             WriteGateMode::Lenient | WriteGateMode::Strict => {
-                let gate_result = validate_write_gate(&learning);
+                let gate_result =
+                    validate_write_gate_with_quality(&learning, quality_mode, min_specificity);
                 if gate_result.passed {
                     fully_valid.push(learning);
+                } else if gate_result.confidence == WriteGateConfidence::Rejected {
+                    // Rejected due to low specificity — check if judge can rescue
+                    if let Some(ref spec) = gate_result.specificity {
+                        if let Some(judge) = judge_fn {
+                            if spec.composite >= judge_borderline.0
+                                && spec.composite <= judge_borderline.1
+                            {
+                                match judge(&learning) {
+                                    Some(score) if score >= judge_borderline.2 => {
+                                        // Rescued by judge
+                                        eprintln!(
+                                            "Judge rescued borderline learning (composite={:.2}, judge={}): '{}'",
+                                            spec.composite,
+                                            score,
+                                            crate::core::judge::truncate_str(&learning.summary, 50)
+                                        );
+                                        fully_valid.push(learning);
+                                        continue;
+                                    }
+                                    Some(score) => {
+                                        // Judge confirmed rejection
+                                        eprintln!(
+                                            "Judge confirmed rejection (composite={:.2}, judge={}): '{}'",
+                                            spec.composite,
+                                            score,
+                                            crate::core::judge::truncate_str(&learning.summary, 50)
+                                        );
+                                    }
+                                    None => {
+                                        // Judge unavailable — fail-open: accept
+                                        eprintln!(
+                                            "Judge unavailable, fail-open accept (composite={:.2}): '{}'",
+                                            spec.composite,
+                                            crate::core::judge::truncate_str(&learning.summary, 50)
+                                        );
+                                        fully_valid.push(learning);
+                                        continue;
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    let reason = if let Some(ref spec) = gate_result.specificity {
+                        format!(
+                            "low specificity score ({:.2} < {:.2})",
+                            spec.composite, min_specificity
+                        )
+                    } else {
+                        "low specificity score".to_string()
+                    };
+                    rejected.push(RejectedCandidate::write_gate_error(
+                        &learning.summary,
+                        learning.tags.clone(),
+                        reason,
+                    ));
                 } else if write_gate_mode == WriteGateMode::Lenient {
                     // Lenient mode: warn but accept
                     // Log to stderr as a warning (fail-open philosophy)
                     eprintln!(
                         "Warning: Learning '{}' accepted despite no valid criteria (lenient mode)",
-                        &learning.summary[..learning.summary.len().min(50)]
+                        crate::core::judge::truncate_str(&learning.summary, 50)
                     );
                     fully_valid.push(learning);
                 } else {
@@ -874,15 +1057,105 @@ pub fn validate_with_duplicates_and_mode(
     existing_learnings: &[CompoundLearning],
     write_gate_mode: WriteGateMode,
 ) -> (Vec<CompoundLearning>, Vec<RejectedCandidate>) {
-    // Layer 1 + 2: Schema + Write gate
-    let (valid, mut rejected) = validate_full_with_mode(candidates, session_id, write_gate_mode);
+    validate_with_duplicates_and_quality(
+        candidates,
+        session_id,
+        existing_learnings,
+        write_gate_mode,
+        crate::core::quality::QualityCheckMode::Disabled,
+        crate::core::quality::DEFAULT_MIN_SPECIFICITY_SCORE,
+        None,
+        (0.0, 0.0, 0.0),
+    )
+}
+
+/// Apply all validation layers including duplicate detection, quality check, and configurable modes.
+#[allow(clippy::too_many_arguments)]
+pub fn validate_with_duplicates_and_quality(
+    candidates: Vec<CandidateLearning>,
+    session_id: &str,
+    existing_learnings: &[CompoundLearning],
+    write_gate_mode: WriteGateMode,
+    quality_mode: crate::core::quality::QualityCheckMode,
+    min_specificity: f64,
+    judge_fn: Option<&JudgeFn>,
+    judge_borderline: (f64, f64, f64),
+) -> (Vec<CompoundLearning>, Vec<RejectedCandidate>) {
+    validate_with_duplicates_and_quality_semantic(
+        candidates,
+        session_id,
+        existing_learnings,
+        write_gate_mode,
+        quality_mode,
+        min_specificity,
+        judge_fn,
+        judge_borderline,
+        None,
+    )
+}
+
+/// Apply all validation layers including duplicate detection, quality check, configurable modes,
+/// and optional semantic deduplication.
+///
+/// The `semantic_dedup` parameter accepts an optional tuple of (grove_dir, config) to enable
+/// ONNX-based embedding similarity checks. When `None` or when the feature is disabled,
+/// only string-based dedup runs.
+#[allow(clippy::too_many_arguments)]
+pub fn validate_with_duplicates_and_quality_semantic(
+    candidates: Vec<CandidateLearning>,
+    session_id: &str,
+    existing_learnings: &[CompoundLearning],
+    write_gate_mode: WriteGateMode,
+    quality_mode: crate::core::quality::QualityCheckMode,
+    min_specificity: f64,
+    judge_fn: Option<&JudgeFn>,
+    judge_borderline: (f64, f64, f64),
+    semantic_dedup: Option<(&std::path::Path, &crate::config::SemanticDedupConfig)>,
+) -> (Vec<CompoundLearning>, Vec<RejectedCandidate>) {
+    // Layer 1 + 2: Schema + Write gate (with quality check + optional judge rescue)
+    let (valid, mut rejected) = validate_full_with_quality(
+        candidates,
+        session_id,
+        write_gate_mode,
+        quality_mode,
+        min_specificity,
+        judge_fn,
+        judge_borderline,
+    );
+
+    // Lazy-init semantic dedup provider + cache if enabled
+    #[cfg(feature = "semantic-dedup")]
+    let mut semantic_state: Option<(
+        Box<dyn crate::core::embeddings::EmbeddingProvider>,
+        crate::core::embeddings::EmbeddingCache,
+        crate::config::SemanticDedupConfig,
+    )> = None;
+
+    #[cfg(feature = "semantic-dedup")]
+    if let Some((grove_dir, config)) = semantic_dedup {
+        if config.enabled {
+            match crate::core::embeddings::FastEmbedProvider::new() {
+                Ok(provider) => {
+                    let cache = crate::core::embeddings::EmbeddingCache::load(grove_dir);
+                    semantic_state = Some((Box::new(provider), cache, config.clone()));
+                }
+                Err(e) => {
+                    tracing::warn!("Semantic dedup: provider init failed (fail-open): {e}");
+                }
+            }
+        }
+    }
+
+    // Suppress unused variable warnings when feature is disabled
+    #[cfg(not(feature = "semantic-dedup"))]
+    let _ = semantic_dedup;
 
     // Layer 3: Duplicate detection
     // Track validated learnings to detect duplicates within the same batch
     let mut final_valid: Vec<CompoundLearning> = Vec::new();
 
     for learning in valid {
-        // Check against existing learnings in storage
+        // Check against existing learnings in storage (string-based)
         let existing_dup = check_duplicate_by_summary(&learning.summary, existing_learnings);
         if existing_dup.is_duplicate {
             rejected.push(RejectedCandidate::duplicate_error(
@@ -896,7 +1169,7 @@ pub fn validate_with_duplicates_and_mode(
             continue;
         }
 
-        // Check against learnings already validated in this batch
+        // Check against learnings already validated in this batch (string-based)
         let batch_dup = check_duplicate_by_summary(&learning.summary, &final_valid);
         if batch_dup.is_duplicate {
             rejected.push(RejectedCandidate::duplicate_error(
@@ -910,7 +1183,59 @@ pub fn validate_with_duplicates_and_mode(
             continue;
         }
 
+        // Semantic duplicate check (feature-gated)
+        #[cfg(feature = "semantic-dedup")]
+        {
+            if let Some((ref provider, ref mut cache, ref config)) = semantic_state {
+                // Check against existing learnings in storage
+                let sem_dup = crate::core::embeddings::check_semantic_duplicate(
+                    &learning.summary,
+                    existing_learnings,
+                    provider.as_ref(),
+                    cache,
+                    config,
+                );
+                if sem_dup.is_duplicate {
+                    rejected.push(RejectedCandidate::duplicate_error(
+                        &learning.summary,
+                        learning.tags.clone(),
+                        format!(
+                            "semantic duplicate of existing learning: {}",
+                            sem_dup.duplicate_of.unwrap_or_default()
+                        ),
+                    ));
+                    continue;
+                }
+
+                // Check against learnings already validated in this batch
+                let batch_sem_dup = crate::core::embeddings::check_semantic_duplicate(
+                    &learning.summary,
+                    &final_valid,
+                    provider.as_ref(),
+                    cache,
+                    config,
+                );
+                if batch_sem_dup.is_duplicate {
+                    rejected.push(RejectedCandidate::duplicate_error(
+                        &learning.summary,
+                        learning.tags.clone(),
+                        format!(
+                            "semantic duplicate within batch: {}",
+                            batch_sem_dup.duplicate_of.unwrap_or_default()
+                        ),
+                    ));
+                    continue;
+                }
+            }
+        }
+
         final_valid.push(learning);
+    }
+
+    // Save embedding cache if used
+    #[cfg(feature = "semantic-dedup")]
+    if let Some((_, cache, _)) = &semantic_state {
+        cache.save();
     }
 
     (final_valid, rejected)
@@ -980,6 +1305,7 @@ mod tests {
             criteria_met: vec!["behavior_changing".to_string()],
             tags: vec!["async".to_string(), "io".to_string()],
             context_files: None,
+            relevance_context: None,
         }
     }
 
@@ -1158,6 +1484,29 @@ mod tests {
         assert_eq!(learning.confidence, Confidence::High);
         assert_eq!(learning.criteria_met.len(), 1);
         assert_eq!(learning.tags.len(), 2);
+    }
+
+    #[test]
+    fn test_validate_candidate_with_relevance_context() {
+        let mut candidate = valid_candidate();
+        candidate.relevance_context =
+            Some("Surface when working on async I/O or event loop operations".to_string());
+        let result = validate_schema(&candidate, "session-1");
+        assert!(result.is_ok());
+        let learning = result.unwrap();
+        assert_eq!(
+            learning.relevance_context,
+            Some("Surface when working on async I/O or event loop operations".to_string())
+        );
+    }
+
+    #[test]
+    fn test_validate_candidate_without_relevance_context() {
+        let candidate = valid_candidate();
+        let result = validate_schema(&candidate, "session-1");
+        assert!(result.is_ok());
+        let learning = result.unwrap();
+        assert!(learning.relevance_context.is_none());
     }
 
     #[test]
@@ -1909,6 +2258,7 @@ mod tests {
             criteria_met: vec!["behavior_changing".to_string()],
             tags: vec!["test".to_string()],
             context_files: None,
+            relevance_context: None,
         };
 
         let (valid, rejected) =
@@ -1930,6 +2280,7 @@ mod tests {
             criteria_met: vec!["behavior_changing".to_string()],
             tags: vec!["test".to_string()],
             context_files: None,
+            relevance_context: None,
         };
 
         let (valid, rejected) =
@@ -1951,6 +2302,7 @@ mod tests {
             criteria_met: vec!["behavior_changing".to_string()],
             tags: vec!["test".to_string()],
             context_files: None,
+            relevance_context: None,
         };
 
         let (valid, rejected) =
@@ -1973,6 +2325,7 @@ mod tests {
             criteria_met: vec![], // No criteria - fails schema validation
             tags: vec!["test".to_string()],
             context_files: None,
+            relevance_context: None,
         };
 
         // All modes reject at schema level
@@ -2005,6 +2358,7 @@ mod tests {
             criteria_met: vec!["behavior_changing".to_string()],
             tags: vec!["test".to_string()],
             context_files: None,
+            relevance_context: None,
         };
 
         let (valid, rejected) = validate_full(vec![candidate], "session-1");
@@ -2062,6 +2416,7 @@ mod tests {
             criteria_met: vec!["behavior_changing".to_string()],
             tags: vec!["test".to_string()],
             context_files: None,
+            relevance_context: None,
         };
 
         let result = check_near_duplicate(&candidate, &existing);
@@ -2086,6 +2441,7 @@ mod tests {
             criteria_met: vec!["behavior_changing".to_string()],
             tags: vec!["test".to_string()],
             context_files: None,
+            relevance_context: None,
         };
 
         let result = check_near_duplicate(&candidate, &existing);
@@ -2109,6 +2465,7 @@ mod tests {
             criteria_met: vec!["behavior_changing".to_string()],
             tags: vec!["test".to_string()],
             context_files: None,
+            relevance_context: None,
         };
 
         let result = check_near_duplicate(&candidate, &existing);
@@ -2132,6 +2489,7 @@ mod tests {
             criteria_met: vec!["behavior_changing".to_string()],
             tags: vec!["test".to_string()],
             context_files: None,
+            relevance_context: None,
         };
 
         let result = check_near_duplicate(&candidate, &existing);
@@ -2155,6 +2513,7 @@ mod tests {
             criteria_met: vec!["behavior_changing".to_string()],
             tags: vec!["test".to_string()],
             context_files: None,
+            relevance_context: None,
         };
 
         let result = check_near_duplicate(&candidate, &existing);
@@ -2178,6 +2537,7 @@ mod tests {
             criteria_met: vec!["behavior_changing".to_string()],
             tags: vec!["test".to_string()],
             context_files: None,
+            relevance_context: None,
         };
 
         let result = check_near_duplicate(&candidate, &existing);
@@ -2198,6 +2558,7 @@ mod tests {
             criteria_met: vec!["behavior_changing".to_string()],
             tags: vec!["test".to_string()],
             context_files: None,
+            relevance_context: None,
         };
 
         let result = check_near_duplicate(&candidate, &existing);
@@ -2228,6 +2589,7 @@ mod tests {
             criteria_met: vec!["behavior_changing".to_string()],
             tags: vec!["test".to_string()],
             context_files: None,
+            relevance_context: None,
         };
 
         let result = check_near_duplicate(&candidate, &existing);
@@ -2255,6 +2617,7 @@ mod tests {
             criteria_met: vec!["behavior_changing".to_string()],
             tags: vec!["test".to_string()],
             context_files: None,
+            relevance_context: None,
         };
 
         let result = check_near_duplicate(&candidate, &existing);
@@ -2282,6 +2645,7 @@ mod tests {
             criteria_met: vec!["behavior_changing".to_string()],
             tags: vec!["test".to_string()],
             context_files: None,
+            relevance_context: None,
         };
 
         let result = check_near_duplicate(&candidate, &existing);
@@ -2310,6 +2674,7 @@ mod tests {
             criteria_met: vec!["behavior_changing".to_string()],
             tags: vec!["test".to_string()],
             context_files: None,
+            relevance_context: None,
         };
 
         let result = check_near_duplicate(&candidate, &existing);
@@ -2334,6 +2699,7 @@ mod tests {
             criteria_met: vec!["behavior_changing".to_string()],
             tags: vec!["test".to_string()],
             context_files: None,
+            relevance_context: None,
         };
 
         let result = check_near_duplicate(&candidate, &existing);
@@ -2358,6 +2724,7 @@ mod tests {
             criteria_met: vec!["behavior_changing".to_string()],
             tags: vec!["test".to_string()],
             context_files: None,
+            relevance_context: None,
         };
 
         let result = check_near_duplicate(&candidate, &existing);
@@ -2382,6 +2749,7 @@ mod tests {
             criteria_met: vec!["behavior_changing".to_string()],
             tags: vec!["test".to_string()],
             context_files: None,
+            relevance_context: None,
         };
 
         let result = check_near_duplicate(&candidate, &existing);
@@ -2518,5 +2886,477 @@ mod tests {
             &[],
         );
         assert!(!result2.is_duplicate);
+    }
+
+    // =========================================================================
+    // Write Gate + Specificity Integration tests
+    // =========================================================================
+
+    #[test]
+    fn test_write_gate_rejects_generic_with_quality_enforce() {
+        // A generic learning that should be rejected when quality_check = enforce
+        let learning = CompoundLearning::new(
+            LearningCategory::Pattern,
+            "Always test your code before deploying",
+            "Remember to write tests and make sure to check everything. Best practice is to test before deployment.",
+            LearningScope::Project,
+            Confidence::High,
+            vec![WriteGateCriterion::BehaviorChanging],
+            vec!["testing".to_string(), "general".to_string()],
+            "session-1",
+        );
+
+        let result = validate_write_gate_with_quality(
+            &learning,
+            crate::core::quality::QualityCheckMode::Enforce,
+            1.5,
+        );
+        assert!(!result.passed, "Generic learning should be rejected");
+        assert_eq!(result.confidence, WriteGateConfidence::Rejected);
+        assert!(result.specificity.is_some());
+        let spec = result.specificity.unwrap();
+        assert!(
+            spec.composite < 1.5,
+            "Composite should be < 1.5, got {}",
+            spec.composite
+        );
+    }
+
+    #[test]
+    fn test_write_gate_passes_specific_with_quality_enforce() {
+        // A specific learning with code entities that should pass
+        let learning = CompoundLearning::new(
+            LearningCategory::Pattern,
+            "Phoenix LiveView mount/3 requires socket assigns initialization",
+            "The LiveView.mount/3 callback in router.ex must set all assigns used by render/1. Missing assigns cause KeyError at runtime. Use assign_new/3 for defaults.",
+            LearningScope::Project,
+            Confidence::High,
+            vec![WriteGateCriterion::BehaviorChanging],
+            vec!["phoenix".to_string(), "LiveView".to_string(), "elixir".to_string()],
+            "session-1",
+        );
+
+        let result = validate_write_gate_with_quality(
+            &learning,
+            crate::core::quality::QualityCheckMode::Enforce,
+            1.5,
+        );
+        assert!(result.passed, "Specific learning should pass");
+        assert_ne!(result.confidence, WriteGateConfidence::Rejected);
+        assert!(result.specificity.is_some());
+    }
+
+    #[test]
+    fn test_write_gate_disabled_quality_check() {
+        // With quality_check = disabled, even generic learnings should pass
+        let learning = CompoundLearning::new(
+            LearningCategory::Pattern,
+            "Always test your code before deploying",
+            "Remember to write tests and make sure to check everything. Best practice is to test.",
+            LearningScope::Project,
+            Confidence::High,
+            vec![WriteGateCriterion::BehaviorChanging],
+            vec!["testing".to_string(), "general".to_string()],
+            "session-1",
+        );
+
+        let result = validate_write_gate_with_quality(
+            &learning,
+            crate::core::quality::QualityCheckMode::Disabled,
+            1.5,
+        );
+        assert!(
+            result.passed,
+            "Quality check disabled should pass all learnings"
+        );
+        assert!(
+            result.specificity.is_none(),
+            "Should not compute specificity when disabled"
+        );
+    }
+
+    #[test]
+    fn test_write_gate_warn_quality_check() {
+        // With quality_check = warn, generic learnings should still pass but get flagged
+        let learning = CompoundLearning::new(
+            LearningCategory::Pattern,
+            "Always test your code before deploying",
+            "Remember to write tests and make sure to check everything. Best practice is to test.",
+            LearningScope::Project,
+            Confidence::High,
+            vec![WriteGateCriterion::BehaviorChanging],
+            vec!["testing".to_string(), "general".to_string()],
+            "session-1",
+        );
+
+        let result = validate_write_gate_with_quality(
+            &learning,
+            crate::core::quality::QualityCheckMode::Warn,
+            1.5,
+        );
+        assert!(result.passed, "Warn mode should pass all learnings");
+        assert!(result.specificity.is_some());
+        // Should have low confidence due to low specificity
+        assert_eq!(result.confidence, WriteGateConfidence::Low);
+    }
+
+    #[test]
+    fn test_write_gate_result_carries_specificity() {
+        let learning = CompoundLearning::new(
+            LearningCategory::Pattern,
+            "Phoenix LiveView mount/3 requires socket assigns",
+            "The LiveView.mount/3 callback must set all assigns used by render/1 in the router module.",
+            LearningScope::Project,
+            Confidence::High,
+            vec![WriteGateCriterion::StableFact],
+            vec!["phoenix".to_string(), "LiveView".to_string()],
+            "session-1",
+        );
+
+        let result = validate_write_gate_with_quality(
+            &learning,
+            crate::core::quality::QualityCheckMode::Enforce,
+            1.5,
+        );
+        assert!(result.specificity.is_some());
+        let spec = result.specificity.unwrap();
+        assert!(spec.ned >= 0.0);
+        assert!(spec.pstf >= 0.0);
+        assert!(spec.composite >= 0.0);
+    }
+
+    #[test]
+    fn test_validate_full_with_quality_rejects_generic() {
+        let candidate = CandidateLearning {
+            category: "pattern".to_string(),
+            summary: "Always test your code before deploying".to_string(),
+            detail: "Remember to write tests and make sure to check everything carefully. Best practice is to test.".to_string(),
+            scope: "project".to_string(),
+            confidence: "high".to_string(),
+            criteria_met: vec!["behavior_changing".to_string()],
+            tags: vec!["testing".to_string(), "general".to_string()],
+            context_files: None,
+            relevance_context: None,
+        };
+
+        let (valid, rejected) = validate_full_with_quality(
+            vec![candidate],
+            "session-1",
+            WriteGateMode::Strict,
+            crate::core::quality::QualityCheckMode::Enforce,
+            1.5,
+            None,
+            (0.0, 0.0, 0.0),
+        );
+        assert!(
+            valid.is_empty(),
+            "Generic learning should be rejected by quality check"
+        );
+        assert_eq!(rejected.len(), 1);
+        assert!(rejected[0].rejection_reason.contains("specificity"));
+    }
+
+    #[test]
+    fn test_validate_full_with_quality_passes_specific() {
+        let candidate = CandidateLearning {
+            category: "pattern".to_string(),
+            summary: "Phoenix LiveView mount/3 requires socket assigns initialization".to_string(),
+            detail: "The LiveView.mount/3 callback in router.ex must set all assigns used by render/1. Missing assigns cause KeyError at runtime.".to_string(),
+            scope: "project".to_string(),
+            confidence: "high".to_string(),
+            criteria_met: vec!["behavior_changing".to_string()],
+            tags: vec!["phoenix".to_string(), "LiveView".to_string(), "elixir".to_string()],
+            context_files: None,
+            relevance_context: None,
+        };
+
+        let (valid, rejected) = validate_full_with_quality(
+            vec![candidate],
+            "session-1",
+            WriteGateMode::Strict,
+            crate::core::quality::QualityCheckMode::Enforce,
+            1.5,
+            None,
+            (0.0, 0.0, 0.0),
+        );
+        assert_eq!(
+            valid.len(),
+            1,
+            "Specific learning should pass quality check"
+        );
+        assert!(rejected.is_empty());
+    }
+
+    // =========================================================================
+    // LLM Judge borderline tests
+    // =========================================================================
+
+    /// A well-formed candidate with valid criteria. By using a high min_specificity
+    /// threshold in tests, we force this into the "rejected by heuristics" path
+    /// regardless of its actual composite score, making tests deterministic.
+    fn well_formed_candidate() -> CandidateLearning {
+        CandidateLearning {
+            category: "process".to_string(),
+            summary: "Always validate VRL transforms locally before deploying".to_string(),
+            detail: "Use vector validate command to check VRL transforms before deploying to production environment to catch syntax errors early.".to_string(),
+            scope: "project".to_string(),
+            confidence: "high".to_string(),
+            criteria_met: vec!["behavior_changing".to_string()],
+            tags: vec!["vector".to_string(), "vrl".to_string(), "deployment".to_string()],
+            context_files: None,
+            relevance_context: None,
+        }
+    }
+
+    #[test]
+    fn test_borderline_rescued_by_judge() {
+        let candidate = well_formed_candidate();
+
+        // Mock judge that returns 4 (clearly project-specific)
+        let judge_fn = |_: &CompoundLearning| -> Option<f64> { Some(4.0) };
+
+        // Use min_specificity=10.0 to guarantee rejection by heuristics,
+        // and borderline zone (0.0, 10.0) to cover all possible composite scores.
+        let (valid, rejected) = validate_full_with_quality(
+            vec![candidate],
+            "session-1",
+            WriteGateMode::Strict,
+            crate::core::quality::QualityCheckMode::Enforce,
+            10.0,
+            Some(&judge_fn),
+            (0.0, 10.0, 3.0), // borderline covers everything, rescue threshold = 3
+        );
+
+        // Heuristics reject (composite < 10.0), but judge returns 4 >= 3 → rescued
+        assert_eq!(valid.len(), 1, "Should be rescued by judge");
+        assert!(rejected.is_empty());
+    }
+
+    #[test]
+    fn test_borderline_confirmed_rejected() {
+        let candidate = well_formed_candidate();
+
+        // Mock judge that returns 2 (below rescue threshold of 3)
+        let judge_fn = |_: &CompoundLearning| -> Option<f64> { Some(2.0) };
+
+        let (valid, rejected) = validate_full_with_quality(
+            vec![candidate],
+            "session-1",
+            WriteGateMode::Strict,
+            crate::core::quality::QualityCheckMode::Enforce,
+            10.0,
+            Some(&judge_fn),
+            (0.0, 10.0, 3.0),
+        );
+
+        // Heuristics reject, judge returns 2 < 3 → stays rejected
+        assert!(valid.is_empty(), "Should stay rejected");
+        assert_eq!(rejected.len(), 1);
+        assert!(rejected[0].rejection_reason.contains("specificity"));
+    }
+
+    #[test]
+    fn test_judge_failure_fail_open() {
+        let candidate = well_formed_candidate();
+
+        // Mock judge that returns None (failure)
+        let judge_fn = |_: &CompoundLearning| -> Option<f64> { None };
+
+        let (valid, rejected) = validate_full_with_quality(
+            vec![candidate],
+            "session-1",
+            WriteGateMode::Strict,
+            crate::core::quality::QualityCheckMode::Enforce,
+            10.0,
+            Some(&judge_fn),
+            (0.0, 10.0, 3.0),
+        );
+
+        // Heuristics reject, judge fails → fail-open: accept
+        assert_eq!(valid.len(), 1, "Should be accepted via fail-open");
+        assert!(rejected.is_empty());
+    }
+
+    #[test]
+    fn test_below_borderline_no_judge() {
+        let candidate = well_formed_candidate();
+
+        let judge_fn = |_: &CompoundLearning| -> Option<f64> {
+            panic!("Judge should not be called for scores below borderline min");
+        };
+
+        // Set borderline zone to (8.0, 10.0) — composite will be well below 8.0,
+        // so it falls outside the borderline zone and judge is never called.
+        let (valid, rejected) = validate_full_with_quality(
+            vec![candidate],
+            "session-1",
+            WriteGateMode::Strict,
+            crate::core::quality::QualityCheckMode::Enforce,
+            10.0,
+            Some(&judge_fn),
+            (8.0, 10.0, 3.0), // borderline zone starts at 8.0
+        );
+
+        // Composite is well below 8.0, so judge is never invoked → stays rejected
+        assert!(valid.is_empty(), "Should be rejected without judge");
+        assert_eq!(rejected.len(), 1);
+        assert!(rejected[0].rejection_reason.contains("specificity"));
+    }
+
+    #[test]
+    fn test_above_borderline_no_judge() {
+        // A highly specific learning that passes heuristics at threshold 1.5
+        let candidate = CandidateLearning {
+            category: "pattern".to_string(),
+            summary: "Phoenix LiveView mount/3 requires socket assigns initialization".to_string(),
+            detail: "The LiveView.mount/3 callback in router.ex must set all assigns used by render/1. Missing assigns cause KeyError at runtime.".to_string(),
+            scope: "project".to_string(),
+            confidence: "high".to_string(),
+            criteria_met: vec!["behavior_changing".to_string()],
+            tags: vec!["phoenix".to_string(), "LiveView".to_string(), "elixir".to_string()],
+            context_files: None,
+            relevance_context: None,
+        };
+
+        let judge_fn = |_: &CompoundLearning| -> Option<f64> {
+            panic!("Judge should not be called for learnings above threshold");
+        };
+
+        let (valid, rejected) = validate_full_with_quality(
+            vec![candidate],
+            "session-1",
+            WriteGateMode::Strict,
+            crate::core::quality::QualityCheckMode::Enforce,
+            1.5,
+            Some(&judge_fn),
+            (1.5, 2.5, 3.0),
+        );
+
+        // This learning passes heuristics (composite > 1.5), so judge is never called
+        assert_eq!(valid.len(), 1);
+        assert!(rejected.is_empty());
+    }
+
+    #[test]
+    fn test_judge_disabled_no_call() {
+        let candidate = well_formed_candidate();
+
+        let (valid, rejected) = validate_full_with_quality(
+            vec![candidate],
+            "session-1",
+            WriteGateMode::Strict,
+            crate::core::quality::QualityCheckMode::Enforce,
+            10.0,
+            None, // No judge
+            (0.0, 10.0, 3.0),
+        );
+
+        // Without judge, rejected learnings stay rejected
+        assert!(valid.is_empty(), "Should be rejected without judge");
+        assert_eq!(rejected.len(), 1);
+        assert!(rejected[0].rejection_reason.contains("specificity"));
+    }
+
+    // =========================================================================
+    // Semantic dedup integration tests (feature-gated)
+    // =========================================================================
+
+    #[test]
+    fn test_semantic_dedup_disabled_config_uses_string_dedup_only() {
+        // When semantic_dedup.enabled = false, only string-based dedup runs
+        let config = crate::config::SemanticDedupConfig::default();
+        assert!(!config.enabled); // Confirm disabled by default
+
+        let dir = tempfile::tempdir().unwrap();
+        let candidate = CandidateLearning {
+            summary: "Use builder pattern for complex objects".to_string(),
+            detail: "The builder pattern helps construct complex objects step by step.".to_string(),
+            ..valid_candidate()
+        };
+
+        // Existing learning with different wording (paraphrase)
+        let existing = vec![semantic_test_learning(
+            "L001",
+            "Apply the builder pattern for constructing objects",
+        )];
+
+        // With string dedup only, these should NOT match (different wording)
+        let (valid, rejected) = validate_with_duplicates_and_quality_semantic(
+            vec![candidate],
+            "test-session",
+            &existing,
+            WriteGateMode::Strict,
+            crate::core::quality::QualityCheckMode::Disabled,
+            0.0,
+            None,
+            (0.0, 0.0, 0.0),
+            Some((dir.path(), &config)),
+        );
+
+        // String dedup should not catch this paraphrase
+        assert_eq!(valid.len(), 1, "paraphrase should pass string-only dedup");
+        assert_eq!(rejected.len(), 0);
+    }
+
+    #[cfg(feature = "semantic-dedup")]
+    #[test]
+    fn test_semantic_dedup_enabled_catches_exact_match() {
+        // Verifies the full cfg-gated path through validate_with_duplicates_and_quality_semantic.
+        let dir = tempfile::tempdir().unwrap();
+        let config = crate::config::SemanticDedupConfig {
+            enabled: true,
+            similarity_threshold: 0.90,
+        };
+
+        let candidate = CandidateLearning {
+            summary: "Use builder pattern for complex objects".to_string(),
+            detail: "The builder pattern helps construct complex objects step by step.".to_string(),
+            ..valid_candidate()
+        };
+
+        // Existing learning with identical text (will match string dedup first)
+        let existing = vec![semantic_test_learning(
+            "L001",
+            "Use builder pattern for complex objects",
+        )];
+
+        let (valid, rejected) = validate_with_duplicates_and_quality_semantic(
+            vec![candidate],
+            "test-session",
+            &existing,
+            WriteGateMode::Strict,
+            crate::core::quality::QualityCheckMode::Disabled,
+            0.0,
+            None,
+            (0.0, 0.0, 0.0),
+            Some((dir.path(), &config)),
+        );
+
+        // Caught by string dedup (exact match) before semantic even runs
+        assert_eq!(valid.len(), 0, "exact match should be caught");
+        assert_eq!(rejected.len(), 1);
+    }
+
+    /// Helper to create a CompoundLearning with a specific ID and summary for dedup tests.
+    fn semantic_test_learning(id: &str, summary: &str) -> CompoundLearning {
+        use crate::core::learning::{LearningStatus, WriteGateCriterion};
+
+        CompoundLearning {
+            id: id.to_string(),
+            schema_version: 1,
+            category: LearningCategory::Pattern,
+            summary: summary.to_string(),
+            detail: "Detailed explanation of the learning".to_string(),
+            scope: LearningScope::Project,
+            confidence: Confidence::High,
+            criteria_met: vec![WriteGateCriterion::BehaviorChanging],
+            tags: vec!["test".to_string()],
+            session_id: "test-session".to_string(),
+            ticket_id: None,
+            timestamp: chrono::Utc::now(),
+            context_files: None,
+            relevance_context: None,
+            status: LearningStatus::Active,
+        }
     }
 }

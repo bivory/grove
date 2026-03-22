@@ -35,6 +35,9 @@ CLAUDE.local.md
 memory/
 .grove/
 
+# Model caches
+.fastembed_cache/
+
 # Added by cargo
 
 /target

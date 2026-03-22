@@ -62,6 +62,7 @@ enum Commands {
     },
 
     /// [Agent] Record structured reflection and capture learnings
+    #[command(after_help = grove::cli::reflect::REFLECT_SCHEMA_HELP)]
     Reflect {
         /// Output as JSON
         #[arg(long, short)]
@@ -72,6 +73,9 @@ enum Commands {
         /// Session ID to use
         #[arg(long)]
         session_id: Option<String>,
+        /// Print the expected JSON schema and exit
+        #[arg(long)]
+        schema: bool,
     },
 
     /// [Agent] Skip reflection with a reason
@@ -315,6 +319,138 @@ enum Commands {
         #[arg(long)]
         dry_run: bool,
     },
+
+    /// [User] Review and rate learnings for quality calibration
+    Review {
+        /// Output as JSON
+        #[arg(long, short)]
+        json: bool,
+        /// Suppress output
+        #[arg(long, short)]
+        quiet: bool,
+        /// Number of learnings to sample (default: 5)
+        #[arg(long, short, default_value = "5")]
+        count: usize,
+    },
+
+    /// [User] Mine past sessions for retroactive learnings
+    Retroflect {
+        /// Project root to retroflect (default: current dir)
+        #[arg(long)]
+        project: Option<String>,
+        /// Auto-discover all projects under ~/.claude/projects/
+        #[arg(long, conflicts_with = "project")]
+        all: bool,
+        /// LLM model for synthesis
+        #[arg(long, default_value = "claude-sonnet-4-20250514")]
+        model: String,
+        /// LLM backend: api or cli
+        #[arg(long, default_value = "api")]
+        backend: String,
+        /// Max sessions to analyze
+        #[arg(long, default_value = "20")]
+        limit: usize,
+        /// Skip sessions with fewer than N user turns
+        #[arg(long, default_value = "3")]
+        min_turns: usize,
+        /// Show candidates without writing
+        #[arg(long)]
+        dry_run: bool,
+        /// Re-analyze previously retroflected sessions
+        #[arg(long)]
+        force: bool,
+        /// Skip cost confirmation prompt
+        #[arg(long)]
+        yes: bool,
+        /// Output results as JSON
+        #[arg(long, short)]
+        json: bool,
+        /// Use Batch API (50% cheaper, async processing)
+        #[arg(long)]
+        batch: bool,
+    },
+
+    /// [Developer] Evaluate retrieval quality with offline benchmarks
+    Eval {
+        #[command(subcommand)]
+        action: EvalAction,
+    },
+}
+
+#[derive(Subcommand)]
+enum EvalAction {
+    /// Run a benchmark and output a scorecard
+    Run {
+        /// Benchmark config (e.g. bm25, boosted-adaptive, adaptive, intent-filter)
+        #[arg(long, short, default_value = "boosted-adaptive")]
+        config: String,
+        /// Path to transcript directory
+        #[arg(long)]
+        transcript_dir: Option<String>,
+        /// Path to learnings file
+        #[arg(long)]
+        learnings_path: Option<String>,
+        /// Path to judge cache
+        #[arg(long)]
+        cache_path: Option<String>,
+        /// Output as JSON
+        #[arg(long, short)]
+        json: bool,
+        /// Use Batch API for judge calls (50% cheaper, async processing)
+        #[arg(long)]
+        batch: bool,
+        /// Bootstrap resamples for confidence intervals (0 = disabled)
+        #[arg(long, default_value = "0")]
+        bootstrap: usize,
+    },
+    /// Compare multiple benchmark configurations
+    Compare {
+        /// Configs to compare (comma-separated)
+        #[arg(long, short, default_value = "bm25,boosted-adaptive")]
+        configs: String,
+        /// Path to transcript directory
+        #[arg(long)]
+        transcript_dir: Option<String>,
+        /// Path to learnings file
+        #[arg(long)]
+        learnings_path: Option<String>,
+        /// Path to judge cache
+        #[arg(long)]
+        cache_path: Option<String>,
+        /// Output as JSON
+        #[arg(long, short)]
+        json: bool,
+        /// Use Batch API for judge calls (50% cheaper, async processing)
+        #[arg(long)]
+        batch: bool,
+        /// Bootstrap resamples for confidence intervals (0 = disabled)
+        #[arg(long, default_value = "0")]
+        bootstrap: usize,
+    },
+    /// Run benchmarks across all corpora in a manifest
+    Sweep {
+        /// Path to corpus manifest TOML file
+        #[arg(long, short)]
+        manifest: String,
+        /// Configs to evaluate (comma-separated)
+        #[arg(long, short, default_value = "bm25,boosted-adaptive")]
+        configs: String,
+        /// Path to judge cache (base directory; per-corpus caches derived from name)
+        #[arg(long)]
+        cache_path: Option<String>,
+        /// Output as JSON
+        #[arg(long, short)]
+        json: bool,
+        /// Bootstrap resamples for confidence intervals (0 = disabled)
+        #[arg(long, default_value = "0")]
+        bootstrap: usize,
+        /// Evaluate cross-corpus negative pairs to measure false positive rate
+        #[arg(long)]
+        cross_negatives: bool,
+        /// Benchmark config to use for negative evaluation
+        #[arg(long, default_value = "boosted-adaptive")]
+        negative_config: String,
+    },
 }
 
 #[derive(Clone, ValueEnum)]
@@ -324,6 +460,8 @@ enum HookEvent {
     PostToolUse,
     Stop,
     SessionEnd,
+    TaskCompleted,
+    UserPromptSubmit,
 }
 
 /// Sort field for list command.
@@ -359,6 +497,8 @@ impl From<HookEvent> for HookType {
             HookEvent::PostToolUse => HookType::PostToolUse,
             HookEvent::Stop => HookType::Stop,
             HookEvent::SessionEnd => HookType::SessionEnd,
+            HookEvent::TaskCompleted => HookType::TaskCompleted,
+            HookEvent::UserPromptSubmit => HookType::UserPromptSubmit,
         }
     }
 }
@@ -435,7 +575,8 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
             json,
             quiet,
             session_id,
-        } => run_reflect(json, quiet, session_id, &cwd),
+            schema,
+        } => run_reflect(json, quiet, session_id, schema, &cwd),
         Commands::Skip {
             reason,
             session_id,
@@ -526,6 +667,23 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
             orphans,
             dry_run,
         } => run_clean(json, quiet, before, orphans, dry_run),
+        Commands::Review { json, quiet, count } => run_review(json, quiet, count, &cwd),
+        Commands::Retroflect {
+            project,
+            all,
+            model,
+            backend,
+            limit,
+            min_turns,
+            dry_run,
+            force,
+            yes,
+            json,
+            batch,
+        } => run_retroflect(
+            project, all, model, backend, limit, min_turns, dry_run, force, yes, json, batch, &cwd,
+        ),
+        Commands::Eval { action } => run_eval(action),
     }
 }
 
@@ -541,42 +699,26 @@ fn run_hook(hook_type: HookType) -> Result<ExitCode, Box<dyn std::error::Error>>
     // Run the hook (reads from stdin)
     let output = runner.run(hook_type)?;
 
-    // Print output
-    println!("{}", output);
-
-    // Determine exit code based on hook output
-    if hook_type == HookType::Stop {
-        // Parse output to check decision
-        match serde_json::from_str::<serde_json::Value>(&output) {
-            Ok(stop_output) => {
-                match stop_output.get("decision").and_then(|d| d.as_str()) {
-                    Some("block") => {
-                        return Ok(ExitCode::from(exit_codes::BLOCK as u8));
-                    }
-                    Some("approve") => {
-                        // Expected value, fall through to APPROVE
-                    }
-                    Some(unexpected) => {
-                        tracing::warn!(
-                            decision = unexpected,
-                            "stop hook returned unexpected decision, defaulting to approve"
-                        );
-                    }
-                    None => {
-                        tracing::warn!(
-                            "stop hook output missing 'decision' field, defaulting to approve"
-                        );
-                    }
+    // TaskCompleted uses a different protocol: exit code 2 + stderr message.
+    // Claude Code does NOT read JSON for TaskCompleted — it reads stderr on exit 2.
+    if hook_type == HookType::TaskCompleted {
+        if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&output) {
+            if parsed.get("decision").and_then(|d| d.as_str()) == Some("block") {
+                if let Some(reason) = parsed.get("reason").and_then(|r| r.as_str()) {
+                    eprintln!("{}", reason);
                 }
-            }
-            Err(e) => {
-                tracing::warn!(
-                    error = %e,
-                    "failed to parse stop hook output as JSON, defaulting to approve"
-                );
+                return Ok(ExitCode::from(exit_codes::BLOCK as u8));
             }
         }
+        // If not blocking, print JSON to stdout and exit 0
+        println!("{}", output);
+        return Ok(ExitCode::from(exit_codes::APPROVE as u8));
     }
+
+    // Stop hook: Claude Code reads JSON `decision` field on exit 0.
+    // Always exit 0 — the JSON "decision":"block" tells CC to block.
+    // All other hooks: exit 0 with JSON output.
+    println!("{}", output);
 
     Ok(ExitCode::from(exit_codes::APPROVE as u8))
 }
@@ -594,10 +736,17 @@ fn run_reflect(
     json: bool,
     quiet: bool,
     session_id: Option<String>,
+    schema: bool,
     cwd: &Path,
 ) -> Result<ExitCode, Box<dyn std::error::Error>> {
-    use grove::cli::reflect::{ReflectCommand, ReflectOptions};
+    use grove::cli::reflect::{ReflectCommand, ReflectOptions, REFLECT_SCHEMA_EXAMPLE};
     use grove::create_primary_backend;
+
+    // --schema: print the expected JSON schema and exit
+    if schema {
+        println!("{}", REFLECT_SCHEMA_EXAMPLE);
+        return Ok(ExitCode::from(exit_codes::APPROVE as u8));
+    }
 
     let config = Config::load();
     let store = FileSessionStore::new()?;
@@ -1056,6 +1205,132 @@ fn run_clean(
     Ok(success_to_exit_code(output.success))
 }
 
+fn run_review(
+    json: bool,
+    quiet: bool,
+    count: usize,
+    cwd: &Path,
+) -> Result<ExitCode, Box<dyn std::error::Error>> {
+    use grove::cli::review::{ReviewCommand, ReviewOptions};
+    use grove::create_primary_backend;
+
+    let config = Config::load();
+    let backend = create_primary_backend(cwd, Some(&config));
+
+    let cmd = ReviewCommand::new(backend, config);
+    let options = ReviewOptions { json, quiet, count };
+
+    let output = cmd.run(&options, cwd);
+    let formatted = cmd.format_output(&output, &options);
+
+    if !formatted.is_empty() {
+        println!("{}", formatted);
+    }
+
+    Ok(success_to_exit_code(output.success))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run_retroflect(
+    project: Option<String>,
+    all: bool,
+    model: String,
+    backend: String,
+    limit: usize,
+    min_turns: usize,
+    dry_run: bool,
+    force: bool,
+    yes: bool,
+    json: bool,
+    batch: bool,
+    cwd: &Path,
+) -> Result<ExitCode, Box<dyn std::error::Error>> {
+    use grove::cli::retroflect::{self, RetroflectOptions};
+
+    let options = RetroflectOptions {
+        project: project.map(std::path::PathBuf::from),
+        all,
+        model,
+        backend,
+        limit,
+        min_turns,
+        dry_run,
+        force,
+        yes,
+        json,
+        batch,
+    };
+
+    let output = retroflect::run(&options, cwd);
+    let formatted = retroflect::format_output(&output, &options);
+
+    if !formatted.is_empty() {
+        println!("{}", formatted);
+    }
+
+    Ok(success_to_exit_code(output.success))
+}
+
+fn run_eval(action: EvalAction) -> Result<ExitCode, Box<dyn std::error::Error>> {
+    use grove::cli::eval::{EvalCompareOptions, EvalRunOptions, EvalSweepOptions};
+
+    let success = match action {
+        EvalAction::Run {
+            config,
+            transcript_dir,
+            learnings_path,
+            cache_path,
+            json,
+            batch,
+            bootstrap,
+        } => grove::cli::eval::run_eval(EvalRunOptions {
+            config,
+            transcript_dir,
+            learnings_path,
+            cache_path,
+            json,
+            batch,
+            bootstrap,
+        })?,
+        EvalAction::Compare {
+            configs,
+            transcript_dir,
+            learnings_path,
+            cache_path,
+            json,
+            batch,
+            bootstrap,
+        } => grove::cli::eval::run_compare(EvalCompareOptions {
+            configs,
+            transcript_dir,
+            learnings_path,
+            cache_path,
+            json,
+            batch,
+            bootstrap,
+        })?,
+        EvalAction::Sweep {
+            manifest,
+            configs,
+            cache_path,
+            json,
+            bootstrap,
+            cross_negatives,
+            negative_config,
+        } => grove::cli::eval::run_sweep(EvalSweepOptions {
+            manifest,
+            configs,
+            cache_path,
+            json,
+            bootstrap,
+            cross_negatives,
+            negative_config,
+        })?,
+    };
+
+    Ok(success_to_exit_code(success))
+}
+
 // =============================================================================
 // Tests
 // =============================================================================
@@ -1380,5 +1655,59 @@ mod tests {
             }
             _ => panic!("Expected List command"),
         }
+    }
+
+    #[test]
+    fn test_cli_parse_reflect_schema_flag() {
+        let cli = Cli::parse_from(["grove", "reflect", "--schema"]);
+        match cli.command {
+            Commands::Reflect { schema, json, .. } => {
+                assert!(schema);
+                assert!(!json);
+            }
+            _ => panic!("Expected Reflect command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_reflect_schema_outputs_valid_json() {
+        let schema_text = grove::cli::reflect::REFLECT_SCHEMA_EXAMPLE;
+        let parsed: std::result::Result<serde_json::Value, _> = serde_json::from_str(schema_text);
+        assert!(
+            parsed.is_ok(),
+            "REFLECT_SCHEMA_EXAMPLE should be valid JSON: {:?}",
+            parsed.err()
+        );
+        let value = parsed.unwrap();
+        assert!(value.get("session_id").is_some());
+        assert!(value.get("candidates").is_some());
+    }
+
+    #[test]
+    fn test_cli_reflect_help_contains_schema_info() {
+        use clap::CommandFactory;
+
+        // Verify that --help output includes the after_help text
+        let cmd = Cli::command();
+        let reflect_cmd: &clap::Command = cmd
+            .get_subcommands()
+            .find(|c| c.get_name() == "reflect")
+            .expect("reflect subcommand should exist");
+        let after_help = reflect_cmd
+            .get_after_help()
+            .expect("reflect should have after_help");
+        let help_text = after_help.to_string();
+        assert!(
+            help_text.contains("STDIN JSON SCHEMA"),
+            "after_help should contain schema documentation"
+        );
+        assert!(
+            help_text.contains("category"),
+            "after_help should document the category field"
+        );
+        assert!(
+            help_text.contains("--schema"),
+            "after_help should mention --schema flag"
+        );
     }
 }

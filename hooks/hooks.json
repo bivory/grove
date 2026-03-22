@@ -9,7 +9,6 @@
       }]
     }],
     "PreToolUse": [{
-      "matcher": "Bash",
       "hooks": [{
         "type": "command",
         "command": "grove hook pre-tool-use",
@@ -35,6 +34,20 @@
       "hooks": [{
         "type": "command",
         "command": "grove hook session-end",
+        "timeout": 5
+      }]
+    }],
+    "TaskCompleted": [{
+      "hooks": [{
+        "type": "command",
+        "command": "grove hook task-completed",
+        "timeout": 5
+      }]
+    }],
+    "UserPromptSubmit": [{
+      "hooks": [{
+        "type": "command",
+        "command": "grove hook user-prompt-submit",
         "timeout": 5
       }]
     }]

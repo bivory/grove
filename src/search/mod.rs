@@ -38,4 +38,4 @@
 pub mod tantivy_backend;
 
 #[cfg(feature = "tantivy-search")]
-pub use tantivy_backend::{TantivySearchIndex, TantivySearchResult};
+pub use tantivy_backend::{escape_query_term, TantivySearchIndex, TantivySearchResult};

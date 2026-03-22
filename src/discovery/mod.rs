@@ -15,6 +15,7 @@ pub use backends::{
     BackendType,
 };
 pub use tickets::{
-    detect_ticketing_system, match_close_command, probe_beads, probe_tissue, ClosePattern,
-    TicketingInfo, TicketingSystem,
+    detect_ticketing_system, extract_title_keywords, match_close_command, probe_beads,
+    probe_tissue, query_active_tickets, ActiveTicketInfo, ClosePattern, TicketingInfo,
+    TicketingSystem,
 };

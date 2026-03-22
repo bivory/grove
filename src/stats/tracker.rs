@@ -19,26 +19,33 @@ use crate::util::read_to_string_limited;
 /// Increment when the event schema changes in a breaking way.
 pub const STATS_SCHEMA_VERSION: u8 = 1;
 
+/// Grove version at build time (from Cargo.toml).
+pub const GROVE_VERSION: &str = env!("CARGO_PKG_VERSION");
+
 /// A stats event that is written to the JSONL log.
 ///
-/// All events include version, timestamp, and event type.
+/// All events include version, timestamp, grove version, and event type.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct StatsEvent {
     /// Schema version for forward compatibility.
     pub v: u8,
     /// Timestamp of the event.
     pub ts: DateTime<Utc>,
+    /// Grove version that emitted this event.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grove_version: Option<String>,
     /// The event type and its data.
     #[serde(flatten)]
     pub data: StatsEventType,
 }
 
 impl StatsEvent {
-    /// Create a new stats event with the current timestamp.
+    /// Create a new stats event with the current timestamp and grove version.
     pub fn new(data: StatsEventType) -> Self {
         Self {
             v: STATS_SCHEMA_VERSION,
             ts: Utc::now(),
+            grove_version: Some(GROVE_VERSION.to_string()),
             data,
         }
     }
@@ -48,6 +55,7 @@ impl StatsEvent {
         Self {
             v: STATS_SCHEMA_VERSION,
             ts,
+            grove_version: Some(GROVE_VERSION.to_string()),
             data,
         }
     }
@@ -113,6 +121,10 @@ pub enum StatsEventType {
         ticket_id: Option<String>,
         /// The backend that received the learnings.
         backend: String,
+        /// Average specificity composite score of accepted learnings.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        #[serde(default)]
+        avg_specificity: Option<f64>,
     },
 
     /// A reflection was skipped.
@@ -160,6 +172,30 @@ pub enum StatsEventType {
         reason: String,
         /// At which stage the candidate was rejected.
         stage: String,
+    },
+
+    /// A learning was rated by a developer.
+    Rated {
+        /// The learning that was rated.
+        learning_id: String,
+        /// Whether the developer found the learning useful (true = thumbs up).
+        useful: bool,
+        /// Context where rating occurred ("reflect" or "review").
+        context: String,
+    },
+
+    /// A retroflect (retroactive reflection) was completed.
+    Retroflect {
+        /// The Grove session ID.
+        session_id: String,
+        /// The Claude Code session ID (JSONL filename UUID).
+        claude_session_id: String,
+        /// Number of candidate learnings produced.
+        candidates: usize,
+        /// Number of learnings accepted (passed write gate).
+        accepted: usize,
+        /// The project path that was analyzed.
+        project_path: String,
     },
 }
 
@@ -219,6 +255,7 @@ impl StatsEventType {
         categories: Vec<LearningCategory>,
         ticket_id: Option<String>,
         backend: impl Into<String>,
+        avg_specificity: Option<f64>,
     ) -> Self {
         Self::Reflection {
             session_id: session_id.into(),
@@ -227,6 +264,7 @@ impl StatsEventType {
             categories,
             ticket_id,
             backend: backend.into(),
+            avg_specificity,
         }
     }
 
@@ -299,6 +337,32 @@ impl StatsEventType {
         }
     }
 
+    /// Create a rated event.
+    pub fn rated(learning_id: impl Into<String>, useful: bool, context: impl Into<String>) -> Self {
+        Self::Rated {
+            learning_id: learning_id.into(),
+            useful,
+            context: context.into(),
+        }
+    }
+
+    /// Create a retroflect event.
+    pub fn retroflect(
+        session_id: impl Into<String>,
+        claude_session_id: impl Into<String>,
+        candidates: usize,
+        accepted: usize,
+        project_path: impl Into<String>,
+    ) -> Self {
+        Self::Retroflect {
+            session_id: session_id.into(),
+            claude_session_id: claude_session_id.into(),
+            candidates,
+            accepted,
+            project_path: project_path.into(),
+        }
+    }
+
     /// Get the event name as a string.
     pub fn event_name(&self) -> &'static str {
         match self {
@@ -311,6 +375,8 @@ impl StatsEventType {
             Self::Archived { .. } => "archived",
             Self::Restored { .. } => "restored",
             Self::Rejected { .. } => "rejected",
+            Self::Rated { .. } => "rated",
+            Self::Retroflect { .. } => "retroflect",
         }
     }
 }
@@ -427,6 +493,7 @@ impl StatsLogger {
     }
 
     /// Append a reflection event.
+    #[allow(clippy::too_many_arguments)]
     pub fn append_reflection(
         &self,
         session_id: impl Into<String>,
@@ -435,9 +502,16 @@ impl StatsLogger {
         categories: Vec<LearningCategory>,
         ticket_id: Option<String>,
         backend: impl Into<String>,
+        avg_specificity: Option<f64>,
     ) -> Result<()> {
         let event = StatsEvent::new(StatsEventType::reflection(
-            session_id, candidates, accepted, categories, ticket_id, backend,
+            session_id,
+            candidates,
+            accepted,
+            categories,
+            ticket_id,
+            backend,
+            avg_specificity,
         ));
         self.append(&event)
     }
@@ -488,6 +562,36 @@ impl StatsLogger {
     ) -> Result<()> {
         let event = StatsEvent::new(StatsEventType::rejected(
             session_id, summary, tags, reason, stage,
+        ));
+        self.append(&event)
+    }
+
+    /// Append a rated event.
+    pub fn append_rated(
+        &self,
+        learning_id: impl Into<String>,
+        useful: bool,
+        context: impl Into<String>,
+    ) -> Result<()> {
+        let event = StatsEvent::new(StatsEventType::rated(learning_id, useful, context));
+        self.append(&event)
+    }
+
+    /// Append a retroflect event.
+    pub fn append_retroflect(
+        &self,
+        session_id: impl Into<String>,
+        claude_session_id: impl Into<String>,
+        candidates: usize,
+        accepted: usize,
+        project_path: impl Into<String>,
+    ) -> Result<()> {
+        let event = StatsEvent::new(StatsEventType::retroflect(
+            session_id,
+            claude_session_id,
+            candidates,
+            accepted,
+            project_path,
         ));
         self.append(&event)
     }
@@ -651,6 +755,7 @@ mod tests {
             categories.clone(),
             Some("T042".to_string()),
             "markdown",
+            Some(2.75),
         );
         assert_eq!(event.event_name(), "reflection");
 
@@ -661,6 +766,7 @@ mod tests {
             categories: cats,
             ticket_id,
             backend,
+            avg_specificity,
         } = event
         {
             assert_eq!(session_id, "session-123");
@@ -669,6 +775,7 @@ mod tests {
             assert_eq!(cats, categories);
             assert_eq!(ticket_id, Some("T042".to_string()));
             assert_eq!(backend, "markdown");
+            assert_eq!(avg_specificity, Some(2.75));
         } else {
             panic!("Expected Reflection event");
         }
@@ -863,6 +970,7 @@ mod tests {
             vec![LearningCategory::Pitfall, LearningCategory::Pattern],
             Some("T042".to_string()),
             "markdown",
+            Some(3.21),
         ));
         let json = serde_json::to_string(&event).unwrap();
 
@@ -972,6 +1080,7 @@ mod tests {
                 vec![LearningCategory::Pitfall],
                 Some("T001".to_string()),
                 "markdown",
+                None,
             )
             .unwrap();
         logger
@@ -1008,6 +1117,7 @@ mod tests {
                 vec![LearningCategory::Pattern, LearningCategory::Convention],
                 Some("ISSUE-123".to_string()),
                 "total_recall",
+                Some(2.50),
             )
             .unwrap();
 
@@ -1021,6 +1131,7 @@ mod tests {
             categories,
             ticket_id,
             backend,
+            avg_specificity,
         } = &events[0].data
         {
             assert_eq!(session_id, "session-xyz");
@@ -1029,6 +1140,7 @@ mod tests {
             assert_eq!(categories.len(), 2);
             assert_eq!(ticket_id, &Some("ISSUE-123".to_string()));
             assert_eq!(backend, "total_recall");
+            assert_eq!(*avg_specificity, Some(2.50));
         } else {
             panic!("Expected Reflection event");
         }
@@ -1125,5 +1237,91 @@ mod tests {
         // Should successfully read
         let events = logger.read_all().unwrap();
         assert_eq!(events.len(), 100);
+    }
+
+    #[test]
+    fn test_rated_event() {
+        let event = StatsEventType::rated("L001", true, "reflect");
+        assert_eq!(event.event_name(), "rated");
+
+        if let StatsEventType::Rated {
+            learning_id,
+            useful,
+            context,
+        } = event
+        {
+            assert_eq!(learning_id, "L001");
+            assert!(useful);
+            assert_eq!(context, "reflect");
+        } else {
+            panic!("Expected Rated event");
+        }
+    }
+
+    #[test]
+    fn test_rated_event_thumbs_down() {
+        let event = StatsEventType::rated("L002", false, "review");
+        if let StatsEventType::Rated {
+            useful, context, ..
+        } = event
+        {
+            assert!(!useful);
+            assert_eq!(context, "review");
+        } else {
+            panic!("Expected Rated event");
+        }
+    }
+
+    #[test]
+    fn test_rated_serialization() {
+        let event = StatsEvent::new(StatsEventType::rated("L001", true, "reflect"));
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("\"event\":\"rated\""));
+        assert!(json.contains("\"learning_id\":\"L001\""));
+        assert!(json.contains("\"useful\":true"));
+        assert!(json.contains("\"context\":\"reflect\""));
+
+        // Round-trip
+        let parsed: StatsEvent = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.data, event.data);
+    }
+
+    #[test]
+    fn test_logger_append_rated() {
+        let temp = TempDir::new().unwrap();
+        let path = temp.path().join("stats.log");
+        let logger = StatsLogger::new(&path);
+
+        logger.append_rated("L001", true, "reflect").unwrap();
+        logger.append_rated("L002", false, "review").unwrap();
+
+        let events = logger.read_all().unwrap();
+        assert_eq!(events.len(), 2);
+
+        match &events[0].data {
+            StatsEventType::Rated {
+                learning_id,
+                useful,
+                context,
+            } => {
+                assert_eq!(learning_id, "L001");
+                assert!(useful);
+                assert_eq!(context, "reflect");
+            }
+            other => panic!("Expected Rated, got {:?}", other),
+        }
+
+        match &events[1].data {
+            StatsEventType::Rated {
+                learning_id,
+                useful,
+                context,
+            } => {
+                assert_eq!(learning_id, "L002");
+                assert!(!useful);
+                assert_eq!(context, "review");
+            }
+            other => panic!("Expected Rated, got {:?}", other),
+        }
     }
 }

@@ -11,12 +11,75 @@ use serde::{Deserialize, Serialize};
 use crate::backends::{MemoryBackend, SearchFilters, SearchQuery};
 use crate::config::{project_stats_log_path, Config};
 use crate::core::{
-    validate_with_duplicates_and_mode, CandidateLearning, EventType, GateStatus, ReflectionResult,
-    RejectedCandidate, SessionState, WriteGateMode,
+    validate_with_duplicates_and_quality_semantic, CandidateLearning, EventType, GateStatus,
+    QualityCheckMode, ReflectionResult, RejectedCandidate, SessionState, WriteGateMode,
 };
 use crate::error::{FailOpen, Result};
 use crate::stats::StatsLogger;
 use crate::storage::SessionStore;
+
+/// JSON schema example for the reflect command's stdin input.
+///
+/// Used by `--schema` flag and `--help` after_help text.
+pub const REFLECT_SCHEMA_EXAMPLE: &str = r#"{
+  "session_id": "session-abc123",
+  "candidates": [
+    {
+      "category": "pitfall",
+      "summary": "Ecto changeset cast/3 silently drops fields not in the schema",
+      "detail": "When adding a new field to a Phoenix form, cast/3 will silently ignore the field if the schema module hasn't been updated with the matching column. This caused a bug where form data was submitted but never persisted. Always update the schema before the changeset.",
+      "scope": "project",
+      "confidence": "high",
+      "criteria_met": ["behavior-changing"],
+      "tags": ["ecto", "phoenix-forms", "schema-migration"],
+      "context_files": ["lib/my_app/accounts/user.ex"],
+      "relevance_context": "Surface when modifying Ecto schemas or debugging forms that submit but don't persist data. Not relevant for read-only queries or LiveView components without forms."
+    }
+  ],
+  "learnings_used": [
+    { "id": "cl_001", "how": "Applied retry pattern from this learning" }
+  ],
+  "reflection_notes": "Applied cl_001 guidance for error handling."
+}"#;
+
+/// Schema field descriptions for help text.
+pub const REFLECT_SCHEMA_HELP: &str = r#"STDIN JSON SCHEMA:
+  session_id      (required) Session ID for this reflection
+  candidates      (required) Array of candidate learnings:
+    category      (required) One of: pattern, pitfall, convention, dependency, process, domain, debugging
+    summary       (required) Brief description of the learning
+    detail        (required) Detailed explanation (≥20 chars)
+    scope         (optional) "project" (default) or "universal"
+    confidence    (optional) "high", "medium" (default), or "low"
+    criteria_met  (optional) At least one of: behavior-changing, decision-rationale, stable-fact, explicit-request
+    tags          (optional) Categorization tags
+    context_files (optional) Related file paths
+    relevance_context (optional) When/where to surface this learning during retrieval
+  learnings_used  (optional) Array of { id, how } for learnings referenced during the session
+  reflection_notes (optional) Free-form notes about applied learnings
+
+EXAMPLE:
+  grove reflect --json <<'EOF'
+  {
+    "session_id": "session-abc123",
+    "candidates": [{
+      "category": "pitfall",
+      "summary": "Ecto changeset cast/3 silently drops fields not in the schema",
+      "detail": "When adding a new field to a Phoenix form, cast/3 silently ignores fields missing from the schema module. Always update the schema before the changeset.",
+      "criteria_met": ["behavior-changing"],
+      "tags": ["ecto", "phoenix-forms"],
+      "relevance_context": "Surface when modifying Ecto schemas or debugging forms that submit but don't persist. Not relevant for read-only queries."
+    }]
+  }
+  EOF
+
+QUALITY TIPS:
+  - Use project-specific terms in summary/detail (library names, function names, file patterns)
+  - Generic advice ("always validate input") surfaces too broadly — anchor to concrete context
+  - relevance_context should say WHEN to surface AND WHEN NOT TO
+  - Prefer fewer high-quality learnings over many generic ones
+
+Use --schema to dump the full JSON schema example (machine-readable)."#;
 
 /// Options for the reflect command.
 #[derive(Debug, Clone, Default)]
@@ -39,6 +102,15 @@ pub struct LearningReference {
     pub how: Option<String>,
 }
 
+/// A developer rating for a surfaced learning.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct LearningRating {
+    /// The learning ID being rated.
+    pub id: String,
+    /// Whether the learning was useful (true = thumbs up, false = thumbs down).
+    pub useful: bool,
+}
+
 /// Input format for reflection (JSON from stdin).
 #[derive(Debug, Clone, Deserialize)]
 pub struct ReflectInput {
@@ -53,6 +125,9 @@ pub struct ReflectInput {
     /// Free-form reflection notes that may mention applied learnings.
     #[serde(default)]
     pub reflection_notes: Option<String>,
+    /// Optional ratings for previously surfaced learnings.
+    #[serde(default)]
+    pub ratings: Option<Vec<LearningRating>>,
 }
 
 /// Output format for the reflect command.
@@ -189,15 +264,40 @@ impl<S: SessionStore, B: MemoryBackend> ReflectCommand<S, B> {
             .map(|r| r.learning)
             .collect::<Vec<_>>();
 
-        // Get write gate mode from config
+        // Get write gate mode and quality check settings from config
         let write_gate_mode = WriteGateMode::from_config(&self.config.gate.write_gate.mode);
+        let quality_mode =
+            QualityCheckMode::from_config(&self.config.gate.write_gate.quality_check);
+        let min_specificity = self.config.gate.write_gate.min_specificity_score;
 
-        // Validate candidates (schema + write gate + duplicate check)
-        let (mut valid_learnings, rejected) = validate_with_duplicates_and_mode(
+        // Construct judge closure if enabled
+        let judge_fn: Option<Box<crate::core::reflect::JudgeFn>> =
+            if self.config.gate.write_gate.judge_enabled {
+                let judge_config = self.config.judge.clone();
+                Some(Box::new(move |learning| {
+                    crate::core::judge::call_judge(&judge_config, learning)
+                }))
+            } else {
+                None
+            };
+        let judge_borderline = (
+            self.config.gate.write_gate.judge_min_score,
+            self.config.gate.write_gate.judge_max_score,
+            self.config.gate.write_gate.judge_rescue_threshold,
+        );
+
+        // Validate candidates (schema + write gate + quality check + judge rescue + duplicate check)
+        let grove_dir = crate::config::project_grove_dir(Path::new(&session.cwd));
+        let (mut valid_learnings, rejected) = validate_with_duplicates_and_quality_semantic(
             input.candidates.clone(),
             &session_id,
             &existing,
             write_gate_mode,
+            quality_mode,
+            min_specificity,
+            judge_fn.as_deref(),
+            judge_borderline,
+            Some((&grove_dir, &self.config.gate.semantic_dedup)),
         );
 
         let candidates_submitted = input.candidates.len();
@@ -225,6 +325,17 @@ impl<S: SessionStore, B: MemoryBackend> ReflectCommand<S, B> {
             }
         }
 
+        // Compute average specificity score of accepted learnings
+        let avg_specificity = if valid_learnings.is_empty() {
+            None
+        } else {
+            let sum: f64 = valid_learnings
+                .iter()
+                .map(|l| crate::core::quality::assess_specificity(l).composite)
+                .sum();
+            Some(sum / valid_learnings.len() as f64)
+        };
+
         // Log reflection stats event
         let stats_path = project_stats_log_path(Path::new(&session.cwd));
         let stats_logger = StatsLogger::new(&stats_path);
@@ -239,6 +350,7 @@ impl<S: SessionStore, B: MemoryBackend> ReflectCommand<S, B> {
                 categories,
                 ticket_id.clone(),
                 self.backend.name(),
+                avg_specificity,
             )
             .fail_open_default("logging reflection stats");
 
@@ -307,6 +419,15 @@ impl<S: SessionStore, B: MemoryBackend> ReflectCommand<S, B> {
             )),
         );
 
+        // Process ratings for previously surfaced learnings
+        if let Some(ratings) = &input.ratings {
+            for rating in ratings {
+                stats_logger
+                    .append_rated(&rating.id, rating.useful, "reflect")
+                    .fail_open_default("logging learning rating");
+            }
+        }
+
         // Save session (fail-open)
         self.store.put(&session).fail_open_default("saving session");
 
@@ -337,8 +458,13 @@ impl<S: SessionStore, B: MemoryBackend> ReflectCommand<S, B> {
             ));
         }
 
-        serde_json::from_str(&input)
-            .map_err(|e| crate::error::GroveError::serde(format!("Invalid JSON input: {}", e)))
+        serde_json::from_str(&input).map_err(|e| {
+            crate::error::GroveError::serde(format!(
+                "Invalid JSON input: {}\n\nHint: run `grove reflect --schema` to see the expected JSON format, \
+                 or `grove reflect --help` for full documentation.",
+                e
+            ))
+        })
     }
 
     /// Format output based on options.
@@ -528,6 +654,7 @@ mod tests {
             criteria_met: vec!["behavior_changing".to_string()],
             tags: vec!["async".to_string(), "io".to_string()],
             context_files: None,
+        relevance_context: None,
         }
     }
 
@@ -589,6 +716,7 @@ mod tests {
             candidates: vec![valid_candidate()],
             learnings_used: None,
             reflection_notes: None,
+            ratings: None,
         };
 
         let options = ReflectOptions::default();
@@ -615,6 +743,7 @@ mod tests {
             candidates: vec![invalid],
             learnings_used: None,
             reflection_notes: None,
+            ratings: None,
         };
 
         let options = ReflectOptions::default();
@@ -643,6 +772,7 @@ mod tests {
             candidates: vec![valid_candidate(), invalid],
             learnings_used: None,
             reflection_notes: None,
+            ratings: None,
         };
 
         let options = ReflectOptions::default();
@@ -670,6 +800,7 @@ mod tests {
             candidates: vec![valid_candidate()],
             learnings_used: None,
             reflection_notes: None,
+            ratings: None,
         };
 
         let options = ReflectOptions::default();
@@ -701,6 +832,7 @@ mod tests {
             candidates: vec![valid_candidate()],
             learnings_used: None,
             reflection_notes: None,
+            ratings: None,
         };
 
         let options = ReflectOptions::default();
@@ -719,6 +851,7 @@ mod tests {
             candidates: vec![valid_candidate()],
             learnings_used: None,
             reflection_notes: None,
+            ratings: None,
         };
 
         let output2 = cmd2.run_with_input(&input2, &options);
@@ -741,6 +874,7 @@ mod tests {
             candidates: vec![],
             learnings_used: None,
             reflection_notes: None,
+            ratings: None,
         };
 
         let options = ReflectOptions::default();
@@ -902,6 +1036,7 @@ mod tests {
                 how: Some("Used for retry logic".to_string()),
             }]),
             reflection_notes: None,
+            ratings: None,
         };
 
         let injected = vec!["cl_001".to_string(), "cl_002".to_string()];
@@ -918,6 +1053,7 @@ mod tests {
             candidates: vec![],
             learnings_used: None,
             reflection_notes: Some("I applied learning cl_001 for the API calls and used learning cl_002 for error handling.".to_string()),
+            ratings: None,
         };
 
         let injected = vec![
@@ -940,6 +1076,7 @@ mod tests {
             candidates: vec![],
             learnings_used: None,
             reflection_notes: Some("The fix was based on cl_001 approach.".to_string()),
+            ratings: None,
         };
 
         let injected = vec!["cl_001".to_string()];
@@ -959,6 +1096,7 @@ mod tests {
             candidates: vec![candidate],
             learnings_used: None,
             reflection_notes: None,
+            ratings: None,
         };
 
         let injected = vec!["cl_001".to_string()];
@@ -975,6 +1113,7 @@ mod tests {
             candidates: vec![],
             learnings_used: None,
             reflection_notes: Some("Applied Learning CL_001 for the fix.".to_string()),
+            ratings: None,
         };
 
         let injected = vec!["cl_001".to_string()];
@@ -990,6 +1129,7 @@ mod tests {
             candidates: vec![],
             learnings_used: None,
             reflection_notes: Some("I did not use any previous learnings.".to_string()),
+            ratings: None,
         };
 
         let injected = vec!["cl_001".to_string(), "cl_002".to_string()];
@@ -1008,6 +1148,7 @@ mod tests {
                 how: None,
             }]),
             reflection_notes: None,
+            ratings: None,
         };
 
         let injected = vec!["cl_001".to_string()];
@@ -1040,5 +1181,152 @@ mod tests {
         assert_eq!(ValidationStage::Schema.to_string(), "schema");
         assert_eq!(ValidationStage::WriteGate.to_string(), "write_gate");
         assert_eq!(ValidationStage::Duplicate.to_string(), "duplicate");
+    }
+
+    #[test]
+    fn test_reflect_invalid_json_error_includes_schema_hint() {
+        // Simulate what happens when invalid JSON is parsed
+        let bad_json = r#"{"not_valid": true}"#;
+        let result: std::result::Result<ReflectInput, _> = serde_json::from_str(bad_json);
+        assert!(result.is_err());
+
+        // Verify the error wrapping logic produces the hint
+        let wrapped = format!(
+            "Invalid JSON input: {}\n\nHint: run `grove reflect --schema` to see the expected JSON format, \
+             or `grove reflect --help` for full documentation.",
+            result.unwrap_err()
+        );
+        assert!(
+            wrapped.contains("grove reflect --schema"),
+            "Error should mention --schema flag"
+        );
+        assert!(
+            wrapped.contains("grove reflect --help"),
+            "Error should mention --help"
+        );
+    }
+
+    #[test]
+    fn test_reflect_empty_stdin_error_message() {
+        // Simulate what run() returns when stdin is empty
+        // (we can't easily mock stdin, so test the output path)
+        let output = ReflectOutput::failure("Failed to read stdin: No input provided on stdin");
+        assert!(!output.success);
+        assert!(output.error.unwrap().contains("No input provided"));
+    }
+
+    #[test]
+    fn test_reflect_schema_example_is_valid_json() {
+        let parsed: std::result::Result<serde_json::Value, _> =
+            serde_json::from_str(REFLECT_SCHEMA_EXAMPLE);
+        assert!(
+            parsed.is_ok(),
+            "REFLECT_SCHEMA_EXAMPLE must be valid JSON: {:?}",
+            parsed.err()
+        );
+    }
+
+    #[test]
+    fn test_reflect_schema_example_deserializes_to_reflect_input() {
+        let parsed: std::result::Result<ReflectInput, _> =
+            serde_json::from_str(REFLECT_SCHEMA_EXAMPLE);
+        assert!(
+            parsed.is_ok(),
+            "REFLECT_SCHEMA_EXAMPLE must deserialize into ReflectInput: {:?}",
+            parsed.err()
+        );
+        let input = parsed.unwrap();
+        assert_eq!(input.session_id, "session-abc123");
+        assert_eq!(input.candidates.len(), 1);
+        assert_eq!(input.candidates[0].category, "pitfall");
+        assert!(input.learnings_used.is_some());
+    }
+
+    #[test]
+    fn test_reflect_input_with_ratings() {
+        let json = r#"{
+            "session_id": "test-session",
+            "candidates": [],
+            "ratings": [
+                {"id": "cl_001", "useful": true},
+                {"id": "cl_002", "useful": false}
+            ]
+        }"#;
+        let input: ReflectInput = serde_json::from_str(json).unwrap();
+        let ratings = input.ratings.unwrap();
+        assert_eq!(ratings.len(), 2);
+        assert_eq!(ratings[0].id, "cl_001");
+        assert!(ratings[0].useful);
+        assert_eq!(ratings[1].id, "cl_002");
+        assert!(!ratings[1].useful);
+    }
+
+    #[test]
+    fn test_reflect_input_without_ratings() {
+        let json = r#"{
+            "session_id": "test-session",
+            "candidates": []
+        }"#;
+        let input: ReflectInput = serde_json::from_str(json).unwrap();
+        assert!(input.ratings.is_none());
+    }
+
+    #[test]
+    fn test_reflect_with_ratings_writes_to_stats() {
+        let (temp, store, backend) = setup();
+        let config = Config::default();
+
+        // Create a session in the working directory
+        let mut session = SessionState::new_fallback("test-session");
+        session.cwd = temp.path().to_string_lossy().to_string();
+        store.put(&session).unwrap();
+
+        let cmd = ReflectCommand::new(Arc::clone(&store), backend, config);
+
+        let input = ReflectInput {
+            session_id: "test-session".to_string(),
+            candidates: vec![valid_candidate()],
+            learnings_used: None,
+            reflection_notes: None,
+            ratings: Some(vec![
+                LearningRating {
+                    id: "cl_surfaced_001".to_string(),
+                    useful: true,
+                },
+                LearningRating {
+                    id: "cl_surfaced_002".to_string(),
+                    useful: false,
+                },
+            ]),
+        };
+
+        let options = ReflectOptions::default();
+        let output = cmd.run_with_input(&input, &options);
+        assert!(output.success);
+
+        // Verify rated events were written to stats log
+        let stats_path = project_stats_log_path(temp.path());
+        let logger = crate::stats::StatsLogger::new(&stats_path);
+        let events = logger.read_all().unwrap();
+
+        let rated_events: Vec<_> = events
+            .iter()
+            .filter(|e| matches!(&e.data, crate::stats::StatsEventType::Rated { .. }))
+            .collect();
+
+        assert_eq!(rated_events.len(), 2);
+
+        match &rated_events[0].data {
+            crate::stats::StatsEventType::Rated {
+                learning_id,
+                useful,
+                context,
+            } => {
+                assert_eq!(learning_id, "cl_surfaced_001");
+                assert!(useful);
+                assert_eq!(context, "reflect");
+            }
+            _ => panic!("Expected Rated event"),
+        }
     }
 }

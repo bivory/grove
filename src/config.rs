@@ -34,6 +34,10 @@ pub struct Config {
     pub retrieval: RetrievalConfig,
     /// Circuit breaker configuration.
     pub circuit_breaker: CircuitBreakerConfig,
+    /// Context signal configuration.
+    pub context: ContextConfig,
+    /// LLM judge configuration for replay harness evaluation.
+    pub judge: JudgeConfig,
 }
 
 /// Ticketing system discovery configuration.
@@ -87,6 +91,9 @@ pub struct GateConfig {
     pub auto_skip: AutoSkipConfig,
     /// Write gate configuration for filtering learnings.
     pub write_gate: WriteGateConfig,
+    /// Semantic deduplication configuration (requires `semantic-dedup` feature).
+    #[serde(default)]
+    pub semantic_dedup: SemanticDedupConfig,
     /// Whether to count skipped sessions as dismissals for unreferenced learnings.
     /// Default is false (skip is "no signal" - doesn't affect learning quality tracking).
     #[serde(default)]
@@ -107,22 +114,117 @@ pub struct WriteGateConfig {
     /// - "lenient": Warn but accept learnings that don't meet criteria
     /// - "disabled": Accept all learnings without filtering
     pub mode: String,
+    /// Quality check mode: "enforce" (default), "warn", or "disabled".
+    ///
+    /// Controls specificity heuristic checks (NED, PSTF, generic phrase detection):
+    /// - "enforce": Reject learnings below min_specificity_score
+    /// - "warn": Accept low-specificity learnings but log a warning
+    /// - "disabled": Skip specificity check entirely
+    pub quality_check: String,
+    /// Minimum composite specificity score (default: 1.5).
+    ///
+    /// Learnings with a composite score below this threshold are rejected
+    /// (when quality_check is "enforce") or flagged (when "warn").
+    pub min_specificity_score: f64,
+    /// Whether to enable the LLM judge for borderline learnings (default: false).
+    ///
+    /// When enabled, learnings with composite specificity scores in the borderline
+    /// zone (judge_min_score..=judge_max_score) are sent to an LLM for assessment
+    /// before being rejected. Requires external API access.
+    #[serde(default)]
+    pub judge_enabled: bool,
+    /// Minimum borderline composite score to trigger LLM judge (default: 1.5).
+    #[serde(default = "default_judge_min_score")]
+    pub judge_min_score: f64,
+    /// Maximum borderline composite score to trigger LLM judge (default: 2.5).
+    #[serde(default = "default_judge_max_score")]
+    pub judge_max_score: f64,
+    /// Minimum LLM judge score to rescue a borderline learning (default: 3.0).
+    #[serde(default = "default_judge_rescue_threshold")]
+    pub judge_rescue_threshold: f64,
 }
 
 /// Valid values for the write gate mode field.
 pub const VALID_WRITE_GATE_MODES: &[&str] = &["strict", "lenient", "disabled"];
+
+/// Valid values for the quality check mode field.
+pub const VALID_QUALITY_CHECK_MODES: &[&str] = &["enforce", "warn", "disabled"];
 
 impl WriteGateConfig {
     /// Check if a mode value is valid.
     pub fn is_valid_mode(value: &str) -> bool {
         VALID_WRITE_GATE_MODES.contains(&value)
     }
+
+    /// Check if a quality check value is valid.
+    pub fn is_valid_quality_check(value: &str) -> bool {
+        VALID_QUALITY_CHECK_MODES.contains(&value)
+    }
+
+    /// Check if a min specificity score value is valid.
+    pub fn is_valid_min_specificity_score(value: f64) -> bool {
+        (0.0..=5.0).contains(&value)
+    }
+}
+
+fn default_judge_min_score() -> f64 {
+    1.5
+}
+
+fn default_judge_max_score() -> f64 {
+    2.5
+}
+
+fn default_judge_rescue_threshold() -> f64 {
+    3.0
 }
 
 impl Default for WriteGateConfig {
     fn default() -> Self {
         Self {
             mode: "strict".to_string(),
+            quality_check: "enforce".to_string(),
+            min_specificity_score: 1.5,
+            judge_enabled: false,
+            judge_min_score: default_judge_min_score(),
+            judge_max_score: default_judge_max_score(),
+            judge_rescue_threshold: default_judge_rescue_threshold(),
+        }
+    }
+}
+
+/// Semantic deduplication configuration.
+///
+/// When enabled (requires `semantic-dedup` feature), embeds learning summaries
+/// using an ONNX model and rejects candidates with cosine similarity >= threshold
+/// against existing learnings. Falls back to string-based dedup when disabled.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct SemanticDedupConfig {
+    /// Whether semantic deduplication is enabled.
+    /// Default: false. Requires the `semantic-dedup` feature to have effect.
+    pub enabled: bool,
+    /// Cosine similarity threshold above which a candidate is considered a duplicate.
+    /// Default: 0.90. Range: 0.0..=1.0.
+    pub similarity_threshold: f64,
+}
+
+fn default_similarity_threshold() -> f64 {
+    0.90
+}
+
+impl SemanticDedupConfig {
+    /// Check if a similarity threshold value is valid.
+    pub fn is_valid_similarity_threshold(value: f64) -> bool {
+        (0.0..=1.0).contains(&value)
+    }
+}
+
+impl Default for SemanticDedupConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            similarity_threshold: default_similarity_threshold(),
         }
     }
 }
@@ -144,6 +246,9 @@ pub const VALID_DECIDERS: &[&str] = &["agent", "always", "never"];
 
 /// Valid values for the retrieval strategy field.
 pub const VALID_STRATEGIES: &[&str] = &["conservative", "moderate", "aggressive"];
+
+/// Valid values for the scoring backend field.
+pub const VALID_SCORING_BACKENDS: &[&str] = &["keyword", "bm25"];
 
 impl AutoSkipConfig {
     /// Check if a decider value is valid.
@@ -178,6 +283,11 @@ pub struct DecayConfig {
     /// Debugging/domain learnings expect lower hit rates than patterns.
     #[serde(default = "default_category_aware")]
     pub category_aware: bool,
+    /// After this many surfacings with zero references, ignore last_surfaced
+    /// when computing decay. This fast-tracks dead learnings that keep
+    /// resetting their decay clock by being surfaced but never used.
+    #[serde(default = "default_fast_track_surfacings")]
+    pub fast_track_surfacings: u32,
 }
 
 fn default_min_dismissals() -> u32 {
@@ -186,6 +296,10 @@ fn default_min_dismissals() -> u32 {
 
 fn default_category_aware() -> bool {
     true
+}
+
+fn default_fast_track_surfacings() -> u32 {
+    5
 }
 
 impl DecayConfig {
@@ -229,6 +343,123 @@ impl Default for DecayConfig {
             min_dismissals_for_decay: 3,
             // Apply category-specific thresholds
             category_aware: true,
+            // After 5 surfacings with 0 references, stop resetting decay clock
+            fast_track_surfacings: 5,
+        }
+    }
+}
+
+/// Per-category half-life configuration for recency decay.
+///
+/// Different learning categories have different shelf lives:
+/// - Debugging tips decay fast (45 days) — specific to recent code
+/// - Conventions decay slowly (180 days) — stable project norms
+///
+/// Each value is the number of days at which the recency weight drops to ~0.3.
+/// Categories not specified use `recency_half_life_days` as fallback.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct CategoryHalfLifeConfig {
+    /// Debugging: diagnostic approaches, error resolution (most time-sensitive).
+    pub debugging: u32,
+    /// Pitfall: gotchas and mistakes to avoid.
+    pub pitfall: u32,
+    /// Pattern: reusable code patterns (default baseline).
+    pub pattern: u32,
+    /// Process: workflow and development process insights.
+    pub process: u32,
+    /// Convention: project conventions and norms (most stable).
+    pub convention: u32,
+    /// Domain: business logic and domain knowledge.
+    pub domain: u32,
+    /// Dependency: library/API knowledge.
+    pub dependency: u32,
+}
+
+impl Default for CategoryHalfLifeConfig {
+    fn default() -> Self {
+        Self {
+            debugging: 90,
+            pitfall: 90,
+            pattern: 90,
+            process: 90,
+            convention: 90,
+            domain: 90,
+            dependency: 90,
+        }
+    }
+}
+
+impl CategoryHalfLifeConfig {
+    /// Get the half-life for a specific learning category.
+    pub fn for_category(&self, category: &LearningCategory) -> u32 {
+        match category {
+            LearningCategory::Debugging => self.debugging,
+            LearningCategory::Pitfall => self.pitfall,
+            LearningCategory::Pattern => self.pattern,
+            LearningCategory::Process => self.process,
+            LearningCategory::Convention => self.convention,
+            LearningCategory::Domain => self.domain,
+            LearningCategory::Dependency => self.dependency,
+        }
+    }
+}
+
+/// Intent filter configuration for post-retrieval filtering.
+///
+/// When enabled, extracts keywords from the user's first message in the transcript
+/// and filters retrieved learnings that have no vocabulary overlap with the user's intent.
+/// This reduces noise from BM25 false positives.
+///
+/// Disabled by default pending multi-corpus validation (grove-5sj7dsjh).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct IntentFilterConfig {
+    /// Whether intent-based filtering is enabled.
+    pub enabled: bool,
+    /// Minimum keyword overlap required to keep a learning.
+    pub min_overlap: usize,
+    /// Maximum keywords to extract from the user's first message.
+    pub max_keywords: usize,
+}
+
+impl Default for IntentFilterConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            min_overlap: 1,
+            max_keywords: 15,
+        }
+    }
+}
+
+/// LLM reranking configuration for deferred injection.
+///
+/// When enabled, after BM25 retrieves top-K candidates, an LLM (Haiku via CLI)
+/// reranks them by relevance to the current session context (tool name, tool input,
+/// git branch, recent files). This provides +15-25% relevance improvement.
+///
+/// Disabled by default. Uses the same backend infrastructure as `JudgeConfig`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct RerankConfig {
+    /// Whether LLM reranking is enabled during deferred injection.
+    pub enabled: bool,
+    /// Timeout in seconds for the reranking LLM call.
+    pub timeout_seconds: u32,
+    /// Model to use for reranking. For CLI backend: short name (e.g., "haiku").
+    pub model: String,
+    /// Backend to use: "cli" (claude CLI) or "api" (curl + ANTHROPIC_API_KEY).
+    pub backend: String,
+}
+
+impl Default for RerankConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            timeout_seconds: 15,
+            model: "haiku".to_string(),
+            backend: "cli".to_string(),
         }
     }
 }
@@ -244,13 +475,63 @@ pub struct RetrievalConfig {
     /// Below this number of active learnings, conservative downgrades to moderate.
     pub min_pool_size: u32,
     /// Days at which recency weight drops to ~0.3 (controls decay speed).
+    /// Acts as global override when `category_half_lives` is also set.
     pub recency_half_life_days: u32,
+    /// Per-category half-life overrides for recency decay.
+    pub category_half_lives: CategoryHalfLifeConfig,
+    /// Scoring backend: "keyword" (default) or "bm25" (Tantivy BM25).
+    pub scoring_backend: String,
+    /// Minimum top score to trigger injection (0.0 to 1.0, default: 0.1).
+    /// If the highest-scoring learning is below this threshold, injection is suppressed entirely.
+    pub min_confidence_threshold: f64,
+    /// Minimum gap between top and median score (default: 0.05).
+    /// If the score gap is below this, the retriever has no strong signal and injection is suppressed.
+    pub min_score_gap: f64,
+    /// Ratio of top score below which learnings are excluded (default: 0.3).
+    /// Only learnings scoring >= top_score * dynamic_k_ratio are injected.
+    pub dynamic_k_ratio: f64,
+    /// Enable per-query adaptive dynamic K (default: false).
+    /// When enabled, the dynamic_k_ratio is adjusted per query based on stats
+    /// cache hit rates and per-category dismiss rates, with a gentle CV nudge.
+    /// Defaults to off until a repo accumulates enough stats data for the
+    /// data-driven levels (L2/L3) to self-calibrate.
+    pub adaptive_dk: bool,
+    /// Corpus size threshold for retrieval profile selection (default: 50).
+    /// Below this count, boosted BM25 is used; at or above, plain BM25.
+    pub corpus_size_threshold: usize,
+    /// Enable corpus-derived vocabulary enrichment for BM25 queries (default: true).
+    /// Extracts domain terms from learning tags, summaries, and relevance context,
+    /// then augments queries with matching terms to bridge the BM25 vocabulary gap.
+    pub corpus_enrichment: bool,
+    /// Intent-based post-retrieval filter configuration.
+    pub intent_filter: IntentFilterConfig,
+    /// LLM reranking configuration for deferred injection.
+    pub rerank: RerankConfig,
 }
 
 impl RetrievalConfig {
     /// Check if a strategy value is valid.
     pub fn is_valid_strategy(value: &str) -> bool {
         VALID_STRATEGIES.contains(&value)
+    }
+
+    /// Check if a scoring backend value is valid.
+    pub fn is_valid_scoring_backend(value: &str) -> bool {
+        VALID_SCORING_BACKENDS.contains(&value)
+    }
+
+    /// Get the half-life for a specific category.
+    ///
+    /// If `recency_half_life_days` differs from the default (90), it acts as a
+    /// global override for all categories. Otherwise, per-category values from
+    /// `category_half_lives` are used.
+    pub fn half_life_for_category(&self, category: &LearningCategory) -> u32 {
+        if self.recency_half_life_days != 90 {
+            // Global override: user explicitly set a single half-life
+            self.recency_half_life_days
+        } else {
+            self.category_half_lives.for_category(category)
+        }
     }
 }
 
@@ -261,6 +542,39 @@ impl Default for RetrievalConfig {
             strategy: "moderate".to_string(),
             min_pool_size: 20,
             recency_half_life_days: 90,
+            category_half_lives: CategoryHalfLifeConfig::default(),
+            scoring_backend: "bm25".to_string(),
+            min_confidence_threshold: 0.1,
+            min_score_gap: 0.05,
+            dynamic_k_ratio: 0.3,
+            adaptive_dk: false,
+            corpus_size_threshold: 50,
+            corpus_enrichment: true,
+            intent_filter: IntentFilterConfig::default(),
+            rerank: RerankConfig::default(),
+        }
+    }
+}
+
+/// Retrieval profile selected dynamically based on corpus size.
+///
+/// Below the threshold, boosted BM25 improves recall for small corpora.
+/// At or above the threshold, plain BM25 provides better precision.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RetrievalProfile {
+    /// Plain BM25 — better precision for large corpora.
+    Standard,
+    /// Boosted BM25 — better recall for small corpora.
+    SmallCorpus,
+}
+
+impl RetrievalProfile {
+    /// Select profile based on learning count vs threshold.
+    pub fn select(learning_count: usize, threshold: usize) -> Self {
+        if learning_count < threshold {
+            Self::SmallCorpus
+        } else {
+            Self::Standard
         }
     }
 }
@@ -305,6 +619,69 @@ impl Default for CircuitBreakerConfig {
             max_blocks: 3,
             cooldown_seconds: 300,
         }
+    }
+}
+
+/// Context signal configuration for session-start retrieval.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct ContextConfig {
+    /// Query ticketing CLI for active ticket metadata at session start.
+    /// Auto-enabled when tissue is detected. Set false to disable.
+    pub active_ticket_query: bool,
+    /// Timeout in milliseconds for ticketing CLI queries.
+    pub active_ticket_timeout_ms: u64,
+    /// Enable deferred injection via PreToolUse hook.
+    /// When true, the first tool call extracts keywords from tool_input
+    /// and re-runs retrieval with augmented signals.
+    pub deferred_injection: bool,
+}
+
+impl Default for ContextConfig {
+    fn default() -> Self {
+        Self {
+            active_ticket_query: true,
+            active_ticket_timeout_ms: 2000,
+            deferred_injection: true,
+        }
+    }
+}
+
+/// LLM judge configuration for replay harness evaluation.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct JudgeConfig {
+    /// Backend to use: "api" (curl + ANTHROPIC_API_KEY with prompt caching)
+    /// or "cli" (claude CLI, uses Max plan).
+    pub backend: String,
+    /// Model ID. For "api" backend use full ID (e.g., "claude-haiku-4-5-20251001").
+    /// For "cli" backend use short name (e.g., "haiku").
+    pub model: String,
+    /// Anthropic API base URL (only used by "api" backend).
+    pub api_url: String,
+    /// Path to the judge cache file. Stores (session, learning) → score
+    /// so pairs are only judged once.
+    pub cache_path: String,
+    /// Max seconds to wait for batch completion (default: 3600 = 1 hour).
+    pub batch_timeout: u64,
+}
+
+impl Default for JudgeConfig {
+    fn default() -> Self {
+        Self {
+            backend: "cli".to_string(),
+            model: "haiku".to_string(),
+            api_url: "https://api.anthropic.com/v1/messages".to_string(),
+            cache_path: String::new(), // empty = auto-detect from project
+            batch_timeout: 3600,
+        }
+    }
+}
+
+impl JudgeConfig {
+    /// Get the batch timeout in seconds.
+    pub fn batch_timeout(&self) -> u64 {
+        self.batch_timeout
     }
 }
 
@@ -444,6 +821,95 @@ impl Config {
             }
         }
 
+        // GROVE_SCORING_BACKEND
+        if let Ok(val) = env::var("GROVE_SCORING_BACKEND") {
+            if RetrievalConfig::is_valid_scoring_backend(&val) {
+                self.retrieval.scoring_backend = val;
+            } else {
+                eprintln!(
+                    "Warning: Invalid GROVE_SCORING_BACKEND value '{}'. \
+                    Valid values: {:?}. Using default '{}'.",
+                    val, VALID_SCORING_BACKENDS, self.retrieval.scoring_backend
+                );
+            }
+        }
+
+        // GROVE_MIN_CONFIDENCE_THRESHOLD
+        if let Ok(val) = env::var("GROVE_MIN_CONFIDENCE_THRESHOLD") {
+            match val.parse::<f64>() {
+                Ok(n) => {
+                    if (0.0..=1.0).contains(&n) {
+                        self.retrieval.min_confidence_threshold = n;
+                    } else {
+                        eprintln!(
+                            "Warning: Invalid GROVE_MIN_CONFIDENCE_THRESHOLD value '{}'. \
+                            Must be in range [0.0, 1.0]. Using default '{}'.",
+                            n, self.retrieval.min_confidence_threshold
+                        );
+                    }
+                }
+                Err(_) => eprintln!(
+                    "Warning: Invalid GROVE_MIN_CONFIDENCE_THRESHOLD value '{}'. \
+                    Expected a decimal number. Using default '{}'.",
+                    val, self.retrieval.min_confidence_threshold
+                ),
+            }
+        }
+
+        // GROVE_MIN_SCORE_GAP
+        if let Ok(val) = env::var("GROVE_MIN_SCORE_GAP") {
+            match val.parse::<f64>() {
+                Ok(n) => {
+                    if n >= 0.0 {
+                        self.retrieval.min_score_gap = n;
+                    } else {
+                        eprintln!(
+                            "Warning: Invalid GROVE_MIN_SCORE_GAP value '{}'. \
+                            Must be >= 0.0. Using default '{}'.",
+                            n, self.retrieval.min_score_gap
+                        );
+                    }
+                }
+                Err(_) => eprintln!(
+                    "Warning: Invalid GROVE_MIN_SCORE_GAP value '{}'. \
+                    Expected a decimal number. Using default '{}'.",
+                    val, self.retrieval.min_score_gap
+                ),
+            }
+        }
+
+        // GROVE_DYNAMIC_K_RATIO
+        if let Ok(val) = env::var("GROVE_DYNAMIC_K_RATIO") {
+            match val.parse::<f64>() {
+                Ok(n) => {
+                    if (0.0..=1.0).contains(&n) {
+                        self.retrieval.dynamic_k_ratio = n;
+                    } else {
+                        eprintln!(
+                            "Warning: Invalid GROVE_DYNAMIC_K_RATIO value '{}'. \
+                            Must be in range [0.0, 1.0]. Using default '{}'.",
+                            n, self.retrieval.dynamic_k_ratio
+                        );
+                    }
+                }
+                Err(_) => eprintln!(
+                    "Warning: Invalid GROVE_DYNAMIC_K_RATIO value '{}'. \
+                    Expected a decimal number. Using default '{}'.",
+                    val, self.retrieval.dynamic_k_ratio
+                ),
+            }
+        }
+
+        // GROVE_ADAPTIVE_DK
+        if let Ok(val) = env::var("GROVE_ADAPTIVE_DK") {
+            self.retrieval.adaptive_dk = val == "true" || val == "1";
+        }
+
+        // GROVE_CORPUS_ENRICHMENT
+        if let Ok(val) = env::var("GROVE_CORPUS_ENRICHMENT") {
+            self.retrieval.corpus_enrichment = val == "true" || val == "1";
+        }
+
         // GROVE_AUTO_SKIP_ENABLED
         if let Ok(val) = env::var("GROVE_AUTO_SKIP_ENABLED") {
             self.gate.auto_skip.enabled = val == "true" || val == "1";
@@ -487,6 +953,134 @@ impl Config {
             }
         }
 
+        // GROVE_QUALITY_CHECK
+        if let Ok(val) = env::var("GROVE_QUALITY_CHECK") {
+            if WriteGateConfig::is_valid_quality_check(&val) {
+                self.gate.write_gate.quality_check = val;
+            } else {
+                eprintln!(
+                    "Warning: Invalid GROVE_QUALITY_CHECK value '{}'. \
+                    Valid values: {:?}. Using default '{}'.",
+                    val, VALID_QUALITY_CHECK_MODES, self.gate.write_gate.quality_check
+                );
+            }
+        }
+
+        // GROVE_MIN_SPECIFICITY_SCORE
+        if let Ok(val) = env::var("GROVE_MIN_SPECIFICITY_SCORE") {
+            match val.parse::<f64>() {
+                Ok(n) => {
+                    if WriteGateConfig::is_valid_min_specificity_score(n) {
+                        self.gate.write_gate.min_specificity_score = n;
+                    } else {
+                        eprintln!(
+                            "Warning: Invalid GROVE_MIN_SPECIFICITY_SCORE value '{}'. \
+                            Must be in range [0.0, 5.0]. Using default '{}'.",
+                            n, self.gate.write_gate.min_specificity_score
+                        );
+                    }
+                }
+                Err(_) => eprintln!(
+                    "Warning: Invalid GROVE_MIN_SPECIFICITY_SCORE value '{}'. \
+                    Expected a decimal number. Using default '{}'.",
+                    val, self.gate.write_gate.min_specificity_score
+                ),
+            }
+        }
+
+        // GROVE_JUDGE_ENABLED
+        if let Ok(val) = env::var("GROVE_JUDGE_ENABLED") {
+            self.gate.write_gate.judge_enabled = val == "true" || val == "1";
+        }
+
+        // GROVE_JUDGE_MIN_SCORE
+        if let Ok(val) = env::var("GROVE_JUDGE_MIN_SCORE") {
+            match val.parse::<f64>() {
+                Ok(n) => {
+                    if WriteGateConfig::is_valid_min_specificity_score(n) {
+                        self.gate.write_gate.judge_min_score = n;
+                    } else {
+                        eprintln!(
+                            "Warning: Invalid GROVE_JUDGE_MIN_SCORE value '{}'. \
+                            Must be in range [0.0, 5.0]. Using default '{}'.",
+                            n, self.gate.write_gate.judge_min_score
+                        );
+                    }
+                }
+                Err(_) => eprintln!(
+                    "Warning: Invalid GROVE_JUDGE_MIN_SCORE value '{}'. \
+                    Expected a decimal number. Using default '{}'.",
+                    val, self.gate.write_gate.judge_min_score
+                ),
+            }
+        }
+
+        // GROVE_JUDGE_MAX_SCORE
+        if let Ok(val) = env::var("GROVE_JUDGE_MAX_SCORE") {
+            match val.parse::<f64>() {
+                Ok(n) => {
+                    if WriteGateConfig::is_valid_min_specificity_score(n) {
+                        self.gate.write_gate.judge_max_score = n;
+                    } else {
+                        eprintln!(
+                            "Warning: Invalid GROVE_JUDGE_MAX_SCORE value '{}'. \
+                            Must be in range [0.0, 5.0]. Using default '{}'.",
+                            n, self.gate.write_gate.judge_max_score
+                        );
+                    }
+                }
+                Err(_) => eprintln!(
+                    "Warning: Invalid GROVE_JUDGE_MAX_SCORE value '{}'. \
+                    Expected a decimal number. Using default '{}'.",
+                    val, self.gate.write_gate.judge_max_score
+                ),
+            }
+        }
+
+        // GROVE_JUDGE_RESCUE_THRESHOLD
+        if let Ok(val) = env::var("GROVE_JUDGE_RESCUE_THRESHOLD") {
+            match val.parse::<f64>() {
+                Ok(n) => {
+                    if WriteGateConfig::is_valid_min_specificity_score(n) {
+                        self.gate.write_gate.judge_rescue_threshold = n;
+                    } else {
+                        eprintln!(
+                            "Warning: Invalid GROVE_JUDGE_RESCUE_THRESHOLD value '{}'. \
+                            Must be in range [0.0, 5.0]. Using default '{}'.",
+                            n, self.gate.write_gate.judge_rescue_threshold
+                        );
+                    }
+                }
+                Err(_) => eprintln!(
+                    "Warning: Invalid GROVE_JUDGE_RESCUE_THRESHOLD value '{}'. \
+                    Expected a decimal number. Using default '{}'.",
+                    val, self.gate.write_gate.judge_rescue_threshold
+                ),
+            }
+        }
+
+        // GROVE_SEMANTIC_DEDUP_THRESHOLD
+        if let Ok(val) = env::var("GROVE_SEMANTIC_DEDUP_THRESHOLD") {
+            match val.parse::<f64>() {
+                Ok(n) => {
+                    if SemanticDedupConfig::is_valid_similarity_threshold(n) {
+                        self.gate.semantic_dedup.similarity_threshold = n;
+                    } else {
+                        eprintln!(
+                            "Warning: Invalid GROVE_SEMANTIC_DEDUP_THRESHOLD value '{}'. \
+                            Must be in range [0.0, 1.0]. Using default '{}'.",
+                            n, self.gate.semantic_dedup.similarity_threshold
+                        );
+                    }
+                }
+                Err(_) => eprintln!(
+                    "Warning: Invalid GROVE_SEMANTIC_DEDUP_THRESHOLD value '{}'. \
+                    Expected a decimal number. Using default '{}'.",
+                    val, self.gate.semantic_dedup.similarity_threshold
+                ),
+            }
+        }
+
         // GROVE_DECAY_DAYS
         if let Ok(val) = env::var("GROVE_DECAY_DAYS") {
             match val.parse::<u32>() {
@@ -518,6 +1112,36 @@ impl Config {
                     Expected a decimal number. Using default '{}'.",
                     val, self.decay.immunity_hit_rate
                 ),
+            }
+        }
+
+        // GROVE_ACTIVE_TICKET_QUERY
+        if let Ok(val) = env::var("GROVE_ACTIVE_TICKET_QUERY") {
+            self.context.active_ticket_query = val == "true" || val == "1";
+        }
+
+        // GROVE_ACTIVE_TICKET_TIMEOUT_MS
+        if let Ok(val) = env::var("GROVE_ACTIVE_TICKET_TIMEOUT_MS") {
+            match val.parse::<u64>() {
+                Ok(n) => self.context.active_ticket_timeout_ms = n,
+                Err(_) => eprintln!(
+                    "Warning: Invalid GROVE_ACTIVE_TICKET_TIMEOUT_MS value '{}'. \
+                    Expected a positive integer. Using default '{}'.",
+                    val, self.context.active_ticket_timeout_ms
+                ),
+            }
+        }
+
+        // GROVE_LLM_JUDGE_BACKEND
+        if let Ok(val) = env::var("GROVE_LLM_JUDGE_BACKEND") {
+            if val == "cli" || val == "api" {
+                self.judge.backend = val;
+            } else {
+                eprintln!(
+                    "Warning: Invalid GROVE_LLM_JUDGE_BACKEND value '{}'. \
+                    Valid values: [\"cli\", \"api\"]. Using default '{}'.",
+                    val, self.judge.backend
+                );
             }
         }
     }
@@ -578,6 +1202,51 @@ impl Config {
         if other.gate.write_gate.mode != default_write_gate.mode {
             self.gate.write_gate.mode = other.gate.write_gate.mode;
         }
+        if other.gate.write_gate.quality_check != default_write_gate.quality_check {
+            self.gate.write_gate.quality_check = other.gate.write_gate.quality_check;
+        }
+        if (other.gate.write_gate.min_specificity_score - default_write_gate.min_specificity_score)
+            .abs()
+            > f64::EPSILON
+        {
+            self.gate.write_gate.min_specificity_score =
+                other.gate.write_gate.min_specificity_score;
+        }
+        if other.gate.write_gate.judge_enabled != default_write_gate.judge_enabled {
+            self.gate.write_gate.judge_enabled = other.gate.write_gate.judge_enabled;
+        }
+        if (other.gate.write_gate.judge_min_score - default_write_gate.judge_min_score).abs()
+            > f64::EPSILON
+        {
+            self.gate.write_gate.judge_min_score = other.gate.write_gate.judge_min_score;
+        }
+        if (other.gate.write_gate.judge_max_score - default_write_gate.judge_max_score).abs()
+            > f64::EPSILON
+        {
+            self.gate.write_gate.judge_max_score = other.gate.write_gate.judge_max_score;
+        }
+        if (other.gate.write_gate.judge_rescue_threshold
+            - default_write_gate.judge_rescue_threshold)
+            .abs()
+            > f64::EPSILON
+        {
+            self.gate.write_gate.judge_rescue_threshold =
+                other.gate.write_gate.judge_rescue_threshold;
+        }
+
+        // Gate: merge semantic_dedup settings
+        let default_semantic_dedup = SemanticDedupConfig::default();
+        if other.gate.semantic_dedup.enabled != default_semantic_dedup.enabled {
+            self.gate.semantic_dedup.enabled = other.gate.semantic_dedup.enabled;
+        }
+        if (other.gate.semantic_dedup.similarity_threshold
+            - default_semantic_dedup.similarity_threshold)
+            .abs()
+            > f64::EPSILON
+        {
+            self.gate.semantic_dedup.similarity_threshold =
+                other.gate.semantic_dedup.similarity_threshold;
+        }
 
         // Decay: merge field by field
         let default_decay = DecayConfig::default();
@@ -602,6 +1271,60 @@ impl Config {
         if other.retrieval.recency_half_life_days != default_retrieval.recency_half_life_days {
             self.retrieval.recency_half_life_days = other.retrieval.recency_half_life_days;
         }
+        if other.retrieval.category_half_lives != default_retrieval.category_half_lives {
+            self.retrieval.category_half_lives = other.retrieval.category_half_lives;
+        }
+        if other.retrieval.scoring_backend != default_retrieval.scoring_backend {
+            self.retrieval.scoring_backend = other.retrieval.scoring_backend;
+        }
+        if (other.retrieval.min_confidence_threshold - default_retrieval.min_confidence_threshold)
+            .abs()
+            > f64::EPSILON
+        {
+            self.retrieval.min_confidence_threshold = other.retrieval.min_confidence_threshold;
+        }
+        if (other.retrieval.min_score_gap - default_retrieval.min_score_gap).abs() > f64::EPSILON {
+            self.retrieval.min_score_gap = other.retrieval.min_score_gap;
+        }
+        if (other.retrieval.dynamic_k_ratio - default_retrieval.dynamic_k_ratio).abs()
+            > f64::EPSILON
+        {
+            self.retrieval.dynamic_k_ratio = other.retrieval.dynamic_k_ratio;
+        }
+        if other.retrieval.adaptive_dk != default_retrieval.adaptive_dk {
+            self.retrieval.adaptive_dk = other.retrieval.adaptive_dk;
+        }
+        if other.retrieval.corpus_size_threshold != default_retrieval.corpus_size_threshold {
+            self.retrieval.corpus_size_threshold = other.retrieval.corpus_size_threshold;
+        }
+        if other.retrieval.corpus_enrichment != default_retrieval.corpus_enrichment {
+            self.retrieval.corpus_enrichment = other.retrieval.corpus_enrichment;
+        }
+        // Intent filter: merge field by field
+        let default_intent = IntentFilterConfig::default();
+        if other.retrieval.intent_filter.enabled != default_intent.enabled {
+            self.retrieval.intent_filter.enabled = other.retrieval.intent_filter.enabled;
+        }
+        if other.retrieval.intent_filter.min_overlap != default_intent.min_overlap {
+            self.retrieval.intent_filter.min_overlap = other.retrieval.intent_filter.min_overlap;
+        }
+        if other.retrieval.intent_filter.max_keywords != default_intent.max_keywords {
+            self.retrieval.intent_filter.max_keywords = other.retrieval.intent_filter.max_keywords;
+        }
+        // Rerank: merge field by field
+        let default_rerank = RerankConfig::default();
+        if other.retrieval.rerank.enabled != default_rerank.enabled {
+            self.retrieval.rerank.enabled = other.retrieval.rerank.enabled;
+        }
+        if other.retrieval.rerank.timeout_seconds != default_rerank.timeout_seconds {
+            self.retrieval.rerank.timeout_seconds = other.retrieval.rerank.timeout_seconds;
+        }
+        if other.retrieval.rerank.model != default_rerank.model {
+            self.retrieval.rerank.model = other.retrieval.rerank.model.clone();
+        }
+        if other.retrieval.rerank.backend != default_rerank.backend {
+            self.retrieval.rerank.backend = other.retrieval.rerank.backend.clone();
+        }
 
         // Circuit breaker: merge field by field
         let default_cb = CircuitBreakerConfig::default();
@@ -610,6 +1333,33 @@ impl Config {
         }
         if other.circuit_breaker.cooldown_seconds != default_cb.cooldown_seconds {
             self.circuit_breaker.cooldown_seconds = other.circuit_breaker.cooldown_seconds;
+        }
+
+        // Context: merge field by field
+        let default_context = ContextConfig::default();
+        if other.context.active_ticket_query != default_context.active_ticket_query {
+            self.context.active_ticket_query = other.context.active_ticket_query;
+        }
+        if other.context.active_ticket_timeout_ms != default_context.active_ticket_timeout_ms {
+            self.context.active_ticket_timeout_ms = other.context.active_ticket_timeout_ms;
+        }
+
+        // Judge: merge field by field
+        let default_judge = JudgeConfig::default();
+        if other.judge.backend != default_judge.backend {
+            self.judge.backend = other.judge.backend;
+        }
+        if other.judge.model != default_judge.model {
+            self.judge.model = other.judge.model;
+        }
+        if other.judge.api_url != default_judge.api_url {
+            self.judge.api_url = other.judge.api_url;
+        }
+        if other.judge.cache_path != default_judge.cache_path {
+            self.judge.cache_path = other.judge.cache_path;
+        }
+        if other.judge.batch_timeout != default_judge.batch_timeout {
+            self.judge.batch_timeout = other.judge.batch_timeout;
         }
 
         self
@@ -709,6 +1459,94 @@ impl Config {
             ));
         }
 
+        // Quality check mode
+        if self.gate.write_gate.quality_check != other.gate.write_gate.quality_check {
+            changes.push((
+                "gate.write_gate.quality_check".to_string(),
+                self.gate.write_gate.quality_check.clone(),
+                other.gate.write_gate.quality_check.clone(),
+            ));
+        }
+
+        // Min specificity score
+        if (self.gate.write_gate.min_specificity_score
+            - other.gate.write_gate.min_specificity_score)
+            .abs()
+            > f64::EPSILON
+        {
+            changes.push((
+                "gate.write_gate.min_specificity_score".to_string(),
+                format!("{:.2}", self.gate.write_gate.min_specificity_score),
+                format!("{:.2}", other.gate.write_gate.min_specificity_score),
+            ));
+        }
+
+        // Judge enabled
+        if self.gate.write_gate.judge_enabled != other.gate.write_gate.judge_enabled {
+            changes.push((
+                "gate.write_gate.judge_enabled".to_string(),
+                self.gate.write_gate.judge_enabled.to_string(),
+                other.gate.write_gate.judge_enabled.to_string(),
+            ));
+        }
+
+        // Judge min score
+        if (self.gate.write_gate.judge_min_score - other.gate.write_gate.judge_min_score).abs()
+            > f64::EPSILON
+        {
+            changes.push((
+                "gate.write_gate.judge_min_score".to_string(),
+                format!("{:.2}", self.gate.write_gate.judge_min_score),
+                format!("{:.2}", other.gate.write_gate.judge_min_score),
+            ));
+        }
+
+        // Judge max score
+        if (self.gate.write_gate.judge_max_score - other.gate.write_gate.judge_max_score).abs()
+            > f64::EPSILON
+        {
+            changes.push((
+                "gate.write_gate.judge_max_score".to_string(),
+                format!("{:.2}", self.gate.write_gate.judge_max_score),
+                format!("{:.2}", other.gate.write_gate.judge_max_score),
+            ));
+        }
+
+        // Judge rescue threshold
+        if (self.gate.write_gate.judge_rescue_threshold
+            - other.gate.write_gate.judge_rescue_threshold)
+            .abs()
+            > f64::EPSILON
+        {
+            changes.push((
+                "gate.write_gate.judge_rescue_threshold".to_string(),
+                format!("{:.2}", self.gate.write_gate.judge_rescue_threshold),
+                format!("{:.2}", other.gate.write_gate.judge_rescue_threshold),
+            ));
+        }
+
+        // Semantic dedup enabled
+        if self.gate.semantic_dedup.enabled != other.gate.semantic_dedup.enabled {
+            changes.push((
+                "gate.semantic_dedup.enabled".to_string(),
+                self.gate.semantic_dedup.enabled.to_string(),
+                other.gate.semantic_dedup.enabled.to_string(),
+            ));
+        }
+
+        // Semantic dedup threshold
+        if (self.gate.semantic_dedup.similarity_threshold
+            - other.gate.semantic_dedup.similarity_threshold)
+            .abs()
+            > f64::EPSILON
+        {
+            changes.push((
+                "gate.semantic_dedup.similarity_threshold".to_string(),
+                format!("{:.2}", self.gate.semantic_dedup.similarity_threshold),
+                format!("{:.2}", other.gate.semantic_dedup.similarity_threshold),
+            ));
+        }
+
         // Decay days
         if self.decay.passive_duration_days != other.decay.passive_duration_days {
             changes.push((
@@ -751,6 +1589,72 @@ impl Config {
                 "retrieval.max_injections".to_string(),
                 self.retrieval.max_injections.to_string(),
                 other.retrieval.max_injections.to_string(),
+            ));
+        }
+
+        // Scoring backend
+        if self.retrieval.scoring_backend != other.retrieval.scoring_backend {
+            changes.push((
+                "retrieval.scoring_backend".to_string(),
+                self.retrieval.scoring_backend.clone(),
+                other.retrieval.scoring_backend.clone(),
+            ));
+        }
+
+        // Min confidence threshold
+        if (self.retrieval.min_confidence_threshold - other.retrieval.min_confidence_threshold)
+            .abs()
+            > f64::EPSILON
+        {
+            changes.push((
+                "retrieval.min_confidence_threshold".to_string(),
+                format!("{:.3}", self.retrieval.min_confidence_threshold),
+                format!("{:.3}", other.retrieval.min_confidence_threshold),
+            ));
+        }
+
+        // Min score gap
+        if (self.retrieval.min_score_gap - other.retrieval.min_score_gap).abs() > f64::EPSILON {
+            changes.push((
+                "retrieval.min_score_gap".to_string(),
+                format!("{:.3}", self.retrieval.min_score_gap),
+                format!("{:.3}", other.retrieval.min_score_gap),
+            ));
+        }
+
+        // Dynamic K ratio
+        if (self.retrieval.dynamic_k_ratio - other.retrieval.dynamic_k_ratio).abs() > f64::EPSILON {
+            changes.push((
+                "retrieval.dynamic_k_ratio".to_string(),
+                format!("{:.3}", self.retrieval.dynamic_k_ratio),
+                format!("{:.3}", other.retrieval.dynamic_k_ratio),
+            ));
+        }
+
+        // Adaptive DK
+        if self.retrieval.adaptive_dk != other.retrieval.adaptive_dk {
+            changes.push((
+                "retrieval.adaptive_dk".to_string(),
+                self.retrieval.adaptive_dk.to_string(),
+                other.retrieval.adaptive_dk.to_string(),
+            ));
+        }
+
+        // Corpus size threshold
+        if self.retrieval.corpus_size_threshold != other.retrieval.corpus_size_threshold {
+            changes.push((
+                "retrieval.corpus_size_threshold".to_string(),
+                self.retrieval.corpus_size_threshold.to_string(),
+                other.retrieval.corpus_size_threshold.to_string(),
+            ));
+        }
+
+        // Corpus enrichment
+        if self.retrieval.corpus_enrichment != other.retrieval.corpus_enrichment {
+            changes.push((
+                "retrieval.corpus_enrichment".to_string(),
+                self.retrieval.corpus_enrichment.to_string(),
+                other.retrieval.corpus_enrichment.to_string(),
             ));
         }
 
@@ -963,6 +1867,11 @@ mod tests {
         assert_eq!(config.retrieval.max_injections, 5);
         assert_eq!(config.retrieval.strategy, "moderate");
 
+        // Intent filter defaults
+        assert!(!config.retrieval.intent_filter.enabled);
+        assert_eq!(config.retrieval.intent_filter.min_overlap, 1);
+        assert_eq!(config.retrieval.intent_filter.max_keywords, 15);
+
         // Circuit breaker defaults
         assert_eq!(config.circuit_breaker.max_blocks, 3);
         assert_eq!(config.circuit_breaker.cooldown_seconds, 300);
@@ -1098,6 +2007,31 @@ max_blocks = 7
         env::remove_var("GROVE_AUTO_SKIP_DECIDER");
         env::remove_var("GROVE_DECAY_DAYS");
         env::remove_var("GROVE_DECAY_IMMUNITY_RATE");
+    }
+
+    #[test]
+    fn test_env_var_judge_backend_override() {
+        env::set_var("GROVE_LLM_JUDGE_BACKEND", "api");
+
+        let mut config = Config::default();
+        assert_eq!(config.judge.backend, "cli"); // default is cli
+        config.apply_env_overrides();
+        assert_eq!(config.judge.backend, "api");
+
+        // Clean up
+        env::remove_var("GROVE_LLM_JUDGE_BACKEND");
+    }
+
+    #[test]
+    fn test_env_var_judge_backend_invalid_keeps_default() {
+        env::set_var("GROVE_LLM_JUDGE_BACKEND", "bogus");
+
+        let mut config = Config::default();
+        config.apply_env_overrides();
+        assert_eq!(config.judge.backend, "cli"); // unchanged
+
+        // Clean up
+        env::remove_var("GROVE_LLM_JUDGE_BACKEND");
     }
 
     #[test]
@@ -1273,6 +2207,7 @@ total-recall = false
                     decider: "never".to_string(),
                 },
                 write_gate: WriteGateConfig::default(),
+                semantic_dedup: SemanticDedupConfig::default(),
                 skip_counts_as_dismissal: false,
             },
             decay: DecayConfig {
@@ -1280,17 +2215,30 @@ total-recall = false
                 immunity_hit_rate: 0.9,
                 min_dismissals_for_decay: 3,
                 category_aware: true,
+                fast_track_surfacings: 5,
             },
             retrieval: RetrievalConfig {
                 max_injections: 10,
                 strategy: "conservative".to_string(),
                 min_pool_size: 20,
                 recency_half_life_days: 90,
+                category_half_lives: CategoryHalfLifeConfig::default(),
+                scoring_backend: "keyword".to_string(),
+                min_confidence_threshold: 0.1,
+                min_score_gap: 0.05,
+                dynamic_k_ratio: 0.3,
+                adaptive_dk: false,
+                corpus_size_threshold: 50,
+                corpus_enrichment: true,
+                intent_filter: IntentFilterConfig::default(),
+                rerank: RerankConfig::default(),
             },
             circuit_breaker: CircuitBreakerConfig {
                 max_blocks: 5,
                 cooldown_seconds: 120,
             },
+            context: ContextConfig::default(),
+            judge: JudgeConfig::default(),
         };
 
         let toml_str = toml::to_string(&config).unwrap();
@@ -1358,6 +2306,7 @@ max_blocks = 10
                     decider: "agent".to_string(), // same as default
                 },
                 write_gate: WriteGateConfig::default(),
+                semantic_dedup: SemanticDedupConfig::default(),
                 skip_counts_as_dismissal: false,
             },
             decay: DecayConfig {
@@ -1365,6 +2314,7 @@ max_blocks = 10
                 immunity_hit_rate: 0.3,    // same as default
                 min_dismissals_for_decay: 3,
                 category_aware: true,
+                fast_track_surfacings: 5,
             },
             ..Config::default()
         };
@@ -1378,6 +2328,7 @@ max_blocks = 10
                     decider: "never".to_string(), // different from default
                 },
                 write_gate: WriteGateConfig::default(),
+                semantic_dedup: SemanticDedupConfig::default(),
                 skip_counts_as_dismissal: false,
             },
             decay: DecayConfig {
@@ -1385,6 +2336,7 @@ max_blocks = 10
                 immunity_hit_rate: 0.3,     // same as default
                 min_dismissals_for_decay: 3,
                 category_aware: true,
+                fast_track_surfacings: 5,
             },
             ..Config::default()
         };
@@ -1417,6 +2369,7 @@ max_blocks = 10
             gate: GateConfig {
                 auto_skip: AutoSkipConfig::default(),
                 write_gate: WriteGateConfig::default(),
+                semantic_dedup: SemanticDedupConfig::default(),
                 skip_counts_as_dismissal: false,
             },
             ..Config::default()
@@ -1431,6 +2384,7 @@ max_blocks = 10
                     decider: "agent".to_string(), // same as default
                 },
                 write_gate: WriteGateConfig::default(),
+                semantic_dedup: SemanticDedupConfig::default(),
                 skip_counts_as_dismissal: false,
             },
             ..Config::default()
@@ -1771,6 +2725,91 @@ max_blocks = 10
         assert_eq!(changes[0].0, "gate.write_gate.mode");
         assert_eq!(changes[0].1, "strict");
         assert_eq!(changes[0].2, "lenient");
+    }
+
+    // Semantic dedup config tests
+
+    #[test]
+    fn test_semantic_dedup_defaults() {
+        let config = SemanticDedupConfig::default();
+        assert!(!config.enabled);
+        assert!((config.similarity_threshold - 0.90).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_semantic_dedup_toml_deserialization() {
+        let toml_str = r#"
+[gate.semantic_dedup]
+enabled = true
+similarity_threshold = 0.85
+"#;
+        let config: Config = toml::from_str(toml_str).unwrap();
+        assert!(config.gate.semantic_dedup.enabled);
+        assert!((config.gate.semantic_dedup.similarity_threshold - 0.85).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_semantic_dedup_missing_section_defaults() {
+        let toml_str = r#"
+[gate]
+skip_counts_as_dismissal = false
+"#;
+        let config: Config = toml::from_str(toml_str).unwrap();
+        assert!(!config.gate.semantic_dedup.enabled);
+        assert!((config.gate.semantic_dedup.similarity_threshold - 0.90).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_semantic_dedup_roundtrip() {
+        let mut config = Config::default();
+        config.gate.semantic_dedup.enabled = true;
+        config.gate.semantic_dedup.similarity_threshold = 0.85;
+
+        let toml_str = toml::to_string(&config).unwrap();
+        let parsed: Config = toml::from_str(&toml_str).unwrap();
+
+        assert!(parsed.gate.semantic_dedup.enabled);
+        assert!((parsed.gate.semantic_dedup.similarity_threshold - 0.85).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_semantic_dedup_merge() {
+        let base = Config::default();
+        let mut override_config = Config::default();
+        override_config.gate.semantic_dedup.enabled = true;
+        override_config.gate.semantic_dedup.similarity_threshold = 0.85;
+
+        let merged = base.merge(override_config);
+
+        assert!(merged.gate.semantic_dedup.enabled);
+        assert!((merged.gate.semantic_dedup.similarity_threshold - 0.85).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_semantic_dedup_merge_default_no_overwrite() {
+        let mut base = Config::default();
+        base.gate.semantic_dedup.enabled = true;
+        base.gate.semantic_dedup.similarity_threshold = 0.85;
+
+        // Override with all defaults should NOT overwrite base
+        let override_config = Config::default();
+        let merged = base.merge(override_config);
+
+        assert!(merged.gate.semantic_dedup.enabled);
+        assert!((merged.gate.semantic_dedup.similarity_threshold - 0.85).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_semantic_dedup_threshold_validation() {
+        assert!(SemanticDedupConfig::is_valid_similarity_threshold(0.0));
+        assert!(SemanticDedupConfig::is_valid_similarity_threshold(0.5));
+        assert!(SemanticDedupConfig::is_valid_similarity_threshold(0.90));
+        assert!(SemanticDedupConfig::is_valid_similarity_threshold(1.0));
+        assert!(!SemanticDedupConfig::is_valid_similarity_threshold(-0.1));
+        assert!(!SemanticDedupConfig::is_valid_similarity_threshold(1.1));
+        assert!(!SemanticDedupConfig::is_valid_similarity_threshold(
+            f64::NAN
+        ));
     }
 
     // Category-aware decay threshold tests
@@ -2147,5 +3186,394 @@ max_blocks = 10
         // project_stats_log_path from subdirectory should return parent's path
         let result = project_stats_log_path(&subdir);
         assert_eq!(result, grove_dir.join("stats.log"));
+    }
+
+    #[test]
+    fn test_intent_filter_toml_deserialization() {
+        let dir = TempDir::new().unwrap();
+        let config_path = dir.path().join("config.toml");
+
+        let toml_content = r#"
+[retrieval.intent_filter]
+enabled = true
+min_overlap = 2
+max_keywords = 10
+"#;
+
+        fs::write(&config_path, toml_content).unwrap();
+        let config = Config::load_from_file(&config_path).unwrap();
+
+        assert!(config.retrieval.intent_filter.enabled);
+        assert_eq!(config.retrieval.intent_filter.min_overlap, 2);
+        assert_eq!(config.retrieval.intent_filter.max_keywords, 10);
+    }
+
+    #[test]
+    fn test_intent_filter_missing_section_uses_defaults() {
+        let dir = TempDir::new().unwrap();
+        let config_path = dir.path().join("config.toml");
+
+        let toml_content = r#"
+[retrieval]
+max_injections = 10
+"#;
+
+        fs::write(&config_path, toml_content).unwrap();
+        let config = Config::load_from_file(&config_path).unwrap();
+
+        // intent_filter should fall back to defaults
+        assert!(!config.retrieval.intent_filter.enabled);
+        assert_eq!(config.retrieval.intent_filter.min_overlap, 1);
+        assert_eq!(config.retrieval.intent_filter.max_keywords, 15);
+    }
+
+    #[test]
+    fn test_intent_filter_round_trip_serialization() {
+        let mut config = Config::default();
+        config.retrieval.intent_filter.enabled = true;
+        config.retrieval.intent_filter.min_overlap = 3;
+        config.retrieval.intent_filter.max_keywords = 20;
+
+        let serialized = toml::to_string_pretty(&config).unwrap();
+        let deserialized: Config = toml::from_str(&serialized).unwrap();
+
+        assert_eq!(
+            config.retrieval.intent_filter,
+            deserialized.retrieval.intent_filter
+        );
+    }
+
+    // =========================================================================
+    // Rerank Config Tests
+    // =========================================================================
+
+    #[test]
+    fn test_rerank_config_defaults() {
+        let config = RerankConfig::default();
+        assert!(!config.enabled);
+        assert_eq!(config.timeout_seconds, 15);
+        assert_eq!(config.model, "haiku");
+        assert_eq!(config.backend, "cli");
+    }
+
+    #[test]
+    fn test_rerank_config_in_retrieval_defaults() {
+        let config = Config::default();
+        assert!(!config.retrieval.rerank.enabled);
+        assert_eq!(config.retrieval.rerank.timeout_seconds, 15);
+    }
+
+    #[test]
+    fn test_rerank_toml_deserialization() {
+        let dir = TempDir::new().unwrap();
+        let config_path = dir.path().join("config.toml");
+
+        let toml_content = r#"
+[retrieval.rerank]
+enabled = true
+timeout_seconds = 20
+model = "sonnet"
+backend = "api"
+"#;
+
+        fs::write(&config_path, toml_content).unwrap();
+        let config = Config::load_from_file(&config_path).unwrap();
+
+        assert!(config.retrieval.rerank.enabled);
+        assert_eq!(config.retrieval.rerank.timeout_seconds, 20);
+        assert_eq!(config.retrieval.rerank.model, "sonnet");
+        assert_eq!(config.retrieval.rerank.backend, "api");
+    }
+
+    #[test]
+    fn test_rerank_missing_section_uses_defaults() {
+        let dir = TempDir::new().unwrap();
+        let config_path = dir.path().join("config.toml");
+
+        let toml_content = r#"
+[retrieval]
+max_injections = 10
+"#;
+
+        fs::write(&config_path, toml_content).unwrap();
+        let config = Config::load_from_file(&config_path).unwrap();
+
+        // rerank should fall back to defaults
+        assert!(!config.retrieval.rerank.enabled);
+        assert_eq!(config.retrieval.rerank.timeout_seconds, 15);
+        assert_eq!(config.retrieval.rerank.model, "haiku");
+        assert_eq!(config.retrieval.rerank.backend, "cli");
+    }
+
+    #[test]
+    fn test_rerank_round_trip_serialization() {
+        let mut config = Config::default();
+        config.retrieval.rerank.enabled = true;
+        config.retrieval.rerank.timeout_seconds = 20;
+        config.retrieval.rerank.model = "sonnet".to_string();
+        config.retrieval.rerank.backend = "api".to_string();
+
+        let serialized = toml::to_string_pretty(&config).unwrap();
+        let deserialized: Config = toml::from_str(&serialized).unwrap();
+
+        assert_eq!(config.retrieval.rerank, deserialized.retrieval.rerank);
+    }
+
+    // =========================================================================
+    // Category Half-Life Config Tests
+    // =========================================================================
+
+    #[test]
+    fn test_category_half_life_defaults() {
+        let config = CategoryHalfLifeConfig::default();
+        assert_eq!(config.debugging, 90);
+        assert_eq!(config.pitfall, 90);
+        assert_eq!(config.pattern, 90);
+        assert_eq!(config.process, 90);
+        assert_eq!(config.convention, 90);
+        assert_eq!(config.domain, 90);
+        assert_eq!(config.dependency, 90);
+    }
+
+    #[test]
+    fn test_category_half_life_for_category() {
+        let config = CategoryHalfLifeConfig::default();
+        assert_eq!(config.for_category(&LearningCategory::Debugging), 90);
+        assert_eq!(config.for_category(&LearningCategory::Convention), 90);
+        assert_eq!(config.for_category(&LearningCategory::Pattern), 90);
+    }
+
+    #[test]
+    fn test_category_half_life_toml_deserialization() {
+        let toml_str = r#"
+[retrieval.category_half_lives]
+debugging = 30
+pitfall = 45
+pattern = 60
+process = 90
+convention = 120
+domain = 90
+dependency = 90
+"#;
+        let config: Config = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.retrieval.category_half_lives.debugging, 30);
+        assert_eq!(config.retrieval.category_half_lives.convention, 120);
+    }
+
+    #[test]
+    fn test_category_half_life_missing_section_uses_defaults() {
+        let toml_str = r#"
+[retrieval]
+max_injections = 5
+"#;
+        let config: Config = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.retrieval.category_half_lives.debugging, 90);
+        assert_eq!(config.retrieval.category_half_lives.convention, 90);
+    }
+
+    #[test]
+    fn test_category_half_life_round_trip_serialization() {
+        let mut config = Config::default();
+        config.retrieval.category_half_lives.debugging = 30;
+        config.retrieval.category_half_lives.convention = 365;
+
+        let serialized = toml::to_string_pretty(&config).unwrap();
+        let deserialized: Config = toml::from_str(&serialized).unwrap();
+
+        assert_eq!(
+            config.retrieval.category_half_lives,
+            deserialized.retrieval.category_half_lives
+        );
+    }
+
+    #[test]
+    fn test_half_life_for_category_global_override() {
+        // When recency_half_life_days != 90, it overrides all categories
+        let config = RetrievalConfig {
+            recency_half_life_days: 60,
+            ..Default::default()
+        };
+
+        assert_eq!(
+            config.half_life_for_category(&LearningCategory::Debugging),
+            60
+        );
+        assert_eq!(
+            config.half_life_for_category(&LearningCategory::Convention),
+            60
+        );
+        assert_eq!(
+            config.half_life_for_category(&LearningCategory::Pattern),
+            60
+        );
+    }
+
+    #[test]
+    fn test_half_life_for_category_per_category_when_default() {
+        // When recency_half_life_days == 90 (default), per-category values apply
+        // (all 90 with flat defaults)
+        let config = RetrievalConfig::default();
+
+        assert_eq!(
+            config.half_life_for_category(&LearningCategory::Debugging),
+            90
+        );
+        assert_eq!(
+            config.half_life_for_category(&LearningCategory::Convention),
+            90
+        );
+        assert_eq!(
+            config.half_life_for_category(&LearningCategory::Pattern),
+            90
+        );
+        assert_eq!(
+            config.half_life_for_category(&LearningCategory::Process),
+            90
+        );
+    }
+
+    #[test]
+    fn test_category_half_life_merge() {
+        let base = Config::default();
+        let mut override_config = Config::default();
+        override_config.retrieval.category_half_lives.debugging = 30;
+        override_config.retrieval.category_half_lives.convention = 365;
+
+        let merged = base.merge(override_config);
+
+        assert_eq!(merged.retrieval.category_half_lives.debugging, 30);
+        assert_eq!(merged.retrieval.category_half_lives.convention, 365);
+    }
+
+    // =========================================================================
+    // Batch timeout config tests
+    // =========================================================================
+
+    #[test]
+    fn judge_config_default_batch_timeout() {
+        let config = JudgeConfig::default();
+        assert_eq!(config.batch_timeout, 3600);
+        assert_eq!(config.batch_timeout(), 3600);
+    }
+
+    #[test]
+    fn batch_timeout_from_toml() {
+        let toml_str = r#"
+[judge]
+batch_timeout = 7200
+"#;
+        let config: Config = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.judge.batch_timeout, 7200);
+    }
+
+    #[test]
+    fn batch_timeout_merge_override() {
+        let base = Config::default();
+        let mut override_config = Config::default();
+        override_config.judge.batch_timeout = 1800;
+
+        let merged = base.merge(override_config);
+        assert_eq!(merged.judge.batch_timeout, 1800);
+    }
+
+    #[test]
+    fn batch_timeout_merge_keeps_default() {
+        let base = Config::default();
+        let override_config = Config::default(); // same defaults
+
+        let merged = base.merge(override_config);
+        assert_eq!(merged.judge.batch_timeout, 3600);
+    }
+
+    #[test]
+    fn batch_timeout_serializes_to_toml() {
+        let config = Config::default();
+        let toml_str = toml::to_string_pretty(&config).unwrap();
+        assert!(toml_str.contains("batch_timeout = 3600"));
+    }
+
+    // =========================================================================
+    // RetrievalProfile tests
+    // =========================================================================
+
+    #[test]
+    fn retrieval_profile_below_threshold_is_small_corpus() {
+        assert_eq!(
+            RetrievalProfile::select(49, 50),
+            RetrievalProfile::SmallCorpus
+        );
+    }
+
+    #[test]
+    fn retrieval_profile_at_threshold_is_standard() {
+        assert_eq!(RetrievalProfile::select(50, 50), RetrievalProfile::Standard);
+    }
+
+    #[test]
+    fn retrieval_profile_above_threshold_is_standard() {
+        assert_eq!(
+            RetrievalProfile::select(100, 50),
+            RetrievalProfile::Standard
+        );
+    }
+
+    #[test]
+    fn retrieval_profile_zero_learning_count() {
+        assert_eq!(
+            RetrievalProfile::select(0, 50),
+            RetrievalProfile::SmallCorpus
+        );
+    }
+
+    #[test]
+    fn corpus_size_threshold_default_is_50() {
+        let config = RetrievalConfig::default();
+        assert_eq!(config.corpus_size_threshold, 50);
+    }
+
+    #[test]
+    fn corpus_size_threshold_from_toml() {
+        let toml_str = r#"
+[retrieval]
+corpus_size_threshold = 30
+"#;
+        let config: Config = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.retrieval.corpus_size_threshold, 30);
+    }
+
+    #[test]
+    fn corpus_size_threshold_merge_override() {
+        let base = Config::default();
+        let mut override_config = Config::default();
+        override_config.retrieval.corpus_size_threshold = 30;
+
+        let merged = base.merge(override_config);
+        assert_eq!(merged.retrieval.corpus_size_threshold, 30);
+    }
+
+    #[test]
+    fn corpus_enrichment_default_is_true() {
+        let config = RetrievalConfig::default();
+        assert!(config.corpus_enrichment);
+    }
+
+    #[test]
+    fn corpus_enrichment_from_toml() {
+        let toml_str = r#"
+[retrieval]
+corpus_enrichment = false
+"#;
+        let config: Config = toml::from_str(toml_str).unwrap();
+        assert!(!config.retrieval.corpus_enrichment);
+    }
+
+    #[test]
+    fn corpus_enrichment_merge_override() {
+        let base = Config::default();
+        let mut override_config = Config::default();
+        override_config.retrieval.corpus_enrichment = false;
+
+        let merged = base.merge(override_config);
+        assert!(!merged.retrieval.corpus_enrichment);
     }
 }

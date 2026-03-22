@@ -10,7 +10,9 @@ pub mod config;
 pub mod core;
 pub mod discovery;
 pub mod error;
+pub mod eval;
 pub mod hooks;
+pub mod llm;
 #[cfg(feature = "tantivy-search")]
 pub mod search;
 pub mod stats;
@@ -37,6 +39,7 @@ pub use storage::{FileSessionStore, SessionStore};
 pub use util::{read_to_string_limited, read_to_string_with_limit, MAX_FILE_SIZE};
 
 // CLI commands
+pub use cli::retroflect as retroflect_cmd;
 pub use cli::{
     BackendsCommand, CleanCommand, DebugCommand, InitCommand, ListCommand, MaintainCommand,
     ObserveCommand, RefCommand, ReflectCommand, SearchCommand, SkipCommand, StatsCommand,

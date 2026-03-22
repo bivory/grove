@@ -30,5 +30,7 @@ ignores:
   - "memory/**"
   - "node_modules/**"
   - ".grove/**"
+  - "design/research/**"
   - "CLAUDE.md"
   - "CLAUDE.local.md"
+  - "TODO.md"

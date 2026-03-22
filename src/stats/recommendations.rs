@@ -125,6 +125,11 @@ pub fn generate_recommendations(
         recommendations.safe.push(rec);
     }
 
+    // Safe: Dynamic K ratio based on corpus noise
+    if let Some(rec) = recommend_dk_ratio(cache, config) {
+        recommendations.safe.push(rec);
+    }
+
     // Aggressive: Circuit breaker tuning
     // (We'd need more data to recommend this - skip for now)
 
@@ -267,6 +272,59 @@ fn recommend_write_gate_tuning(
     None
 }
 
+/// Recommend dynamic_k_ratio based on corpus noise (hit rate).
+///
+/// Uses the same thresholds as Level 2 adaptive dk:
+/// - hit_rate < 0.3 → noisy corpus → recommend tighter dk (0.4)
+/// - hit_rate > 0.7 → healthy corpus → recommend looser dk (0.25)
+/// - Otherwise → keep current value
+///
+/// Requires ≥20 surfaced learnings (cold-start guard).
+fn recommend_dk_ratio(cache: &StatsCache, config: &Config) -> Option<ConfigRecommendation> {
+    let surfaced_count = cache
+        .learnings
+        .values()
+        .filter(|s| s.surfaced > 0 && !s.archived)
+        .count();
+
+    if surfaced_count < 20 {
+        return None;
+    }
+
+    let hit_rate = cache.aggregates.average_hit_rate;
+    if !hit_rate.is_finite() {
+        return None;
+    }
+
+    let current = config.retrieval.dynamic_k_ratio;
+    let recommended = if hit_rate < 0.3 {
+        0.4
+    } else if hit_rate > 0.7 {
+        0.25
+    } else {
+        return None;
+    };
+
+    if (current - recommended).abs() < f64::EPSILON {
+        return None;
+    }
+
+    Some(ConfigRecommendation::safe(
+        "retrieval.dynamic_k_ratio",
+        format!("{:.2}", current),
+        format!("{:.2}", recommended),
+        format!(
+            "avg hit rate {:.0}%: {} dk for better precision",
+            hit_rate * 100.0,
+            if recommended > current {
+                "tighter"
+            } else {
+                "looser"
+            }
+        ),
+    ))
+}
+
 /// Recommend decay duration based on frequent DecayWarning insights.
 fn recommend_decay_duration(insights: &[Insight], config: &Config) -> Option<ConfigRecommendation> {
     let decay_warning = insights
@@ -314,6 +372,13 @@ pub fn apply_safe_recommendations(config: &Config, recommendations: &Recommendat
             "gate.auto_skip.line_threshold" => {
                 if let Ok(value) = rec.recommended_value.parse::<u32>() {
                     new_config.gate.auto_skip.line_threshold = value;
+                }
+            }
+            "retrieval.dynamic_k_ratio" => {
+                if let Ok(value) = rec.recommended_value.parse::<f64>() {
+                    if (0.0..=1.0).contains(&value) {
+                        new_config.retrieval.dynamic_k_ratio = value;
+                    }
                 }
             }
             _ => {
@@ -557,5 +622,74 @@ mod tests {
         assert!(rec.is_empty());
         assert!(!rec.has_safe());
         assert_eq!(rec.total(), 0);
+    }
+
+    #[test]
+    fn test_recommend_dk_noisy_corpus() {
+        let cache = make_cache_with_hit_rate(0.2, 25);
+        let config = make_config();
+
+        let rec = recommend_dk_ratio(&cache, &config);
+
+        assert!(rec.is_some());
+        let rec = rec.unwrap();
+        assert_eq!(rec.config_key, "retrieval.dynamic_k_ratio");
+        assert_eq!(rec.recommended_value, "0.40");
+        assert!(rec.is_safe);
+    }
+
+    #[test]
+    fn test_recommend_dk_healthy_corpus() {
+        let cache = make_cache_with_hit_rate(0.8, 25);
+        let config = make_config();
+
+        let rec = recommend_dk_ratio(&cache, &config);
+
+        assert!(rec.is_some());
+        let rec = rec.unwrap();
+        assert_eq!(rec.recommended_value, "0.25");
+    }
+
+    #[test]
+    fn test_recommend_dk_moderate_no_change() {
+        let cache = make_cache_with_hit_rate(0.5, 25);
+        let config = make_config();
+
+        let rec = recommend_dk_ratio(&cache, &config);
+
+        assert!(
+            rec.is_none(),
+            "Moderate hit rate should not trigger dk recommendation"
+        );
+    }
+
+    #[test]
+    fn test_recommend_dk_cold_start() {
+        let cache = make_cache_with_hit_rate(0.1, 10); // < 20 surfaced
+        let config = make_config();
+
+        let rec = recommend_dk_ratio(&cache, &config);
+
+        assert!(
+            rec.is_none(),
+            "Insufficient data should not trigger recommendation"
+        );
+    }
+
+    #[test]
+    fn test_apply_dk_recommendation() {
+        let config = make_config();
+        let recommendations = Recommendations {
+            safe: vec![ConfigRecommendation::safe(
+                "retrieval.dynamic_k_ratio",
+                "0.30",
+                "0.40",
+                "noisy corpus",
+            )],
+            aggressive: vec![],
+        };
+
+        let new_config = apply_safe_recommendations(&config, &recommendations);
+        assert!((new_config.retrieval.dynamic_k_ratio - 0.4).abs() < f64::EPSILON);
     }
 }

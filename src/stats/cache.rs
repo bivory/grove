@@ -175,6 +175,7 @@ impl StatsCache {
                 categories,
                 ticket_id,
                 backend,
+                avg_specificity,
             } => {
                 self.reflections.completed += 1;
                 *self
@@ -199,6 +200,12 @@ impl StatsCache {
                                 avg_hit_rate: 0.0,
                             });
                     cat_stats.count += 1;
+                }
+
+                // Accumulate specificity for running average
+                if let Some(spec) = avg_specificity {
+                    self.write_gate.specificity_count += 1;
+                    self.write_gate.specificity_sum += spec;
                 }
 
                 // Update origin tickets for learnings
@@ -253,6 +260,22 @@ impl StatsCache {
                 // Track rejected candidates for retrospective miss detection
                 self.track_rejected_candidate(summary, tags.clone(), reason, stage, event.ts);
             }
+
+            StatsEventType::Rated {
+                learning_id,
+                useful,
+                context: _,
+            } => {
+                let stats = self.learnings.entry(learning_id.clone()).or_default();
+                stats.rating_count += 1;
+                if *useful {
+                    stats.rating_positive += 1;
+                }
+            }
+
+            StatsEventType::Retroflect { .. } => {
+                // Retroflect events are tracked but don't affect the cache aggregates yet.
+            }
         }
     }
 
@@ -303,6 +326,12 @@ impl StatsCache {
         if self.write_gate.total_evaluated > 0 {
             self.write_gate.pass_rate =
                 self.write_gate.total_accepted as f64 / self.write_gate.total_evaluated as f64;
+        }
+
+        // Compute average specificity across reflections
+        if self.write_gate.specificity_count > 0 {
+            self.write_gate.avg_specificity =
+                Some(self.write_gate.specificity_sum / self.write_gate.specificity_count as f64);
         }
 
         // total_learnings is the count of accepted learnings from reflections,
@@ -477,6 +506,12 @@ pub struct LearningStats {
     /// The learning's category (for category-aware decay).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub category: Option<crate::core::LearningCategory>,
+    /// Number of times this learning has been rated.
+    #[serde(default)]
+    pub rating_count: u32,
+    /// Number of positive ratings (thumbs up).
+    #[serde(default)]
+    pub rating_positive: u32,
 }
 
 /// Reflection statistics.
@@ -506,6 +541,16 @@ pub struct WriteGateStats {
     /// Retrospective misses (learnings that should have been captured).
     #[serde(default)]
     pub retrospective_misses: u32,
+    /// Average specificity composite score of accepted learnings (across all reflections).
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub avg_specificity: Option<f64>,
+    /// Number of reflections that reported specificity (for running average).
+    #[serde(skip)]
+    pub(crate) specificity_count: u32,
+    /// Sum of avg_specificity values (for running average).
+    #[serde(skip)]
+    pub(crate) specificity_sum: f64,
 }
 
 /// Cross-pollination edge (learning referenced outside origin ticket).
@@ -767,6 +812,7 @@ mod tests {
             vec![LearningCategory::Pattern],
             None,
             backend,
+            None,
         ))
     }
 
@@ -1751,5 +1797,54 @@ mod tests {
                 prop_assert!(!stats.archived);
             }
         }
+    }
+
+    #[test]
+    fn test_rated_event_updates_learning_stats() {
+        let events = vec![
+            StatsEvent::new(StatsEventType::rated("L001", true, "reflect")),
+            StatsEvent::new(StatsEventType::rated("L001", true, "review")),
+            StatsEvent::new(StatsEventType::rated("L001", false, "review")),
+        ];
+
+        let cache = StatsCache::from_events(&events);
+        let stats = cache.learnings.get("L001").unwrap();
+
+        assert_eq!(stats.rating_count, 3);
+        assert_eq!(stats.rating_positive, 2);
+    }
+
+    #[test]
+    fn test_rated_event_new_learning_creates_entry() {
+        let events = vec![StatsEvent::new(StatsEventType::rated(
+            "L_new", false, "review",
+        ))];
+
+        let cache = StatsCache::from_events(&events);
+        let stats = cache.learnings.get("L_new").unwrap();
+
+        assert_eq!(stats.rating_count, 1);
+        assert_eq!(stats.rating_positive, 0);
+        assert_eq!(stats.surfaced, 0); // No surfaced events
+    }
+
+    #[test]
+    fn test_rated_combined_with_surfaced() {
+        let events = vec![
+            StatsEvent::new(StatsEventType::surfaced(
+                "L001",
+                "s1",
+                Some(LearningCategory::Pattern),
+            )),
+            StatsEvent::new(StatsEventType::rated("L001", true, "reflect")),
+        ];
+
+        let cache = StatsCache::from_events(&events);
+        let stats = cache.learnings.get("L001").unwrap();
+
+        assert_eq!(stats.surfaced, 1);
+        assert_eq!(stats.rating_count, 1);
+        assert_eq!(stats.rating_positive, 1);
+        assert_eq!(stats.category, Some(LearningCategory::Pattern));
     }
 }

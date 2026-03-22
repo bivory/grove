@@ -642,6 +642,11 @@ fn format_learning_as_markdown(learning: &CompoundLearning) -> String {
         }
     }
 
+    // Relevance context
+    if let Some(ref ctx) = learning.relevance_context {
+        md.push_str(&format!("**Relevance:** {}\n", ctx));
+    }
+
     // Criteria met
     if !learning.criteria_met.is_empty() {
         let criteria: Vec<&str> = learning
@@ -779,6 +784,8 @@ fn parse_learnings_from_markdown(content: &str) -> Result<Vec<CompoundLearning>>
                 builder.session_id = Some(rest.trim().to_string());
             } else if let Some(rest) = line.strip_prefix("**Context Files:**") {
                 builder.context_files = Some(parse_context_files(rest));
+            } else if let Some(rest) = line.strip_prefix("**Relevance:**") {
+                builder.relevance_context = Some(rest.trim().to_string());
             } else if let Some(rest) = line.strip_prefix("**Criteria:**") {
                 builder.criteria_met = parse_criteria(rest);
             } else if let Some(rest) = line.strip_prefix("**Created:**") {
@@ -822,6 +829,7 @@ struct LearningBuilder {
     session_id: Option<String>,
     ticket_id: Option<String>,
     context_files: Option<Vec<String>>,
+    relevance_context: Option<String>,
     criteria_met: Vec<WriteGateCriterion>,
     timestamp: Option<DateTime<Utc>>,
 }
@@ -840,6 +848,7 @@ impl LearningBuilder {
             session_id: None,
             ticket_id: None,
             context_files: None,
+            relevance_context: None,
             criteria_met: Vec::new(),
             timestamp: None,
         }
@@ -865,6 +874,7 @@ impl LearningBuilder {
             ticket_id: self.ticket_id,
             timestamp: self.timestamp.unwrap_or_else(Utc::now),
             context_files: self.context_files,
+            relevance_context: self.relevance_context,
             status: self.status.unwrap_or(LearningStatus::Active),
         })
     }
@@ -1780,5 +1790,43 @@ Detail here."#;
 
         assert_eq!(learnings.len(), 1);
         assert_eq!(learnings[0].summary, "Learning with no detail");
+    }
+
+    #[test]
+    fn test_relevance_context_roundtrip() {
+        let mut learning = sample_learning();
+        learning.relevance_context =
+            Some("Surface when working on dashboard queries or N+1 issues".to_string());
+
+        let md = format_learning_as_markdown(&learning);
+        assert!(
+            md.contains("**Relevance:** Surface when working on dashboard queries or N+1 issues")
+        );
+
+        let parsed = parse_learnings_from_markdown(&md).unwrap();
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(
+            parsed[0].relevance_context,
+            Some("Surface when working on dashboard queries or N+1 issues".to_string())
+        );
+    }
+
+    #[test]
+    fn test_relevance_context_none_backward_compat() {
+        // Markdown without relevance_context should parse with None
+        let content = r#"## cl_001
+**Category:** Pattern
+**Summary:** Old learning without relevance context
+**Scope:** Project | **Confidence:** High | **Status:** Active
+**Tags:** #test
+**Session:** session-1
+**Created:** 2026-01-01T00:00:00Z
+
+Some detail text that is long enough.
+
+---"#;
+        let learnings = parse_learnings_from_markdown(content).unwrap();
+        assert_eq!(learnings.len(), 1);
+        assert!(learnings[0].relevance_context.is_none());
     }
 }

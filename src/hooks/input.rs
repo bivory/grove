@@ -15,6 +15,12 @@ pub struct HookInput {
     pub transcript_path: PathBuf,
     /// Current working directory.
     pub cwd: PathBuf,
+    /// The hook event name (e.g., "Stop", "PreToolUse").
+    #[serde(default)]
+    pub hook_event_name: Option<String>,
+    /// Current permission mode (e.g., "default", "plan").
+    #[serde(default)]
+    pub permission_mode: Option<String>,
 }
 
 impl HookInput {
@@ -28,14 +34,27 @@ impl HookInput {
             session_id: session_id.into(),
             transcript_path: transcript_path.into(),
             cwd: cwd.into(),
+            hook_event_name: None,
+            permission_mode: None,
         }
     }
 }
 
 /// Input for session-start hook.
 ///
-/// Contains common fields only - no additional data needed.
-pub type SessionStartInput = HookInput;
+/// Contains common fields plus optional session metadata from Claude Code.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SessionStartInput {
+    /// Common hook input fields.
+    #[serde(flatten)]
+    pub common: HookInput,
+    /// Source of the session (e.g., "cli", "ide").
+    #[serde(default)]
+    pub source: Option<String>,
+    /// The model being used (e.g., "claude-sonnet-4-6").
+    #[serde(default)]
+    pub model: Option<String>,
+}
 
 /// Input for pre-tool-use hook.
 ///
@@ -50,6 +69,9 @@ pub struct PreToolUseInput {
     /// The tool input (as JSON value).
     #[serde(default)]
     pub tool_input: serde_json::Value,
+    /// Unique identifier for this tool use.
+    #[serde(default)]
+    pub tool_use_id: Option<String>,
 }
 
 impl PreToolUseInput {
@@ -63,6 +85,7 @@ impl PreToolUseInput {
             common,
             tool_name: tool_name.into(),
             tool_input,
+            tool_use_id: None,
         }
     }
 }
@@ -82,6 +105,9 @@ pub struct PostToolUseInput {
     pub tool_input: serde_json::Value,
     /// The tool response/output.
     pub tool_response: String,
+    /// Unique identifier for this tool use.
+    #[serde(default)]
+    pub tool_use_id: Option<String>,
 }
 
 impl PostToolUseInput {
@@ -97,30 +123,65 @@ impl PostToolUseInput {
             tool_name: tool_name.into(),
             tool_input,
             tool_response: tool_response.into(),
+            tool_use_id: None,
         }
     }
 }
 
 /// Input for stop hook.
 ///
-/// Contains common fields only.
-pub type StopInput = HookInput;
+/// Contains common fields plus stop-hook-specific fields from Claude Code.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct StopInput {
+    /// Common hook input fields.
+    #[serde(flatten)]
+    pub common: HookInput,
+    /// Whether the agent is already in a stop-hook-triggered continuation.
+    /// When true, the agent is trying to resolve a previous block — don't block again.
+    #[serde(default)]
+    pub stop_hook_active: bool,
+    /// The last assistant message before the stop hook was triggered.
+    #[serde(default)]
+    pub last_assistant_message: Option<String>,
+}
+
+impl StopInput {
+    /// Create a new stop input.
+    pub fn new(common: HookInput) -> Self {
+        Self {
+            common,
+            stop_hook_active: false,
+            last_assistant_message: None,
+        }
+    }
+}
 
 /// Reason for session ending.
+///
+/// Values match Claude Code's actual reason strings.
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum SessionEndReason {
-    /// User initiated exit.
+    /// User cleared the conversation.
+    Clear,
+    /// User logged out.
+    Logout,
+    /// User exited at the prompt input.
+    PromptInputExit,
+    /// Bypass permissions was disabled.
+    BypassPermissionsDisabled,
+    /// User initiated exit (legacy, may still appear).
     UserExit,
-    /// Session timeout.
+    /// Session timeout (legacy, may still appear).
     Timeout,
-    /// Conversation limit reached.
+    /// Conversation limit reached (legacy, may still appear).
     LimitReached,
-    /// Error occurred.
+    /// Error occurred (legacy, may still appear).
     Error,
-    /// Unknown reason.
+    /// Unknown or unrecognized reason.
     #[default]
-    Unknown,
+    #[serde(other)]
+    Other,
 }
 
 /// Input for session-end hook.
@@ -187,6 +248,29 @@ impl TaskCompletedInput {
     pub fn with_description(mut self, description: impl Into<String>) -> Self {
         self.task_description = Some(description.into());
         self
+    }
+}
+
+/// Input for user-prompt-submit hook.
+///
+/// Fires when the user submits a prompt, before Claude processes it.
+/// Contains the user's prompt text for keyword extraction and re-retrieval.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct UserPromptSubmitInput {
+    /// Common hook input fields.
+    #[serde(flatten)]
+    pub common: HookInput,
+    /// The user's submitted prompt text.
+    pub prompt: String,
+}
+
+impl UserPromptSubmitInput {
+    /// Create a new user-prompt-submit input.
+    pub fn new(common: HookInput, prompt: impl Into<String>) -> Self {
+        Self {
+            common,
+            prompt: prompt.into(),
+        }
     }
 }
 
@@ -403,7 +487,7 @@ mod tests {
 
         let input: SessionEndInput = serde_json::from_str(json).unwrap();
 
-        assert_eq!(input.reason, SessionEndReason::Unknown);
+        assert_eq!(input.reason, SessionEndReason::Other);
     }
 
     // SessionEndReason tests
@@ -411,11 +495,17 @@ mod tests {
     #[test]
     fn test_session_end_reason_serialization() {
         let reasons = [
+            (SessionEndReason::Clear, "\"clear\""),
+            (SessionEndReason::Logout, "\"logout\""),
+            (SessionEndReason::PromptInputExit, "\"prompt_input_exit\""),
+            (
+                SessionEndReason::BypassPermissionsDisabled,
+                "\"bypass_permissions_disabled\"",
+            ),
             (SessionEndReason::UserExit, "\"user_exit\""),
             (SessionEndReason::Timeout, "\"timeout\""),
             (SessionEndReason::LimitReached, "\"limit_reached\""),
             (SessionEndReason::Error, "\"error\""),
-            (SessionEndReason::Unknown, "\"unknown\""),
         ];
 
         for (reason, expected) in reasons {
@@ -427,7 +517,71 @@ mod tests {
         }
     }
 
+    #[test]
+    fn test_session_end_reason_unknown_falls_back_to_other() {
+        // Unrecognized strings should deserialize to Other via #[serde(other)]
+        let parsed: SessionEndReason = serde_json::from_str("\"some_future_reason\"").unwrap();
+        assert_eq!(parsed, SessionEndReason::Other);
+    }
+
     // parse_input tests
+
+    // StopInput tests
+
+    #[test]
+    fn test_stop_input_new() {
+        let common = sample_common_input();
+        let input = StopInput::new(common.clone());
+
+        assert_eq!(input.common, common);
+        assert!(!input.stop_hook_active);
+    }
+
+    #[test]
+    fn test_stop_input_with_stop_hook_active() {
+        let json = r#"{
+            "session_id": "test-session",
+            "transcript_path": "/path/to/transcript.jsonl",
+            "cwd": "/working/dir",
+            "stop_hook_active": true
+        }"#;
+
+        let input: StopInput = serde_json::from_str(json).unwrap();
+
+        assert_eq!(input.common.session_id, "test-session");
+        assert!(input.stop_hook_active);
+    }
+
+    #[test]
+    fn test_stop_input_defaults_stop_hook_active() {
+        let json = r#"{
+            "session_id": "test-session",
+            "transcript_path": "/path/to/transcript.jsonl",
+            "cwd": "/working/dir"
+        }"#;
+
+        let input: StopInput = serde_json::from_str(json).unwrap();
+        assert!(!input.stop_hook_active);
+        assert!(input.last_assistant_message.is_none());
+    }
+
+    #[test]
+    fn test_stop_input_with_last_assistant_message() {
+        let json = r#"{
+            "session_id": "test-session",
+            "transcript_path": "/path/to/transcript.jsonl",
+            "cwd": "/working/dir",
+            "stop_hook_active": true,
+            "last_assistant_message": "I've completed the task."
+        }"#;
+
+        let input: StopInput = serde_json::from_str(json).unwrap();
+        assert!(input.stop_hook_active);
+        assert_eq!(
+            input.last_assistant_message,
+            Some("I've completed the task.".to_string())
+        );
+    }
 
     #[test]
     fn test_parse_input_valid() {
@@ -549,5 +703,67 @@ mod tests {
 
         let result: Result<TaskCompletedInput, _> = serde_json::from_str(json);
         assert!(result.is_err());
+    }
+
+    // UserPromptSubmitInput tests
+
+    #[test]
+    fn test_user_prompt_submit_input_new() {
+        let common = sample_common_input();
+        let input = UserPromptSubmitInput::new(common.clone(), "Help me fix authentication");
+
+        assert_eq!(input.common, common);
+        assert_eq!(input.prompt, "Help me fix authentication");
+    }
+
+    #[test]
+    fn test_user_prompt_submit_input_serialization() {
+        let input =
+            UserPromptSubmitInput::new(sample_common_input(), "Help me fix the database query");
+
+        let json = serde_json::to_string(&input).unwrap();
+        let parsed: UserPromptSubmitInput = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(input, parsed);
+    }
+
+    #[test]
+    fn test_user_prompt_submit_input_flattened() {
+        let json = r#"{
+            "session_id": "test-session",
+            "transcript_path": "/path/to/transcript.jsonl",
+            "cwd": "/working/dir",
+            "prompt": "Implement OAuth login"
+        }"#;
+
+        let input: UserPromptSubmitInput = serde_json::from_str(json).unwrap();
+
+        assert_eq!(input.common.session_id, "test-session");
+        assert_eq!(input.prompt, "Implement OAuth login");
+    }
+
+    #[test]
+    fn test_user_prompt_submit_input_missing_prompt() {
+        let json = r#"{
+            "session_id": "test-session",
+            "transcript_path": "/path/to/transcript.jsonl",
+            "cwd": "/working/dir"
+        }"#;
+
+        let result: Result<UserPromptSubmitInput, _> = serde_json::from_str(json);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_user_prompt_submit_input_empty_prompt() {
+        let json = r#"{
+            "session_id": "test-session",
+            "transcript_path": "/path/to/transcript.jsonl",
+            "cwd": "/working/dir",
+            "prompt": ""
+        }"#;
+
+        let input: UserPromptSubmitInput = serde_json::from_str(json).unwrap();
+        assert_eq!(input.prompt, "");
     }
 }

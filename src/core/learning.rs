@@ -56,6 +56,10 @@ pub struct CompoundLearning {
     pub timestamp: DateTime<Utc>,
     /// Files that provide context for this learning.
     pub context_files: Option<Vec<String>>,
+    /// When/where this learning should be surfaced during retrieval.
+    /// Generated at reflection time to bridge BM25 vocabulary gap.
+    #[serde(default)]
+    pub relevance_context: Option<String>,
     /// Current status of the learning.
     pub status: LearningStatus,
 }
@@ -91,6 +95,7 @@ impl CompoundLearning {
             ticket_id: None,
             timestamp: Utc::now(),
             context_files: None,
+            relevance_context: None,
             status: LearningStatus::Active,
         }
     }
@@ -113,6 +118,12 @@ impl CompoundLearning {
     /// Set the context files.
     pub fn with_context_files(mut self, files: Vec<String>) -> Self {
         self.context_files = Some(files);
+        self
+    }
+
+    /// Set the relevance context.
+    pub fn with_relevance_context(mut self, context: impl Into<String>) -> Self {
+        self.relevance_context = Some(context.into());
         self
     }
 

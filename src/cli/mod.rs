@@ -15,8 +15,13 @@ pub mod skip;
 // User commands
 pub mod list;
 pub mod maintain;
+pub mod retroflect;
+pub mod review;
 pub mod search;
 pub mod stats;
+
+// Developer commands
+pub mod eval;
 
 // Utility commands
 pub mod backends_cmd;
@@ -36,6 +41,7 @@ pub use maintain::MaintainCommand;
 pub use observe::ObserveCommand;
 pub use ref_cmd::RefCommand;
 pub use reflect::ReflectCommand;
+pub use review::ReviewCommand;
 pub use search::SearchCommand;
 pub use sessions::SessionsCommand;
 pub use skip::SkipCommand;

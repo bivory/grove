@@ -107,9 +107,14 @@ grove maintain                 # Review and prune stale learnings
 grove init                     # Scaffold config, learnings file, session dir
 grove backends                 # Show discovered memory backends
 grove tickets                  # Show discovered ticketing system
+grove sessions                 # List recent sessions with status
 grove debug <session_id>       # Full session state dump
 grove trace <session_id>       # Show trace events for session
 grove clean --before 30d       # Remove old session files
+grove review                   # Sample learnings for quality rating
+grove eval run                 # Run retrieval quality benchmark
+grove eval compare             # Compare multiple benchmark configs
+grove retroflect               # Mine past sessions for retroactive learnings
 ```
 
 ### 4.2 Agent Commands
@@ -132,7 +137,9 @@ grove hook session-start       # Discovery, context injection (reads stdin JSON)
 grove hook pre-tool-use        # Ticket close detection (reads stdin JSON)
 grove hook post-tool-use       # Ticket close confirmation (reads stdin JSON)
 grove hook stop                # Gate enforcement (reads stdin JSON)
+grove hook task-completed      # Task completion detection (reads stdin JSON)
 grove hook session-end         # Dismissed detection, cleanup (reads stdin JSON)
+grove hook user-prompt-submit  # Mid-session re-retrieval (reads stdin JSON)
 ```
 
 All commands support `--json` for machine output and `--quiet` for ID-only

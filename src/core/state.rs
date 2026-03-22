@@ -105,6 +105,9 @@ pub struct GateState {
     pub cached_diff_size: Option<u32>,
     /// Detected ticket context (when gate is Active).
     pub ticket: Option<TicketContext>,
+    /// Whether deferred injection should be attempted on the next PreToolUse call.
+    #[serde(default)]
+    pub deferred_injection_pending: bool,
 }
 
 impl Default for GateState {
@@ -122,6 +125,7 @@ impl Default for GateState {
             ticket_close_intent: None,
             cached_diff_size: None,
             ticket: None,
+            deferred_injection_pending: false,
         }
     }
 }
@@ -367,6 +371,10 @@ pub enum EventType {
     LearningDismissed,
     /// Gate status changed.
     GateStatusChanged,
+    /// Deferred injection attempted via PreToolUse.
+    DeferredInjection,
+    /// User prompt submit injection attempted.
+    UserPromptInjection,
 }
 
 /// Reflection result from a completed reflection.
@@ -582,6 +590,7 @@ mod tests {
         assert!(gate.skip.is_none());
         assert!(gate.subagent_observations.is_empty());
         assert!(gate.injected_learnings.is_empty());
+        assert!(!gate.deferred_injection_pending);
     }
 
     #[test]

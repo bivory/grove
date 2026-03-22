@@ -20,6 +20,7 @@ use crate::error::{GroveError, Result};
 /// Field weights for relevance scoring.
 const SUMMARY_BOOST: f32 = 2.0;
 const TAGS_BOOST: f32 = 1.5;
+const RELEVANCE_CONTEXT_BOOST: f32 = 1.5;
 const DETAIL_BOOST: f32 = 1.0;
 
 /// Heap size for IndexWriter (15MB).
@@ -45,6 +46,15 @@ fn escape_query(query: &str) -> String {
         }
     }
     escaped
+}
+
+/// Escape special characters in a single query term.
+///
+/// Like [`escape_query`] but public, for use by callers that build
+/// boosted query strings (e.g., `term^2.0`) where the boost syntax
+/// must be appended after escaping.
+pub fn escape_query_term(term: &str) -> String {
+    escape_query(term)
 }
 
 /// A search result from Tantivy.
@@ -81,6 +91,7 @@ pub struct TantivySearchIndex {
     detail_field: Field,
     tags_field: Field,
     category_field: Field,
+    relevance_context_field: Field,
 }
 
 impl TantivySearchIndex {
@@ -114,6 +125,9 @@ impl TantivySearchIndex {
             category_field: schema
                 .get_field("category")
                 .expect("schema must have category field"),
+            relevance_context_field: schema
+                .get_field("relevance_context")
+                .expect("schema must have relevance_context field"),
             schema,
         })
     }
@@ -153,6 +167,9 @@ impl TantivySearchIndex {
             category_field: schema
                 .get_field("category")
                 .expect("schema must have category field"),
+            relevance_context_field: schema
+                .get_field("relevance_context")
+                .expect("schema must have relevance_context field"),
             schema,
         })
     }
@@ -183,6 +200,7 @@ impl TantivySearchIndex {
         schema_builder.add_text_field("detail", text_options.clone());
         schema_builder.add_text_field("tags", text_options_stored.clone());
         schema_builder.add_text_field("category", text_options_stored);
+        schema_builder.add_text_field("relevance_context", text_options);
 
         schema_builder.build()
     }
@@ -220,6 +238,8 @@ impl TantivySearchIndex {
             let tags_text = learning.tags.join(" ");
             let category_text = format!("{:?}", learning.category).to_lowercase();
 
+            let relevance_text = learning.relevance_context.clone().unwrap_or_default();
+
             writer
                 .add_document(doc!(
                     self.id_field => learning.id.clone(),
@@ -227,6 +247,7 @@ impl TantivySearchIndex {
                     self.detail_field => learning.detail.clone(),
                     self.tags_field => tags_text,
                     self.category_field => category_text,
+                    self.relevance_context_field => relevance_text,
                 ))
                 .map_err(|e| GroveError::backend(format!("Failed to add document: {}", e)))?;
         }
@@ -266,12 +287,14 @@ impl TantivySearchIndex {
                 self.detail_field,
                 self.tags_field,
                 self.category_field,
+                self.relevance_context_field,
             ],
         );
 
         // Set field boosts
         query_parser.set_field_boost(self.summary_field, SUMMARY_BOOST);
         query_parser.set_field_boost(self.tags_field, TAGS_BOOST);
+        query_parser.set_field_boost(self.relevance_context_field, RELEVANCE_CONTEXT_BOOST);
         query_parser.set_field_boost(self.detail_field, DETAIL_BOOST);
 
         // Escape special characters to prevent query injection
@@ -279,6 +302,48 @@ impl TantivySearchIndex {
         let query = query_parser
             .parse_query(&escaped_query)
             .map_err(|e| GroveError::backend(format!("Failed to parse query: {}", e)))?;
+
+        self.execute_search(&searcher, &*query, limit)
+    }
+
+    /// Stemmed search with pre-escaped query containing boost syntax.
+    ///
+    /// Unlike [`search_stemmed`], this method does NOT escape the query string.
+    /// The caller is responsible for escaping individual terms before appending
+    /// boost suffixes (e.g., `escaped_term^2.0`). Use [`escape_query_term`]
+    /// for per-term escaping.
+    ///
+    /// This is used for benchmark evaluation of per-term BM25 boosting.
+    pub fn search_boosted(
+        &self,
+        pre_escaped_query: &str,
+        limit: usize,
+    ) -> Result<Vec<TantivySearchResult>> {
+        if limit == 0 || pre_escaped_query.trim().is_empty() {
+            return Ok(Vec::new());
+        }
+        let searcher = self.reader.searcher();
+
+        let mut query_parser = QueryParser::for_index(
+            &self.index,
+            vec![
+                self.summary_field,
+                self.detail_field,
+                self.tags_field,
+                self.category_field,
+                self.relevance_context_field,
+            ],
+        );
+
+        query_parser.set_field_boost(self.summary_field, SUMMARY_BOOST);
+        query_parser.set_field_boost(self.tags_field, TAGS_BOOST);
+        query_parser.set_field_boost(self.relevance_context_field, RELEVANCE_CONTEXT_BOOST);
+        query_parser.set_field_boost(self.detail_field, DETAIL_BOOST);
+
+        // No escaping — query is pre-escaped with boost syntax intact
+        let query = query_parser
+            .parse_query(pre_escaped_query)
+            .map_err(|e| GroveError::backend(format!("Failed to parse boosted query: {}", e)))?;
 
         self.execute_search(&searcher, &*query, limit)
     }
@@ -306,6 +371,7 @@ impl TantivySearchIndex {
             self.detail_field,
             self.tags_field,
             self.category_field,
+            self.relevance_context_field,
         ];
 
         let mut subqueries: Vec<(Occur, Box<dyn Query>)> = Vec::new();
@@ -821,5 +887,121 @@ mod tests {
                 result
             );
         }
+    }
+
+    #[test]
+    fn test_search_by_relevance_context() {
+        let index = TantivySearchIndex::in_memory().unwrap();
+
+        let learning = CompoundLearning::new(
+            LearningCategory::Pattern,
+            "Phoenix LiveView lifecycle management",
+            "LiveView mount/3 must initialize all assigns used by render/1.",
+            LearningScope::Project,
+            Confidence::High,
+            vec![WriteGateCriterion::BehaviorChanging],
+            vec!["phoenix".to_string(), "elixir".to_string()],
+            "test-session",
+        )
+        .with_id("cl_20260314_001")
+        .with_relevance_context(
+            "Surface when working on LiveView components, mount/handle_params callbacks, \
+             or modifying files in lib/app_web/live/. Relevant for Phoenix real-time UI.",
+        );
+
+        // A second learning without relevance_context
+        let learning2 = CompoundLearning::new(
+            LearningCategory::Convention,
+            "Use snake_case for module names",
+            "Elixir convention is snake_case for module file names.",
+            LearningScope::Project,
+            Confidence::High,
+            vec![WriteGateCriterion::StableFact],
+            vec!["elixir".to_string(), "naming".to_string()],
+            "test-session",
+        )
+        .with_id("cl_20260314_002");
+
+        index.index_learnings(&[learning, learning2]).unwrap();
+
+        // Search for terms only in relevance_context
+        let results = index.search("handle_params", 10).unwrap();
+        assert!(
+            !results.is_empty(),
+            "Should find learning via relevance_context terms"
+        );
+        assert_eq!(results[0].id, "cl_20260314_001");
+
+        // Search for "real-time" only in relevance_context
+        let results = index.search("real-time", 10).unwrap();
+        assert!(
+            !results.is_empty(),
+            "Should find learning via relevance_context"
+        );
+    }
+
+    #[test]
+    fn test_escape_query_term_special_chars() {
+        assert_eq!(escape_query_term("hello"), "hello");
+        assert_eq!(escape_query_term("test:value"), "test\\:value");
+        assert_eq!(escape_query_term("a+b"), "a\\+b");
+        assert_eq!(escape_query_term("foo^bar"), "foo\\^bar");
+    }
+
+    #[test]
+    fn test_escape_query_term_used_with_boost() {
+        // Demonstrate the pattern: escape term, then append boost
+        let term = "test:value";
+        let boosted = format!("{}^2.0", escape_query_term(term));
+        // The colon is escaped but the boost ^ is not
+        assert_eq!(boosted, "test\\:value^2.0");
+    }
+
+    #[test]
+    fn test_boosted_query_executes_in_tantivy() {
+        // Verify that a boosted query string actually parses and executes
+        let index = TantivySearchIndex::in_memory().unwrap();
+        let learnings = vec![CompoundLearning::new(
+            LearningCategory::Pattern,
+            "Use builder pattern for config",
+            "Builder pattern provides fluent API for complex configuration.",
+            LearningScope::Project,
+            Confidence::High,
+            vec![WriteGateCriterion::BehaviorChanging],
+            vec!["pattern".to_string(), "builder".to_string()],
+            "test-session",
+        )
+        .with_id("cl_boost_001")];
+        index.index_learnings(&learnings).unwrap();
+
+        // Boosted query: "builder" gets 2.0x, "pattern" gets 1.5x
+        // Uses search_boosted which doesn't re-escape the boost syntax
+        let boosted_query = "builder^2.0 pattern^1.5";
+        let results = index.search_boosted(boosted_query, 10).unwrap();
+        assert!(!results.is_empty(), "Boosted query should find results");
+    }
+
+    #[test]
+    fn test_boosted_vs_unboosted_same_results() {
+        // Both should find the same learning, just potentially with different scores
+        let index = TantivySearchIndex::in_memory().unwrap();
+        let learnings = vec![CompoundLearning::new(
+            LearningCategory::Pitfall,
+            "Avoid using unwrap in production",
+            "Always use proper error handling instead of unwrap.",
+            LearningScope::Project,
+            Confidence::High,
+            vec![WriteGateCriterion::BehaviorChanging],
+            vec!["error-handling".to_string(), "unwrap".to_string()],
+            "test-session",
+        )
+        .with_id("cl_boost_002")];
+        index.index_learnings(&learnings).unwrap();
+
+        let unboosted = index.search("unwrap error", 10).unwrap();
+        let boosted = index.search_boosted("unwrap^2.0 error^1.0", 10).unwrap();
+
+        assert_eq!(unboosted.len(), boosted.len());
+        assert_eq!(unboosted[0].id, boosted[0].id);
     }
 }

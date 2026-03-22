@@ -7,6 +7,8 @@ extend-exclude = [
     "*.lock",
     ".git/",
     ".tissue/",
+    "design/research/keyword/benchmarks/",
+    "design/research/benchmarks/",
 ]
 
 [default]
@@ -20,3 +22,13 @@ extend-ignore-re = [
 grove = "grove"
 # Intentional typo used in fuzzy search tests
 contaner = "contaner"
+# Academic author name (Asai et al., Self-RAG paper)
+Asai = "Asai"
+# Abbreviation: Named Entity Density
+NED = "NED"
+neds = "neds"
+# French word fragment in UTF-8 truncation test (src/llm.rs)
+caf = "caf"
+# Abbreviation: False Positive Rate (eval metrics)
+fpr = "fpr"
+FPR = "FPR"

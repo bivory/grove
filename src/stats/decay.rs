@@ -78,7 +78,7 @@ pub fn evaluate(
     }
 
     // Compute last verified timestamp
-    let last_verified = compute_last_verified(stats, created_at);
+    let last_verified = compute_last_verified(stats, created_at, config);
 
     // Check if past decay threshold
     let decay_threshold = Duration::days(config.passive_duration_days as i64);
@@ -93,9 +93,17 @@ pub fn evaluate(
 ///
 /// Returns the maximum of:
 /// - last_referenced
-/// - last_surfaced
+/// - last_surfaced (skipped if fast-track decay applies)
 /// - created_at
-fn compute_last_verified(stats: &LearningStats, created_at: DateTime<Utc>) -> DateTime<Utc> {
+///
+/// Fast-track: if a learning has been surfaced `fast_track_surfacings` or more
+/// times with zero references, `last_surfaced` is ignored. This prevents dead
+/// learnings from indefinitely resetting their decay clock.
+fn compute_last_verified(
+    stats: &LearningStats,
+    created_at: DateTime<Utc>,
+    config: &DecayConfig,
+) -> DateTime<Utc> {
     let mut last = created_at;
 
     if let Some(ts) = stats.last_referenced {
@@ -104,9 +112,15 @@ fn compute_last_verified(stats: &LearningStats, created_at: DateTime<Utc>) -> Da
         }
     }
 
-    if let Some(ts) = stats.last_surfaced {
-        if ts > last {
-            last = ts;
+    // Skip last_surfaced if the learning has been surfaced enough times
+    // without ever being referenced — it's dead weight resetting its clock.
+    let fast_tracked = stats.referenced == 0 && stats.surfaced >= config.fast_track_surfacings;
+
+    if !fast_tracked {
+        if let Some(ts) = stats.last_surfaced {
+            if ts > last {
+                last = ts;
+            }
         }
     }
 
@@ -249,7 +263,7 @@ pub fn get_decay_warnings(
         // UNIX_EPOCH which would cause immediate warnings)
         let created_at = learning_timestamps.get(learning_id).copied().unwrap_or(now);
 
-        let last_verified = compute_last_verified(stats, created_at);
+        let last_verified = compute_last_verified(stats, created_at, config);
         let age = now - last_verified;
 
         // In warning window: past warning threshold but not yet decayed
@@ -325,6 +339,8 @@ mod tests {
             category: None,
             referencing_tickets: vec![],
             archived,
+            rating_count: 0,
+            rating_positive: 0,
         }
     }
 
@@ -465,6 +481,37 @@ mod tests {
 
         // Zero dismissals - definitely shouldn't decay
         let stats = make_stats_with_dismissed(None, None, 0.0, false, 0);
+
+        let result = evaluate(&stats, created_at, &config, now);
+        assert_eq!(result, DecayResult::Active);
+    }
+
+    #[test]
+    fn test_evaluate_fast_track_causes_decay() {
+        let config = default_config(); // fast_track_surfacings = 5
+        let now = Utc::now();
+        let created_at = now - Duration::days(100);
+
+        // Recent surfacing would normally prevent decay, but with 6 surfacings
+        // and 0 references, fast-track ignores last_surfaced
+        let mut stats = make_stats(Some(now - Duration::days(5)), None, 0.0, false);
+        stats.surfaced = 6;
+        stats.referenced = 0;
+
+        let result = evaluate(&stats, created_at, &config, now);
+        assert_eq!(result, DecayResult::Decayed);
+    }
+
+    #[test]
+    fn test_evaluate_fast_track_does_not_apply_with_references() {
+        let config = default_config();
+        let now = Utc::now();
+        let created_at = now - Duration::days(100);
+
+        // 6 surfacings but 1 reference → fast-track doesn't apply
+        let mut stats = make_stats(Some(now - Duration::days(5)), None, 0.0, false);
+        stats.surfaced = 6;
+        stats.referenced = 1;
 
         let result = evaluate(&stats, created_at, &config, now);
         assert_eq!(result, DecayResult::Active);
@@ -660,8 +707,9 @@ mod tests {
     fn test_compute_last_verified_created_only() {
         let created_at = Utc::now() - Duration::days(50);
         let stats = make_stats(None, None, 0.0, false);
+        let config = default_config();
 
-        let result = compute_last_verified(&stats, created_at);
+        let result = compute_last_verified(&stats, created_at, &config);
         assert_eq!(result, created_at);
     }
 
@@ -672,8 +720,9 @@ mod tests {
         let surfaced_at = now - Duration::days(10);
 
         let stats = make_stats(Some(surfaced_at), None, 0.0, false);
+        let config = default_config();
 
-        let result = compute_last_verified(&stats, created_at);
+        let result = compute_last_verified(&stats, created_at, &config);
         assert_eq!(result, surfaced_at);
     }
 
@@ -685,8 +734,78 @@ mod tests {
         let referenced_at = now - Duration::days(5);
 
         let stats = make_stats(Some(surfaced_at), Some(referenced_at), 0.0, false);
+        let config = default_config();
 
-        let result = compute_last_verified(&stats, created_at);
+        let result = compute_last_verified(&stats, created_at, &config);
+        assert_eq!(result, referenced_at);
+    }
+
+    #[test]
+    fn test_compute_last_verified_fast_track_ignores_surfaced() {
+        let now = Utc::now();
+        let created_at = now - Duration::days(100);
+        let surfaced_at = now - Duration::days(5);
+
+        // 6 surfacings, 0 references → fast-track applies (threshold is 5)
+        let mut stats = make_stats(Some(surfaced_at), None, 0.0, false);
+        stats.surfaced = 6;
+        stats.referenced = 0;
+        let config = default_config();
+
+        let result = compute_last_verified(&stats, created_at, &config);
+        // Should ignore last_surfaced and return created_at
+        assert_eq!(result, created_at);
+    }
+
+    #[test]
+    fn test_compute_last_verified_fast_track_not_triggered_below_threshold() {
+        let now = Utc::now();
+        let created_at = now - Duration::days(100);
+        let surfaced_at = now - Duration::days(5);
+
+        // 4 surfacings, 0 references → below threshold, surfaced still counts
+        let mut stats = make_stats(Some(surfaced_at), None, 0.0, false);
+        stats.surfaced = 4;
+        stats.referenced = 0;
+        let config = default_config();
+
+        let result = compute_last_verified(&stats, created_at, &config);
+        assert_eq!(result, surfaced_at);
+    }
+
+    #[test]
+    fn test_compute_last_verified_fast_track_not_triggered_with_references() {
+        let now = Utc::now();
+        let created_at = now - Duration::days(100);
+        let surfaced_at = now - Duration::days(5);
+
+        // 10 surfacings, 1 reference → has references, fast-track doesn't apply
+        let mut stats = make_stats(Some(surfaced_at), None, 0.0, false);
+        stats.surfaced = 10;
+        stats.referenced = 1;
+        let config = default_config();
+
+        let result = compute_last_verified(&stats, created_at, &config);
+        assert_eq!(result, surfaced_at);
+    }
+
+    #[test]
+    fn test_compute_last_verified_fast_track_still_uses_referenced() {
+        let now = Utc::now();
+        let created_at = now - Duration::days(100);
+        let surfaced_at = now - Duration::days(5);
+        let referenced_at = now - Duration::days(10);
+
+        // Fast-track would apply (6 surfacings, 0 refs) but referenced_at
+        // should still be used (it's set despite referenced count being 0 —
+        // edge case, but the logic should still pick it up)
+        let mut stats = make_stats(Some(surfaced_at), Some(referenced_at), 0.0, false);
+        stats.surfaced = 6;
+        stats.referenced = 0;
+        let config = default_config();
+
+        let result = compute_last_verified(&stats, created_at, &config);
+        // last_surfaced is ignored but last_referenced is still considered
         assert_eq!(result, referenced_at);
     }
 
@@ -772,6 +891,8 @@ mod tests {
             referencing_tickets: vec![],
             archived,
             category,
+            rating_count: 0,
+            rating_positive: 0,
         }
     }
 

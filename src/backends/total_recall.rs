@@ -778,6 +778,7 @@ impl TotalRecallBackend {
             ticket_id: None,
             timestamp,
             context_files: None,
+            relevance_context: None,
             status: crate::core::LearningStatus::Active,
         })
     }

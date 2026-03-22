@@ -52,6 +52,9 @@ flowchart TB
 | **Session Storage** | File-based session state (gate status, trace events) |
 | **Hook I/O** | Serialization/deserialization of Claude Code hook contracts |
 | **Config** | Configuration loading, defaults, precedence |
+| **Eval** | Offline retrieval quality evaluation (corpus, judge, metrics, runner) |
+| **LLM** | Shared LLM call infrastructure (CLI and API backends) |
+| **Retroflect** | Retroactive reflection from Claude Code session history |
 
 ## 3. Domain Model
 
@@ -224,6 +227,7 @@ Each session maintains a trace of events for debugging and auditing.
 | `LearningReferenced` | Injected learning was referenced |
 | `LearningDismissed` | Injected learning was not used |
 | `GateStatusChanged` | Gate status transitioned |
+| `UserPromptInjection` | Mid-session re-retrieval via UserPromptSubmit |
 
 Trace events are stored in session state and can be viewed with
 `grove trace <session_id>`.
@@ -568,6 +572,9 @@ eventually archived. See Section 8 (Passive Decay) in the Stats document.
 
 ## 7. Hook Behaviors
 
+Grove integrates with Claude Code via 7 hooks: SessionStart, PreToolUse,
+PostToolUse, Stop, TaskCompleted, SessionEnd, and UserPromptSubmit.
+
 ### 7.1 Session Start
 
 Fires when a Claude Code session begins.
@@ -648,7 +655,18 @@ block → retry) don't recompute. In non-git repositories, diff size is
 unavailable and the auto-skip threshold check is bypassed (agent always
 decides).
 
-### 7.5 Session End
+### 7.5 Task Completed
+
+Fires when a Claude Code task completes (tasks ticketing system).
+
+1. Load session state
+2. If tasks ticketing is active: transition gate (Active → Pending)
+3. Log trace event
+
+This hook enables the gate to detect task completion in projects
+using Claude Code's built-in task system rather than tissue or beads.
+
+### 7.6 Session End
 
 Fires when a Claude Code session terminates.
 
@@ -665,6 +683,26 @@ after all work is complete.
 
 **Note:** SessionEnd reason codes include `clear`, `logout`,
 `prompt_input_exit`, and `other`. Grove processes all of them identically.
+
+### 7.7 User Prompt Submit
+
+Fires when a user submits a prompt during a session, before Claude processes it.
+
+1. Load session state (fail-open if not found)
+2. Extract keywords from the user's prompt text using the same noise-filtering
+   logic as `extract_user_intent_keywords` but operating on the prompt string
+   directly rather than reading a transcript file
+3. If no keywords are extracted (prompt too short or all noise), return empty
+4. Merge prompt keywords with git context (changed files + branch keywords)
+5. Retrieve and score learnings using the shared retrieval pipeline
+6. Deduplicate against already-injected learnings (`only_new=true`)
+7. If new relevant learnings are found, return them as `additionalContext`
+   in the `hookSpecificOutput` field
+
+This hook enables mid-session re-retrieval: as the conversation evolves and
+the user asks about new topics, Grove can surface relevant learnings that
+weren't captured at session start. The deduplication ensures the same learning
+is never injected twice.
 
 ## 8. Multi-Agent Behavior
 
@@ -1015,6 +1053,16 @@ no config exists.
 | decay | immunity_hit_rate | `0.8` | Hit rate above which decay is skipped |
 | retrieval | max_injections | `5` | Max learnings injected per session |
 | retrieval | strategy | `moderate` | `conservative`, `moderate`, `aggressive` |
+| retrieval | scoring_backend | `bm25` | `bm25` or `keyword` |
+| retrieval | corpus_enrichment | `true` | Augment queries with corpus-derived vocabulary |
+| retrieval | corpus_size_threshold | `50` | Heuristic: boosted BM25 below, plain above |
+| retrieval | dynamic_k_ratio | `0.3` | Min score ratio for dynamic K filtering |
+| retrieval | adaptive_dk | `false` | Per-query dynamic K tuning via stats feedback |
+| retrieval | min_confidence_threshold | `0.1` | Suppress injection if top score below this |
+| retrieval | min_score_gap | `0.05` | Suppress if top-to-median gap below this |
+| retrieval | recency_half_life_days | `90` | Global recency decay half-life |
+| retrieval | intent_filter.enabled | `false` | Post-retrieval intent keyword filter |
+| retrieval | rerank.enabled | `false` | LLM reranking of retrieved learnings |
 | circuit_breaker | max_blocks | `3` | Blocks before forced approve |
 | circuit_breaker | cooldown_seconds | `300` | Cooldown before breaker resets |
 
@@ -1035,6 +1083,312 @@ learning is better than a stuck developer.
 | Stats file corrupt | Log warning, rebuild on next `grove maintain` |
 | Discovery fails | Proceed with no ticketing / fallback backend |
 | Reflection parsing fails | Approve exit, log error |
+
+## 13. Retroflect: Retroactive Reflection
+
+Grove captures learnings only at ticket boundaries via `grove reflect`.
+Sessions before Grove was installed — and sessions where reflection was
+skipped — produce zero learnings. `grove retroflect` mines Claude Code
+session history to generate reflections retroactively using an LLM, then
+writes them through the existing validation pipeline.
+
+### 13.1 Concept
+
+Retroflect reads `~/.claude/projects/{project}/*.jsonl` session files,
+condenses each session transcript, sends it to an LLM for learning
+extraction, and writes the results through the standard two-phase
+validation pipeline (schema validation + write gate filter).
+
+### 13.2 Session Discovery
+
+Claude Code stores session transcripts as JSONL files under
+`~/.claude/projects/`. The directory names are forward-encoded from the
+project's absolute path, but this encoding is **not reversible** (`/`,
+`.`, and `_` all map to `-`). Instead, retroflect reads the `cwd` field
+from the first JSONL entry in each session directory to determine the
+original project path.
+
+Three discovery modes:
+
+| Mode | Trigger | Behavior |
+|------|---------|----------|
+| `--project <path>` | Explicit path | Forward-encode path to find session dir |
+| Current dir | Default | Check `.grove/` exists, forward-encode to find session dir |
+| `--all` | Flag | Glob `~/.claude/projects/*/`, parse one JSONL per dir to get `cwd`, group sessions by project |
+
+### 13.3 Session Transcript Parsing
+
+JSONL files contain multiple entry types. Retroflect handles each explicitly:
+
+| Entry Type | Action |
+|------------|--------|
+| `user` | Extract text content blocks only (skip `tool_result` blocks) |
+| `assistant` | Extract `text` blocks only (skip `thinking` and `tool_use`) |
+| `queue-operation` | Skip entirely |
+| `progress` | Skip entirely |
+| `system` | Skip entirely |
+| `file-history-snapshot` | Skip entirely |
+
+File paths are extracted from tool inputs (Read/Write/Edit/Grep/Glob) and
+included as metadata.
+
+### 13.4 Transcript Condensation
+
+Retroflect sends generous context to the LLM — most sessions fit entirely.
+For oversized sessions, a sliding window preserves complete user-assistant
+pairs (never splitting a pair). Window selection prioritizes pairs where
+the assistant text is longest, as these typically contain explanations,
+decisions, and debugging conclusions.
+
+Subagent session files (in subdirectories) are skipped; only top-level
+`*.jsonl` files are processed.
+
+### 13.5 LLM Synthesis
+
+The LLM receives the condensed transcript with a system prompt containing:
+
+- Seven category definitions with examples
+- `CandidateLearning` JSON schema
+- `criteria_met` options with what constitutes evidence
+- Instruction: produce 0-5 candidates per session, tag each with `#retroflect`
+- Instruction: focus on decisions, pivots, debugging breakthroughs
+
+The LLM backend defaults to API (`--backend api`) to avoid `ARG_MAX`
+risk with large prompts via CLI.
+
+### 13.6 Provenance
+
+Retroflect learnings are tagged with `#retroflect` for auditability.
+The tag is injected automatically if the LLM doesn't include it. This
+enables:
+
+- Filtering: `grove list --tags retroflect`
+- Bulk operations: audit or delete all retroflect learnings
+- Eval corpus: distinguish LLM-generated from human-reflected learnings
+  for A/B benchmarking
+
+### 13.7 Validation and Persistence
+
+Retroflect learnings pass through the same validation pipeline as
+interactive reflections:
+
+1. Schema validation (Layer 1)
+2. Write gate filter with lenient threshold (Layer 2)
+3. Near-duplicate detection against existing learnings + batch-accepted
+   learnings (cross-session dedup within the retroflect run)
+4. Inject `#retroflect` tag if not already present
+
+For `--all` mode, `.grove/` auto-initialization requires explicit
+per-project confirmation or the `--init` flag.
+
+Stats are flushed after each session for crash recovery.
+
+### 13.8 Sequence Diagram
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant CLI as grove retroflect
+    participant Parser as Session Parser
+    participant LLM as LLM Backend
+    participant Gate as Validation Pipeline
+    participant Backend as Memory Backend
+    participant Stats as Stats Log
+
+    User->>CLI: grove retroflect --limit 10
+    CLI->>CLI: discover eligible sessions
+    CLI->>CLI: filter (min-turns, already-analyzed)
+    CLI->>User: "Found N sessions (~X tokens). Continue?"
+    User->>CLI: confirm
+
+    loop each session
+        CLI->>Parser: parse JSONL transcript
+        Parser-->>CLI: SessionSummary (condensed)
+        CLI->>LLM: system prompt + transcript
+        LLM-->>CLI: Vec<CandidateLearning>
+
+        loop each candidate
+            CLI->>Gate: validate (schema + write gate + dedup)
+            Gate-->>CLI: accepted/rejected
+        end
+
+        CLI->>Backend: write accepted learnings
+        CLI->>Stats: log Retroflect event
+        Note over Stats: flush per session<br/>(crash checkpoint)
+    end
+
+    CLI->>User: summary report
+```
+
+## 14. Batch Processing
+
+Grove's eval judge and retroflect systems both make sequential LLM calls
+via curl subprocess — one per (session, learning) pair for eval (hundreds
+to thousands of calls), and one per session for retroflect (tens to
+dozens of calls). The Anthropic Message Batches API processes requests
+asynchronously at **50% cost reduction** and higher throughput. Both
+systems are ideal candidates: neither needs immediate responses, and both
+already use the Anthropic API backend.
+
+### 14.1 Anthropic Message Batches API
+
+The Message Batches API (`POST /v1/messages/batches`) accepts up to
+100,000 requests (or 256 MB) per batch, processes them asynchronously,
+and returns results at 50% of standard pricing.
+
+**Lifecycle:**
+
+1. **Create** — `POST /v1/messages/batches` with an array of requests,
+   each tagged with a `custom_id`. Returns a batch ID and
+   `processing_status: "in_progress"`.
+2. **Poll** — `GET /v1/messages/batches/{batch_id}` returns current
+   status and `request_counts` (processing, succeeded, errored, expired,
+   canceled).
+3. **Retrieve** — `GET /v1/messages/batches/{batch_id}/results` streams
+   JSONL results, each keyed by `custom_id`.
+4. **Cancel** (optional) — `POST /v1/messages/batches/{batch_id}/cancel`
+   for early termination.
+
+**Constraints:**
+
+| Constraint | Value |
+|-----------|-------|
+| Max requests per batch | 100,000 |
+| Max batch size | 256 MB |
+| Typical completion time | < 1 hour |
+| Maximum processing time | 24 hours |
+| Results available for | 29 days |
+| Cost reduction | 50% on all token usage |
+
+All Messages API features are supported within batches, including prompt
+caching, tool use, and extended thinking.
+
+### 14.2 Two-Phase Execution: Eval Judge
+
+The eval judge scores (session, learning) pairs to measure retrieval
+quality. In sequential mode, each pair is a separate API call. Batch
+mode collects all uncached pairs first, then submits them as a single
+batch.
+
+**Phase 1 — Collect:** Iterate all (session, learning) pairs in the
+benchmark. For each pair, check the judge cache. If uncached, build the
+API request params and add to the batch request list with `custom_id`
+set to the cache key (`{session_file}:{learning_id}`).
+
+**Phase 2 — Submit, poll, apply:** Submit the batch, poll until ended
+(or timeout), retrieve results. For each succeeded result, parse the
+score and insert into the judge cache. Failed results are logged and
+skipped — the cache entry remains absent, so the pair is retried on the
+next run.
+
+The search/filter/composite-score logic is shared between sequential and
+batch paths via an extracted helper function.
+
+### 14.3 Three-Phase Execution: Retroflect
+
+Retroflect processes sessions sequentially today because each session's
+validation pipeline accumulates `batch_accepted` learnings for
+cross-session deduplication. Batch mode must preserve this ordering
+invariant.
+
+**Phase 1 — Collect:** Iterate all eligible sessions. For each, parse
+the JSONL transcript, build the user prompt, and construct a
+`BatchRequest` with `custom_id = "retroflect:{session_id}"`. Store a
+mapping from `custom_id` to `(project_path, SessionSummary)` to
+preserve original session order.
+
+**Phase 2 — Submit and wait:** Submit the batch, poll with progress
+reporting to stderr (showing processing/succeeded/errored/expired
+counts from the API response).
+
+**Phase 3 — Process results in order:** Sort results by original session
+order (not batch result order). For each result: parse LLM response,
+run the validation pipeline with accumulating `batch_accepted` (schema
+validation + write gate + cross-session dedup), write accepted learnings
+to backend, log stats events. This sequential validation preserves
+the same dedup invariant as the current sequential approach.
+
+### 14.4 Prompt Caching Within Batches
+
+Both eval and retroflect already set `cache_control: {"type":
+"ephemeral"}` on the system prompt block. No request structure changes
+are needed for batch mode. The Anthropic API applies prompt caching
+across requests within a batch, yielding 30–98% cache hit rates for
+the shared system prompt content.
+
+Combined with the 50% batch pricing discount, total cost reduction is
+substantial for large runs.
+
+### 14.5 Error Handling
+
+Consistent with Grove's fail-open philosophy:
+
+| Failure | Behavior |
+|---------|----------|
+| Batch creation failure | Log warning, fall back to sequential processing |
+| Polling timeout | Retrieve partial results; completed requests are used, rest are skipped |
+| Individual request failure | Log warning, skip (cache not populated, retried next run) |
+| Results retrieval failure | Return what is available; if zero results, fall back to sequential |
+| Ctrl+C interruption | Cancel batch (best-effort) to prevent wasted compute |
+| 256 MB batch size exceeded | Chunk into multiple batches |
+
+Failed requests are simply absent from the cache (eval) or skipped
+(retroflect). Re-running the command picks them up on the next
+sequential or batch run.
+
+### 14.6 Sequence Diagram: Batch Retroflect
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant CLI as grove retroflect --batch
+    participant Parser as Session Parser
+    participant Batch as Batch API
+    participant Gate as Validation Pipeline
+    participant Backend as Memory Backend
+    participant Stats as Stats Log
+
+    User->>CLI: grove retroflect --batch --limit 20
+    CLI->>CLI: discover eligible sessions
+    CLI->>CLI: filter (min-turns, already-analyzed)
+    CLI->>User: "Found N sessions. Continue?"
+    User->>CLI: confirm
+
+    Note over CLI: Phase 1: Collect
+
+    loop each session
+        CLI->>Parser: parse JSONL transcript
+        Parser-->>CLI: SessionSummary (condensed)
+        CLI->>CLI: build BatchRequest (custom_id = retroflect:{session_id})
+    end
+
+    Note over CLI: Phase 2: Submit and wait
+
+    CLI->>Batch: POST /v1/messages/batches (N requests)
+    Batch-->>CLI: batch_id
+
+    loop poll until ended
+        CLI->>Batch: GET /v1/messages/batches/{batch_id}
+        Batch-->>CLI: status + request_counts
+        Note over CLI: stderr: [processing: X, succeeded: Y, errored: Z]
+    end
+
+    CLI->>Batch: GET /v1/messages/batches/{batch_id}/results
+    Batch-->>CLI: JSONL results
+
+    Note over CLI: Phase 3: Process in original session order
+
+    loop each result (sorted by original order)
+        CLI->>Gate: validate (schema + write gate + cross-session dedup)
+        Gate-->>CLI: accepted/rejected
+
+        CLI->>Backend: write accepted learnings
+        CLI->>Stats: log Retroflect event
+        Note over Stats: flush per session<br/>(crash checkpoint)
+    end
+
+    CLI->>User: summary report
+```
 
 ## Related Documents
 

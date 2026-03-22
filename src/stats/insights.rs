@@ -20,6 +20,7 @@ use chrono::{DateTime, Utc};
 
 use crate::config::DecayConfig;
 use crate::core::{LearningCategory, WriteGateCriterion};
+use crate::stats::cache::LearningStats;
 use crate::stats::decay::get_decay_warnings;
 use crate::stats::StatsCache;
 
@@ -74,6 +75,8 @@ pub enum InsightKind {
     WriteGateTooLoose,
     /// Skipped session on ticket later produced learnings.
     SkipMiss,
+    /// Learning surfaced many times but rarely or never referenced.
+    OverSurfacedLearning,
 }
 
 impl InsightKind {
@@ -89,6 +92,7 @@ impl InsightKind {
             Self::WriteGateTooStrict => "Write Gate Too Strict",
             Self::WriteGateTooLoose => "Write Gate Too Loose",
             Self::SkipMiss => "Skip Miss",
+            Self::OverSurfacedLearning => "Over-Surfaced Learning",
         }
     }
 }
@@ -124,6 +128,10 @@ pub struct InsightConfig {
     pub write_gate_too_loose_hit_rate: f64,
     /// Minimum skip misses to trigger the insight.
     pub skip_miss_min_count: usize,
+    /// Minimum times a learning must be surfaced before over-surfacing check applies.
+    pub over_surfaced_min_surfacings: u32,
+    /// Maximum hit rate below which a frequently-surfaced learning is flagged.
+    pub over_surfaced_max_hit_rate: f64,
 }
 
 impl Default for InsightConfig {
@@ -143,6 +151,8 @@ impl Default for InsightConfig {
             write_gate_too_loose_pass_rate: 0.95,
             write_gate_too_loose_hit_rate: 0.3,
             skip_miss_min_count: 1,
+            over_surfaced_min_surfacings: 5,
+            over_surfaced_max_hit_rate: 0.1,
         }
     }
 }
@@ -655,6 +665,56 @@ pub fn generate_skip_miss_insight(
     ))
 }
 
+/// Generate an over-surfaced learning insight.
+///
+/// Flags learnings that have been surfaced many times but rarely or never referenced,
+/// indicating they match too broadly and add noise to retrieval results.
+pub fn generate_over_surfaced_learning_insight(
+    cache: &StatsCache,
+    min_surfacings: u32,
+    max_hit_rate: f64,
+) -> Option<Insight> {
+    let mut over_surfaced: Vec<(&String, &LearningStats)> = cache
+        .learnings
+        .iter()
+        .filter(|(_, stats)| {
+            !stats.archived && stats.surfaced >= min_surfacings && stats.hit_rate <= max_hit_rate
+        })
+        .collect();
+
+    if over_surfaced.is_empty() {
+        return None;
+    }
+
+    // Sort by surfaced count descending (worst offenders first)
+    over_surfaced.sort_by(|a, b| b.1.surfaced.cmp(&a.1.surfaced));
+
+    let count = over_surfaced.len();
+    let (worst_id, worst_stats) = over_surfaced[0];
+
+    let message =
+        if count == 1 {
+            format!(
+            "Learning '{}' surfaced {} times with {:.0}% hit rate — it may be matching too broadly",
+            worst_id,
+            worst_stats.surfaced,
+            worst_stats.hit_rate * 100.0,
+        )
+        } else {
+            format!(
+            "{} learnings surfaced {}+ times with ≤{:.0}% hit rate (worst: '{}' at {} surfacings)",
+            count, min_surfacings, max_hit_rate * 100.0, worst_id, worst_stats.surfaced,
+        )
+        };
+
+    Some(Insight::new(
+        InsightKind::OverSurfacedLearning,
+        message,
+        "Consider editing these learnings to add project-specific terms, or archive them with `grove maintain --archive`",
+        2, // Medium priority
+    ))
+}
+
 /// Generate all insights.
 ///
 /// Returns a list of insights sorted by priority.
@@ -753,6 +813,15 @@ pub fn generate_all(
         insights.push(insight);
     }
 
+    // Over-surfaced learnings
+    if let Some(insight) = generate_over_surfaced_learning_insight(
+        cache,
+        insight_config.over_surfaced_min_surfacings,
+        insight_config.over_surfaced_max_hit_rate,
+    ) {
+        insights.push(insight);
+    }
+
     // Sort by priority (lower number = higher priority)
     insights.sort_by_key(|i| i.priority);
 
@@ -812,6 +881,8 @@ mod tests {
             referencing_tickets: vec![],
             archived: false,
             category: None,
+            rating_count: 0,
+            rating_positive: 0,
         }
     }
 
@@ -2364,8 +2435,13 @@ mod tests {
             now,
         );
 
-        assert_eq!(insights.len(), 1);
-        assert_eq!(insights[0].kind, InsightKind::WriteGateTooLoose);
+        assert_eq!(insights.len(), 2);
+        assert!(insights
+            .iter()
+            .any(|i| i.kind == InsightKind::WriteGateTooLoose));
+        assert!(insights
+            .iter()
+            .any(|i| i.kind == InsightKind::OverSurfacedLearning));
     }
 
     #[test]
@@ -2728,5 +2804,157 @@ mod tests {
         let insight = generate_skip_miss_insight(&cache, &context_files, 1);
 
         assert!(insight.is_some()); // Should match via path suffix
+    }
+
+    // =========================================================================
+    // OverSurfacedLearning insight tests
+    // =========================================================================
+
+    #[test]
+    fn test_over_surfaced_no_learnings() {
+        let cache = StatsCache::new();
+        let insight = generate_over_surfaced_learning_insight(&cache, 5, 0.1);
+        assert!(insight.is_none());
+    }
+
+    #[test]
+    fn test_over_surfaced_below_min_surfacings() {
+        let mut cache = StatsCache::new();
+        let mut stats = make_learning_stats();
+        stats.surfaced = 4; // Below threshold of 5
+        stats.referenced = 0;
+        stats.hit_rate = 0.0;
+        cache.learnings.insert("L001".to_string(), stats);
+
+        let insight = generate_over_surfaced_learning_insight(&cache, 5, 0.1);
+        assert!(insight.is_none());
+    }
+
+    #[test]
+    fn test_over_surfaced_hit_rate_above_threshold() {
+        let mut cache = StatsCache::new();
+        let mut stats = make_learning_stats();
+        stats.surfaced = 10;
+        stats.referenced = 3;
+        stats.hit_rate = 0.3; // Above 0.1 threshold
+        cache.learnings.insert("L001".to_string(), stats);
+
+        let insight = generate_over_surfaced_learning_insight(&cache, 5, 0.1);
+        assert!(insight.is_none());
+    }
+
+    #[test]
+    fn test_over_surfaced_triggers_single() {
+        let mut cache = StatsCache::new();
+        let mut stats = make_learning_stats();
+        stats.surfaced = 10;
+        stats.referenced = 0;
+        stats.hit_rate = 0.0;
+        cache.learnings.insert("L001".to_string(), stats);
+
+        let insight = generate_over_surfaced_learning_insight(&cache, 5, 0.1);
+        assert!(insight.is_some());
+        let insight = insight.unwrap();
+        assert_eq!(insight.kind, InsightKind::OverSurfacedLearning);
+        assert!(insight.message.contains("L001"));
+        assert!(insight.message.contains("10 times"));
+        assert!(insight.message.contains("0%"));
+    }
+
+    #[test]
+    fn test_over_surfaced_triggers_multiple() {
+        let mut cache = StatsCache::new();
+
+        for i in 1..=3 {
+            let mut stats = make_learning_stats();
+            stats.surfaced = 10 + i;
+            stats.referenced = 0;
+            stats.hit_rate = 0.0;
+            cache.learnings.insert(format!("L{:03}", i), stats);
+        }
+
+        let insight = generate_over_surfaced_learning_insight(&cache, 5, 0.1);
+        assert!(insight.is_some());
+        let insight = insight.unwrap();
+        assert!(insight.message.contains("3 learnings"));
+        // Worst offender should be L003 (13 surfacings)
+        assert!(insight.message.contains("L003"));
+    }
+
+    #[test]
+    fn test_over_surfaced_ignores_archived() {
+        let mut cache = StatsCache::new();
+        let mut stats = make_learning_stats();
+        stats.surfaced = 20;
+        stats.referenced = 0;
+        stats.hit_rate = 0.0;
+        stats.archived = true;
+        cache.learnings.insert("L001".to_string(), stats);
+
+        let insight = generate_over_surfaced_learning_insight(&cache, 5, 0.1);
+        assert!(insight.is_none());
+    }
+
+    #[test]
+    fn test_over_surfaced_at_exact_threshold() {
+        let mut cache = StatsCache::new();
+        let mut stats = make_learning_stats();
+        stats.surfaced = 5; // Exactly at min threshold
+        stats.referenced = 0;
+        stats.hit_rate = 0.1; // Exactly at max hit rate (<=)
+        cache.learnings.insert("L001".to_string(), stats);
+
+        let insight = generate_over_surfaced_learning_insight(&cache, 5, 0.1);
+        assert!(insight.is_some());
+    }
+
+    #[test]
+    fn test_over_surfaced_priority() {
+        let mut cache = StatsCache::new();
+        let mut stats = make_learning_stats();
+        stats.surfaced = 10;
+        stats.referenced = 0;
+        stats.hit_rate = 0.0;
+        cache.learnings.insert("L001".to_string(), stats);
+
+        let insight = generate_over_surfaced_learning_insight(&cache, 5, 0.1).unwrap();
+        assert_eq!(insight.priority, 2);
+    }
+
+    #[test]
+    fn test_over_surfaced_in_generate_all() {
+        let now = Utc::now();
+        let mut cache = StatsCache::new();
+
+        let mut stats = make_learning_stats();
+        stats.surfaced = 15;
+        stats.referenced = 0;
+        stats.hit_rate = 0.0;
+        cache.learnings.insert("L001".to_string(), stats);
+
+        let timestamps = HashMap::new();
+        let categories = HashMap::new();
+        let criteria = HashMap::new();
+        let context_files = HashMap::new();
+        let decay_config = default_decay_config();
+        let insight_config = default_insight_config();
+
+        let insights = generate_all(
+            &cache,
+            &timestamps,
+            &categories,
+            &criteria,
+            &context_files,
+            &decay_config,
+            &insight_config,
+            now,
+        );
+
+        assert!(
+            insights
+                .iter()
+                .any(|i| i.kind == InsightKind::OverSurfacedLearning),
+            "Expected OverSurfacedLearning insight in generate_all output"
+        );
     }
 }

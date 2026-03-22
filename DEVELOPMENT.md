@@ -129,6 +129,125 @@ mise release:minor  # 0.1.0 → 0.2.0
 mise release:major  # 0.1.0 → 1.0.0
 ```
 
+## Benchmarking Retrieval Algorithms
+
+Grove includes an offline eval system for measuring retrieval quality. It
+requires the `tantivy-search` feature:
+
+```bash
+cargo build --features tantivy-search
+```
+
+### Corpus Setup
+
+Create a corpus manifest listing projects with learnings and transcripts:
+
+```toml
+# .grove/corpora.toml
+[[corpus]]
+name = "my-project"
+transcript_dir = "~/.claude/projects/-Users-you-my-project"
+learnings_path = "/path/to/my-project/.grove/learnings.md"
+```
+
+### Generating Learnings with Retroflect
+
+Bootstrap learnings from existing session transcripts:
+
+```bash
+# Single project, sequential (default model: Sonnet)
+grove retroflect --project /path/to/project
+
+# All projects, Batch API (50% cheaper, async processing)
+grove retroflect --batch --yes --all
+
+# Cheaper bulk run with Haiku
+grove retroflect --batch --model claude-haiku-4-5-20251001 --yes --all
+
+# Re-analyze with a better model (--force re-processes already-retroflected sessions)
+grove retroflect --batch --model claude-sonnet-4-20250514 --yes --force --all
+```
+
+### Running Eval Benchmarks
+
+Single corpus:
+
+```bash
+grove eval run --config boosted-adaptive \
+  --transcript-dir ~/.claude/projects/-Users-you-my-project \
+  --learnings-path /path/to/my-project/.grove/learnings.md
+```
+
+Multi-corpus sweep across algorithm configs:
+
+```bash
+grove eval sweep --manifest .grove/corpora.toml \
+  --configs "bm25,boosted-adaptive"
+```
+
+Both `eval run` and `eval sweep` support `--batch` for 50% cheaper LLM judge
+calls via the Anthropic Batch API:
+
+```bash
+grove eval sweep --manifest .grove/corpora.toml \
+  --configs "bm25,boosted-adaptive" \
+  --batch
+```
+
+### Available Benchmark Configs
+
+| Config | Description |
+|--------|-------------|
+| `bm25` | BM25 search only (baseline) |
+| `adaptive` | BM25 + adaptive threshold + dynamic K |
+| `intent-filter` | BM25 + adaptive + intent-as-filter |
+| `boosted-adaptive` | BM25 with per-term boost + adaptive |
+| `adaptive-rerank` | BM25 + adaptive + LLM reranking |
+| `boosted-adaptive-rerank` | BM25 boosted + adaptive + LLM reranking |
+| `flat-recency` | BM25 + adaptive with flat 90-day half-life (ablation control) |
+| `heuristic` | BM25 with corpus-size heuristic (plain for large, boosted for small) |
+| `heuristic(N)` | Same, with custom threshold (default 50) |
+| `corpus-enriched` | BM25 boosted + adaptive + corpus vocabulary enrichment |
+| `adaptive-dk` | BM25 + adaptive + per-query adaptive dynamic K |
+| `boosted(kw=F,tag=F,dk=F)` | Custom boost params (keyword, tag, dynamic_k_ratio) |
+
+### Comparing Results
+
+```bash
+grove eval compare --configs bm25,boosted-adaptive
+```
+
+### Interpreting Benchmark Results
+
+Eval sweep output includes these metrics per corpus per config:
+
+| Metric | What It Measures |
+|--------|-----------------|
+| **Pairs** | Total (session, learning) pairs evaluated |
+| **Avg/Med** | Mean/median relevance score (1-5 scale, LLM judge) |
+| **Noise%** | Fraction of pairs scoring <= 2 (irrelevant) |
+| **P@3g** | Global precision: % of surfaced pairs scoring >= 3 |
+| **P@3** | Per-session precision: mean of per-session top-3 precision |
+| **R@4** | Recall: % of ground-truth relevant pairs (>= 4) that were surfaced |
+| **F1** | Harmonic mean of P@3g and R@4 — primary comparison metric |
+| **Cov%** | Coverage: % of sessions receiving at least one result |
+| **MRR** | Mean reciprocal rank of first relevant (>= 4) result per session |
+
+**Key principles:**
+
+- **F1 is the primary metric** for comparing configs across corpora
+- **No single config wins all corpora** — corpus characteristics (learning count,
+  domain diversity) determine which config is optimal
+- **Coverage floor matters** — a config with high precision but < 80% coverage
+  leaves too many sessions empty
+- **Bootstrap CIs** (`--bootstrap 1000`) quantify confidence; differences within
+  overlapping CIs are not statistically significant
+- **Cross-corpus negatives** (`--cross-negatives`) measure false positive rate
+  by pairing learnings from one project with sessions from another
+
+**Validation policy:** No retrieval changes ship unless they improve (or hold) F1
+on **all** available benchmark corpora. See `design/research/benchmarks/README.md`.
+
 ## Project Architecture
 
 ```text

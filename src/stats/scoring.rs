@@ -36,10 +36,10 @@
 //! Learnings with proven value get boosted:
 //!
 //! ```text
-//! reference_boost = 0.3 + (hit_rate × 0.7)
+//! reference_boost = 0.1 + (hit_rate × 0.9)
 //! ```
 //!
-//! Range: 0.3 (never referenced) to 1.0 (always referenced).
+//! Range: 0.1 (never referenced) to 1.0 (always referenced).
 //!
 //! ## Strategy Modes
 //!
@@ -102,10 +102,59 @@ pub mod recency {
 /// Constants for reference boost calculation.
 pub mod reference {
     /// Base boost for learnings with no references.
-    pub const BASE_BOOST: f64 = 0.3;
+    /// Lowered from 0.3 to 0.1 to penalize chronically unreferenced
+    /// learnings more aggressively (grove-6feruie6).
+    pub const BASE_BOOST: f64 = 0.1;
 
     /// Maximum additional boost from hit rate.
-    pub const MAX_ADDITIONAL: f64 = 0.7;
+    pub const MAX_ADDITIONAL: f64 = 0.9;
+}
+
+/// Domain-scoped negative tag signals for retrieval.
+///
+/// When a learning's tags indicate a specific domain (e.g., "deployment", "ci")
+/// that doesn't match the session context, its relevance score is penalized.
+pub mod domain {
+    /// Multiplier applied when a learning has domain tags but none match the
+    /// session context. 0.5 = halve the score for domain mismatches.
+    pub const MISMATCH_PENALTY: f64 = 0.5;
+
+    /// Domain tag groups. Each group represents a high-level domain.
+    /// Tags within the same group are considered equivalent for matching.
+    pub const GROUPS: &[&[&str]] = &[
+        &[
+            "deployment",
+            "deploy",
+            "ci",
+            "cd",
+            "devops",
+            "infrastructure",
+        ],
+        &[
+            "testing",
+            "test",
+            "spec",
+            "e2e",
+            "integration-test",
+            "unit-test",
+        ],
+        &["debugging", "debug", "troubleshooting", "profiling"],
+        &[
+            "migration",
+            "schema-migration",
+            "database-migration",
+            "data-migration",
+        ],
+    ];
+
+    /// Check if a tag belongs to a domain group.
+    /// Returns the group index if found, None otherwise.
+    pub fn tag_domain(tag: &str) -> Option<usize> {
+        let lower = tag.to_lowercase();
+        GROUPS
+            .iter()
+            .position(|group| group.iter().any(|g| *g == lower))
+    }
 }
 
 /// Retrieval strategy mode for composite scoring.
@@ -272,7 +321,64 @@ pub fn score(query: &SearchQuery, learning: &CompoundLearning) -> f64 {
         .map(|(score, mult)| score * mult)
         .sum();
 
-    combined.min(1.0)
+    let raw = combined.min(1.0);
+
+    // Apply domain mismatch penalty: if the learning has tags in a domain
+    // group and no query keyword/tag indicates that domain, reduce the score.
+    let penalty = domain_penalty(&query.keywords, &query.tags, &learning.tags);
+    raw * penalty
+}
+
+/// Compute domain mismatch penalty.
+///
+/// Returns 1.0 (no penalty) if:
+/// - The learning has no domain tags
+/// - The learning's domain matches the query's domain
+/// - The query has no context or no domain-scoped signals
+///
+/// Returns `domain::MISMATCH_PENALTY` if the learning and query are
+/// in different domain groups (e.g., "deployment" vs "testing").
+fn domain_penalty(
+    query_keywords: &[String],
+    query_tags: &[String],
+    learning_tags: &[String],
+) -> f64 {
+    // Find which domain groups the learning belongs to
+    let learning_domains: Vec<usize> = learning_tags
+        .iter()
+        .filter_map(|tag| domain::tag_domain(tag))
+        .collect();
+
+    if learning_domains.is_empty() {
+        return 1.0; // No domain tags, no penalty
+    }
+
+    // No session context → can't determine mismatch, no penalty
+    if query_keywords.is_empty() && query_tags.is_empty() {
+        return 1.0;
+    }
+
+    // Collect domain groups present in the query signals
+    let query_domains: Vec<usize> = query_keywords
+        .iter()
+        .chain(query_tags.iter())
+        .filter_map(|kw| domain::tag_domain(kw))
+        .collect();
+
+    // If the query has no domain signals, we can't determine a mismatch
+    if query_domains.is_empty() {
+        return 1.0;
+    }
+
+    // Penalty applies when the learning's domain(s) don't overlap
+    // with the query's domain(s)
+    let domains_overlap = learning_domains.iter().any(|ld| query_domains.contains(ld));
+
+    if domains_overlap {
+        1.0
+    } else {
+        domain::MISMATCH_PENALTY
+    }
 }
 
 /// Score tag matches between query tags and learning tags.
@@ -493,13 +599,17 @@ pub fn recency_weight(created_at: DateTime<Utc>, now: DateTime<Utc>, lambda: f64
 
 /// Calculate the reference boost based on hit rate.
 ///
-/// Hit rate is: referenced / surfaced (or 0.0 if never surfaced).
-///
-/// Returns: 0.3 + (hit_rate × 0.7)
-/// Range: 0.3 (never referenced) to 1.0 (always referenced)
-pub fn reference_boost(hit_rate: f64) -> f64 {
-    let clamped_rate = hit_rate.clamp(0.0, 1.0);
-    reference::BASE_BOOST + (clamped_rate * reference::MAX_ADDITIONAL)
+/// Returns 1.0 (neutral) if the learning has never been surfaced (no data).
+/// Otherwise returns: 0.1 + (hit_rate × 0.9)
+/// Range: 0.1 (surfaced but never referenced) to 1.0 (always referenced)
+pub fn reference_boost(hit_rate: Option<f64>) -> f64 {
+    match hit_rate {
+        None => 1.0, // No surfacing data yet — neutral boost
+        Some(rate) => {
+            let clamped_rate = rate.clamp(0.0, 1.0);
+            reference::BASE_BOOST + (clamped_rate * reference::MAX_ADDITIONAL)
+        }
+    }
 }
 
 /// Learning statistics needed for composite scoring.
@@ -522,12 +632,12 @@ impl LearningStats {
 
     /// Calculate the hit rate (referenced / surfaced).
     ///
-    /// Returns 0.0 if never surfaced.
-    pub fn hit_rate(&self) -> f64 {
+    /// Returns `None` if never surfaced (no data yet).
+    pub fn hit_rate(&self) -> Option<f64> {
         if self.surfaced == 0 {
-            0.0
+            None
         } else {
-            self.referenced as f64 / self.surfaced as f64
+            Some(self.referenced as f64 / self.surfaced as f64)
         }
     }
 }
@@ -541,7 +651,7 @@ pub struct CompositeScore {
     pub relevance: f64,
     /// The recency weight component (0.1 to 1.0).
     pub recency: f64,
-    /// The reference boost component (0.3 to 1.0).
+    /// The reference boost component (0.1 to 1.0).
     pub reference: f64,
     /// The final composite score.
     pub score: f64,
@@ -595,7 +705,8 @@ impl CompositeScore {
 /// * `strategy` - The scoring strategy to use
 /// * `now` - The current time (for recency calculation)
 /// * `limit` - Maximum number of results to return (capped by strategy default)
-/// * `lambda` - Recency decay rate (use `recency::LAMBDA` for default)
+/// * `lambda` - Recency decay rate (use `recency::LAMBDA` for default).
+///   For per-category decay, use [`composite_rank_with_category_lambda`].
 pub fn composite_rank<F>(
     query: &SearchQuery,
     learnings: &[CompoundLearning],
@@ -607,6 +718,26 @@ pub fn composite_rank<F>(
 ) -> Vec<CompositeScore>
 where
     F: Fn(&str) -> LearningStats,
+{
+    composite_rank_with_category_lambda(query, learnings, stats, strategy, now, limit, |_| lambda)
+}
+
+/// Score and rank learnings with per-category recency decay.
+///
+/// Like [`composite_rank`] but accepts a function that returns the lambda
+/// decay rate for each learning category, enabling category-specific decay.
+pub fn composite_rank_with_category_lambda<F, L>(
+    query: &SearchQuery,
+    learnings: &[CompoundLearning],
+    stats: F,
+    strategy: Strategy,
+    now: DateTime<Utc>,
+    limit: usize,
+    lambda_fn: L,
+) -> Vec<CompositeScore>
+where
+    F: Fn(&str) -> LearningStats,
+    L: Fn(&crate::core::LearningCategory) -> f64,
 {
     let min_threshold = strategy.min_relevance_threshold();
 
@@ -632,7 +763,8 @@ where
                 return None;
             }
 
-            // Calculate recency
+            // Calculate recency with category-specific lambda
+            let lambda = lambda_fn(&l.category);
             let recency = recency_weight(l.timestamp, now, lambda);
 
             // Get stats and calculate reference boost
@@ -1262,33 +1394,119 @@ mod tests {
 
     #[test]
     fn test_reference_boost_never_referenced() {
-        let boost = reference_boost(0.0);
+        let boost = reference_boost(Some(0.0));
         assert!((boost - reference::BASE_BOOST).abs() < f64::EPSILON);
     }
 
     #[test]
     fn test_reference_boost_always_referenced() {
-        let boost = reference_boost(1.0);
+        let boost = reference_boost(Some(1.0));
         assert!((boost - 1.0).abs() < f64::EPSILON);
     }
 
     #[test]
     fn test_reference_boost_half_referenced() {
-        let boost = reference_boost(0.5);
+        let boost = reference_boost(Some(0.5));
         let expected = reference::BASE_BOOST + 0.5 * reference::MAX_ADDITIONAL;
         assert!((boost - expected).abs() < f64::EPSILON);
     }
 
     #[test]
     fn test_reference_boost_clamps_negative() {
-        let boost = reference_boost(-0.5);
+        let boost = reference_boost(Some(-0.5));
         assert!((boost - reference::BASE_BOOST).abs() < f64::EPSILON);
     }
 
     #[test]
     fn test_reference_boost_clamps_over_one() {
-        let boost = reference_boost(1.5);
+        let boost = reference_boost(Some(1.5));
         assert!((boost - 1.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_reference_boost_no_data() {
+        let boost = reference_boost(None);
+        assert!((boost - 1.0).abs() < f64::EPSILON);
+    }
+
+    // =======================================================================
+    // Domain Penalty Tests
+    // =======================================================================
+
+    #[test]
+    fn test_domain_penalty_no_domain_tags() {
+        let penalty = domain_penalty(
+            &["rust".into()],
+            &[],
+            &["ecto".into(), "phoenix".into()], // not domain tags
+        );
+        assert!((penalty - 1.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_domain_penalty_matching_domain() {
+        let penalty = domain_penalty(
+            &["deployment".into()], // query keyword matches
+            &[],
+            &["deployment".into(), "kubernetes".into()],
+        );
+        assert!((penalty - 1.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_domain_penalty_matching_domain_via_group() {
+        // "ci" and "deploy" are in the same group
+        let penalty = domain_penalty(&["ci".into()], &[], &["deploy".into()]);
+        assert!((penalty - 1.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_domain_penalty_mismatch() {
+        // Query is in "testing" domain, learning is in "deployment" domain
+        let penalty = domain_penalty(&["testing".into()], &[], &["deployment".into()]);
+        assert!((penalty - domain::MISMATCH_PENALTY).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_domain_penalty_no_domain_in_query() {
+        // Query has keywords but none are domain tags → no penalty
+        let penalty = domain_penalty(&["rust".into(), "ecto".into()], &[], &["deployment".into()]);
+        assert!((penalty - 1.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_domain_penalty_no_query_context() {
+        // No keywords or tags → no penalty (can't determine mismatch)
+        let penalty = domain_penalty(&[], &[], &["deployment".into()]);
+        assert!((penalty - 1.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_domain_penalty_query_tag_matches() {
+        let penalty = domain_penalty(
+            &[],
+            &["testing".into()], // query tag matches
+            &["test".into()],
+        );
+        assert!((penalty - 1.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_domain_penalty_case_insensitive() {
+        let penalty = domain_penalty(&["Deployment".into()], &[], &["DEPLOY".into()]);
+        assert!((penalty - 1.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_domain_tag_groups() {
+        // Verify domain tag identification works
+        assert!(domain::tag_domain("deployment").is_some());
+        assert!(domain::tag_domain("ci").is_some());
+        assert!(domain::tag_domain("testing").is_some());
+        assert!(domain::tag_domain("debug").is_some());
+        assert!(domain::tag_domain("migration").is_some());
+        assert!(domain::tag_domain("ecto").is_none());
+        assert!(domain::tag_domain("phoenix").is_none());
     }
 
     // =======================================================================
@@ -1298,19 +1516,19 @@ mod tests {
     #[test]
     fn test_learning_stats_hit_rate_never_surfaced() {
         let stats = LearningStats::new(0, 0);
-        assert!((stats.hit_rate() - 0.0).abs() < f64::EPSILON);
+        assert_eq!(stats.hit_rate(), None);
     }
 
     #[test]
     fn test_learning_stats_hit_rate_always_referenced() {
         let stats = LearningStats::new(10, 10);
-        assert!((stats.hit_rate() - 1.0).abs() < f64::EPSILON);
+        assert!((stats.hit_rate().unwrap() - 1.0).abs() < f64::EPSILON);
     }
 
     #[test]
     fn test_learning_stats_hit_rate_half() {
         let stats = LearningStats::new(10, 5);
-        assert!((stats.hit_rate() - 0.5).abs() < f64::EPSILON);
+        assert!((stats.hit_rate().unwrap() - 0.5).abs() < f64::EPSILON);
     }
 
     // =======================================================================
@@ -1393,6 +1611,26 @@ mod tests {
         assert_eq!(Strategy::Conservative.default_max_injections(), 3);
         assert_eq!(Strategy::Moderate.default_max_injections(), 5);
         assert_eq!(Strategy::Aggressive.default_max_injections(), 10);
+    }
+
+    #[test]
+    fn test_moderate_effective_limit_matches_config_max_injections() {
+        // The production hook runner computes:
+        //   effective_limit = max_injections.min(strategy.default_max_injections())
+        // With moderate (default) and max_injections=5 (default), these align.
+        // The eval benchmarks validated this combination (3-corpus sweep, 2026-03-18).
+        let max_injections: usize = 5;
+        let effective = max_injections.min(Strategy::Moderate.default_max_injections());
+        assert_eq!(effective, 5);
+    }
+
+    #[test]
+    fn test_conservative_caps_effective_limit_below_max_injections() {
+        // Conservative caps at 3 even when max_injections is 5.
+        // This creates a mismatch with eval benchmarks which tested with 5.
+        let max_injections: usize = 5;
+        let effective = max_injections.min(Strategy::Conservative.default_max_injections());
+        assert_eq!(effective, 3);
     }
 
     #[test]
@@ -1971,5 +2209,146 @@ mod tests {
         );
 
         assert_eq!(ranked.len(), 2);
+    }
+
+    // =======================================================================
+    // Category-Specific Decay Curve Tests
+    // =======================================================================
+
+    #[test]
+    fn test_category_decay_debugging_45_days() {
+        // Debugging: 45-day half-life → weight ~0.3 at 45 days
+        let lambda = recency::lambda_from_half_life(45);
+        let now = Utc::now();
+        let created = now - chrono::Duration::days(45);
+        let weight = recency_weight(created, now, lambda);
+        assert!(
+            (weight - 0.3).abs() < 0.05,
+            "Debugging 45-day-old should be ~0.3, got {weight}"
+        );
+    }
+
+    #[test]
+    fn test_category_decay_pitfall_60_days() {
+        // Pitfall: 60-day half-life → weight ~0.3 at 60 days
+        let lambda = recency::lambda_from_half_life(60);
+        let now = Utc::now();
+        let created = now - chrono::Duration::days(60);
+        let weight = recency_weight(created, now, lambda);
+        assert!(
+            (weight - 0.3).abs() < 0.05,
+            "Pitfall 60-day-old should be ~0.3, got {weight}"
+        );
+    }
+
+    #[test]
+    fn test_category_decay_pattern_90_days() {
+        // Pattern: 90-day half-life (same as default) → weight ~0.3 at 90 days
+        let lambda = recency::lambda_from_half_life(90);
+        let now = Utc::now();
+        let created = now - chrono::Duration::days(90);
+        let weight = recency_weight(created, now, lambda);
+        assert!(
+            (weight - 0.3).abs() < 0.05,
+            "Pattern 90-day-old should be ~0.3, got {weight}"
+        );
+    }
+
+    #[test]
+    fn test_category_decay_process_120_days() {
+        // Process: 120-day half-life → weight ~0.3 at 120 days
+        let lambda = recency::lambda_from_half_life(120);
+        let now = Utc::now();
+        let created = now - chrono::Duration::days(120);
+        let weight = recency_weight(created, now, lambda);
+        assert!(
+            (weight - 0.3).abs() < 0.05,
+            "Process 120-day-old should be ~0.3, got {weight}"
+        );
+    }
+
+    #[test]
+    fn test_category_decay_convention_180_days() {
+        // Convention: 180-day half-life → weight ~0.3 at 180 days
+        let lambda = recency::lambda_from_half_life(180);
+        let now = Utc::now();
+        let created = now - chrono::Duration::days(180);
+        let weight = recency_weight(created, now, lambda);
+        assert!(
+            (weight - 0.3).abs() < 0.05,
+            "Convention 180-day-old should be ~0.3, got {weight}"
+        );
+    }
+
+    #[test]
+    fn test_category_decay_domain_120_days() {
+        // Domain: 120-day half-life → weight ~0.3 at 120 days
+        let lambda = recency::lambda_from_half_life(120);
+        let now = Utc::now();
+        let created = now - chrono::Duration::days(120);
+        let weight = recency_weight(created, now, lambda);
+        assert!(
+            (weight - 0.3).abs() < 0.05,
+            "Domain 120-day-old should be ~0.3, got {weight}"
+        );
+    }
+
+    #[test]
+    fn test_category_decay_ordering() {
+        // At 60 days, debugging should decay more than convention
+        let now = Utc::now();
+        let created = now - chrono::Duration::days(60);
+
+        let debug_weight = recency_weight(created, now, recency::lambda_from_half_life(45));
+        let convention_weight = recency_weight(created, now, recency::lambda_from_half_life(180));
+
+        assert!(
+            debug_weight < convention_weight,
+            "Debugging ({debug_weight}) should decay faster than convention ({convention_weight}) at 60 days"
+        );
+    }
+
+    #[test]
+    fn test_composite_rank_with_category_lambda() {
+        use crate::core::LearningCategory;
+
+        let query = SearchQuery::with_tags(vec!["rust".to_string()]);
+
+        // Create two learnings: same age, different categories
+        let mut debug_learning = make_learning("Debug technique", vec!["rust"], None);
+        debug_learning.category = LearningCategory::Debugging;
+        debug_learning.timestamp = Utc::now() - chrono::Duration::days(60);
+
+        let mut convention_learning = make_learning("Convention rule", vec!["rust"], None);
+        convention_learning.category = LearningCategory::Convention;
+        convention_learning.timestamp = Utc::now() - chrono::Duration::days(60);
+
+        let learnings = vec![debug_learning, convention_learning];
+        let now = Utc::now();
+        let stats = |_: &str| LearningStats::new(0, 0);
+
+        // With per-category lambda, convention should rank higher than debugging
+        // at 60 days because convention decays slower (180d vs 45d half-life)
+        let ranked = composite_rank_with_category_lambda(
+            &query,
+            &learnings,
+            stats,
+            Strategy::Moderate,
+            now,
+            10,
+            |cat| {
+                let half_life = match cat {
+                    LearningCategory::Debugging => 45,
+                    LearningCategory::Convention => 180,
+                    _ => 90,
+                };
+                recency::lambda_from_half_life(half_life)
+            },
+        );
+
+        assert_eq!(ranked.len(), 2);
+        // Convention should rank higher (slower decay → higher recency weight)
+        assert_eq!(ranked[0].learning.category, LearningCategory::Convention);
+        assert_eq!(ranked[1].learning.category, LearningCategory::Debugging);
     }
 }

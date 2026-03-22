@@ -10,6 +10,7 @@
 //! - **session**: Always available (fallback)
 
 use std::path::Path;
+use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
@@ -315,6 +316,156 @@ fn is_beads_complete_command(command: &str) -> bool {
     }
 
     parts[0] == "beads" && parts[1] == "complete"
+}
+
+/// Information about an active (in-progress or open) ticket.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ActiveTicketInfo {
+    /// The ticket identifier.
+    pub ticket_id: String,
+    /// The ticket title.
+    pub title: String,
+    /// Tags/labels associated with the ticket.
+    pub tags: Vec<String>,
+}
+
+/// JSON structure returned by `tissue list --json`.
+#[derive(Debug, Deserialize)]
+struct TissueListEntry {
+    issue: TissueIssue,
+}
+
+#[derive(Debug, Deserialize)]
+struct TissueIssue {
+    id: String,
+    title: String,
+    #[serde(default)]
+    tags: Vec<String>,
+}
+
+/// Query tissue for active (in-progress or open) tickets.
+///
+/// Runs `tissue list --status in_progress --json` first; if empty,
+/// falls back to `tissue list --status open --json`.
+///
+/// Returns empty vec on any error (fail-open).
+pub fn query_active_tickets(cwd: &Path, timeout_ms: u64) -> Vec<ActiveTicketInfo> {
+    let timeout = Duration::from_millis(timeout_ms);
+
+    // Try in_progress first
+    if let Some(tickets) = run_tissue_list(cwd, "in_progress", timeout) {
+        if !tickets.is_empty() {
+            return tickets;
+        }
+    }
+
+    // Fall back to open
+    if let Some(tickets) = run_tissue_list(cwd, "open", timeout) {
+        return tickets;
+    }
+
+    Vec::new()
+}
+
+/// Run `tissue list --status <status> --json` and parse the output.
+fn run_tissue_list(cwd: &Path, status: &str, timeout: Duration) -> Option<Vec<ActiveTicketInfo>> {
+    let child = std::process::Command::new("tissue")
+        .args(["list", "--status", status, "--json"])
+        .current_dir(cwd)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn();
+
+    let child = match child {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::warn!(error = %e, "failed to spawn tissue list command");
+            return None;
+        }
+    };
+
+    // Wait with timeout
+    let output = wait_with_timeout(child, timeout)?;
+
+    if !output.status.success() {
+        tracing::warn!(
+            status = %output.status,
+            "tissue list returned non-zero exit code"
+        );
+        return None;
+    }
+
+    let stdout = String::from_utf8(output.stdout).ok()?;
+    parse_tissue_json(&stdout)
+}
+
+/// Wait for a child process with a timeout.
+///
+/// Returns None if the process doesn't finish in time or on join failure.
+fn wait_with_timeout(
+    child: std::process::Child,
+    timeout: Duration,
+) -> Option<std::process::Output> {
+    let start = std::time::Instant::now();
+    let handle = std::thread::spawn(move || child.wait_with_output());
+
+    // Poll the thread with the timeout budget
+    loop {
+        if handle.is_finished() {
+            return match handle.join() {
+                Ok(Ok(output)) => Some(output),
+                _ => None,
+            };
+        }
+        if start.elapsed() >= timeout {
+            tracing::warn!("tissue list timed out after {}ms", timeout.as_millis());
+            return None;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+/// Parse tissue JSON output into ActiveTicketInfo entries.
+fn parse_tissue_json(json_str: &str) -> Option<Vec<ActiveTicketInfo>> {
+    let trimmed = json_str.trim();
+    if trimmed.is_empty() {
+        return Some(Vec::new());
+    }
+
+    // tissue list --json outputs a JSON array of entries
+    let entries: Vec<TissueListEntry> = serde_json::from_str(trimmed).ok()?;
+    let tickets = entries
+        .into_iter()
+        .map(|e| ActiveTicketInfo {
+            ticket_id: e.issue.id,
+            title: e.issue.title,
+            tags: e.issue.tags,
+        })
+        .collect();
+    Some(tickets)
+}
+
+/// Extract keywords from a ticket title.
+///
+/// Splits on whitespace and punctuation, filters noise words,
+/// and returns words with length >= 3.
+pub fn extract_title_keywords(title: &str) -> Vec<String> {
+    // Extended noise words for natural language titles
+    const NOISE_WORDS: &[&str] = &[
+        "the", "and", "for", "with", "from", "into", "that", "this", "when", "where", "which",
+        "what", "how", "who", "has", "have", "had", "was", "were", "are", "been", "being", "not",
+        "but", "can", "all", "any", "our", "its", "also", "than", "then", "too", "very", "just",
+        "about", "above", "after", "before", "between", "each", "only", "other", "some", "such",
+        "more", "most", "will", "would", "could", "should", "may", "might", "shall", "must", "add",
+        "fix", "bug", "feat", "feature", "chore", "docs", "refactor", "test", "update", "use",
+        "new", "get", "set",
+    ];
+
+    title
+        .split(|c: char| !c.is_alphanumeric() && c != '-' && c != '_')
+        .map(|w| w.trim().to_lowercase())
+        .filter(|w| w.len() >= 3 && !NOISE_WORDS.contains(&w.as_str()))
+        .collect()
 }
 
 #[cfg(test)]
@@ -856,5 +1007,111 @@ mod tests {
     fn test_beads_compound_command_pipe() {
         let result = match_close_command("Bash", "beads close issue-456 | tee log.txt");
         assert!(result.is_none(), "| operator should prevent beads match");
+    }
+
+    // =========================================================================
+    // parse_tissue_json tests
+    // =========================================================================
+
+    #[test]
+    fn test_parse_tissue_json_valid() {
+        let json = r#"[
+            {"issue": {"id": "grove-1", "title": "Add logging", "tags": ["backend", "ops"]}},
+            {"issue": {"id": "grove-2", "title": "Fix auth bug", "tags": []}}
+        ]"#;
+
+        let result = parse_tissue_json(json).unwrap();
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].ticket_id, "grove-1");
+        assert_eq!(result[0].title, "Add logging");
+        assert_eq!(result[0].tags, vec!["backend", "ops"]);
+        assert_eq!(result[1].ticket_id, "grove-2");
+        assert_eq!(result[1].title, "Fix auth bug");
+        assert!(result[1].tags.is_empty());
+    }
+
+    #[test]
+    fn test_parse_tissue_json_empty_array() {
+        let result = parse_tissue_json("[]").unwrap();
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_parse_tissue_json_empty_string() {
+        let result = parse_tissue_json("").unwrap();
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_parse_tissue_json_whitespace_only() {
+        let result = parse_tissue_json("   \n  ").unwrap();
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_parse_tissue_json_invalid() {
+        let result = parse_tissue_json("not json");
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_parse_tissue_json_missing_tags_defaults() {
+        // tags field is optional (serde default)
+        let json = r#"[{"issue": {"id": "grove-1", "title": "No tags"}}]"#;
+        let result = parse_tissue_json(json).unwrap();
+        assert_eq!(result.len(), 1);
+        assert!(result[0].tags.is_empty());
+    }
+
+    // =========================================================================
+    // extract_title_keywords tests
+    // =========================================================================
+
+    #[test]
+    fn test_extract_title_keywords_basic() {
+        let keywords = extract_title_keywords("Implement retry logic for API calls");
+        assert!(keywords.contains(&"implement".to_string()));
+        assert!(keywords.contains(&"retry".to_string()));
+        assert!(keywords.contains(&"logic".to_string()));
+        assert!(keywords.contains(&"api".to_string()));
+        assert!(keywords.contains(&"calls".to_string()));
+        // "for" is a noise word
+        assert!(!keywords.contains(&"for".to_string()));
+    }
+
+    #[test]
+    fn test_extract_title_keywords_filters_noise() {
+        let keywords = extract_title_keywords("Fix the bug with authentication");
+        // "fix", "the", "with" are noise words
+        assert!(!keywords.contains(&"fix".to_string()));
+        assert!(!keywords.contains(&"the".to_string()));
+        assert!(!keywords.contains(&"with".to_string()));
+        // "bug" is noise too
+        assert!(!keywords.contains(&"bug".to_string()));
+        assert!(keywords.contains(&"authentication".to_string()));
+    }
+
+    #[test]
+    fn test_extract_title_keywords_min_length() {
+        let keywords = extract_title_keywords("A to do list");
+        // Short words (< 3 chars) are excluded
+        assert!(!keywords.contains(&"a".to_string()));
+        assert!(!keywords.contains(&"to".to_string()));
+        assert!(!keywords.contains(&"do".to_string()));
+        assert!(keywords.contains(&"list".to_string()));
+    }
+
+    #[test]
+    fn test_extract_title_keywords_punctuation() {
+        let keywords = extract_title_keywords("grove: implement retry-logic (v2)");
+        assert!(keywords.contains(&"grove".to_string()));
+        assert!(keywords.contains(&"implement".to_string()));
+        assert!(keywords.contains(&"retry-logic".to_string()));
+    }
+
+    #[test]
+    fn test_extract_title_keywords_empty() {
+        let keywords = extract_title_keywords("");
+        assert!(keywords.is_empty());
     }
 }

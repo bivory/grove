@@ -210,6 +210,9 @@ pub struct WriteGateStatsInfo {
     pub total_rejected: u32,
     /// Pass rate.
     pub pass_rate: f64,
+    /// Average specificity composite score of accepted learnings.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub avg_specificity: Option<f64>,
 }
 
 impl From<&WriteGateStats> for WriteGateStatsInfo {
@@ -219,6 +222,7 @@ impl From<&WriteGateStats> for WriteGateStatsInfo {
             total_accepted: stats.total_accepted,
             total_rejected: stats.total_rejected,
             pass_rate: sanitize_f64(stats.pass_rate),
+            avg_specificity: stats.avg_specificity.map(sanitize_f64),
         }
     }
 }
@@ -290,6 +294,7 @@ impl StatsOutput {
                 total_accepted: 0,
                 total_rejected: 0,
                 pass_rate: 0.0,
+                avg_specificity: None,
             },
             insights: Vec::new(),
             recommendations: RecommendationsInfo::default(),
@@ -321,6 +326,7 @@ impl StatsOutput {
                 total_accepted: 0,
                 total_rejected: 0,
                 pass_rate: 0.0,
+                avg_specificity: None,
             },
             insights: Vec::new(),
             recommendations: RecommendationsInfo::default(),
@@ -930,6 +936,9 @@ mod tests {
             pass_rate: 0.75,
             rejection_reasons: HashMap::new(),
             retrospective_misses: 0,
+            avg_specificity: None,
+            specificity_count: 0,
+            specificity_sum: 0.0,
         };
 
         let info = WriteGateStatsInfo::from(&stats);
@@ -1006,6 +1015,9 @@ mod tests {
             pass_rate: f64::NAN, // Simulate corrupted data
             rejection_reasons: HashMap::new(),
             retrospective_misses: 0,
+            avg_specificity: None,
+            specificity_count: 0,
+            specificity_sum: 0.0,
         };
 
         let info = WriteGateStatsInfo::from(&stats);

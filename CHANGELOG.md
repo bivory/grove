@@ -7,6 +7,76 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-03-21
+
+### Added
+
+#### Retrieval Quality Engine
+
+- BM25 rescoring via Tantivy with adaptive score threshold and dynamic K
+- Corpus-size heuristic routing: boosted BM25 for small corpora (<50
+  learnings), plain BM25 for large corpora (>=50)
+- Corpus-agnostic vocabulary enrichment extracted from learning text
+  to bridge BM25 vocabulary gaps at query time
+- Intent-as-filter post-retrieval filtering using session transcript
+  keywords (benchmarked, default off)
+- Domain-scoped tags as negative retrieval signals
+- Fast-track decay for dead learnings with 0% hit rate
+- Steeper reference boost penalty for unreferenced learnings
+- Configurable `corpus_size_threshold`, `adaptive_dk`,
+  `min_confidence_threshold`, `min_score_gap` in retrieval config
+
+#### Evaluation Framework
+
+- `grove eval sweep` for multi-corpus benchmarking with bootstrap 95% CIs
+- `grove eval compare` for cross-config metric comparison
+- LLM judge (Haiku) for scoring (session, learning) relevance pairs
+- Corpus manifest (TOML) for portable benchmark definitions
+- Cross-corpus negative testing for false positive rate measurement
+- 8 benchmark configs: bm25, boosted-adaptive, heuristic,
+  corpus-enriched, adaptive-dk, intent-filter, flat-recency, custom
+  boosted params
+- Benchmark sweep script (`design/research/scripts/bench-sweep.sh`)
+- Consolidated research docs (RETRIEVAL.md, CAPTURE-QUALITY.md)
+
+#### Capture Quality Gates
+
+- Specificity heuristics at write gate: Named Entity Density (NED),
+  Project-Specific Term Frequency (PSTF), Generic Phrase Detection (GPD)
+- LLM judge for borderline specificity learnings
+- Semantic near-duplicate detection via ONNX embeddings (behind feature flag)
+- `grove review` command for learning lifecycle management
+- `grove retroflect` command for batch historical reflection
+
+#### Stats and Observability
+
+- `grove_version` field on all stats events for release cohort analysis
+- `avg_specificity` instrumented in reflection events
+- Over-surfaced learning insight for per-learning surfacing quality
+- Stats-driven dynamic K and strategy recommendations
+- Adaptive dynamic-K tuning (3-level system, default off)
+
+#### Infrastructure
+
+- Replay harness for offline transcript analysis
+- Batch API integration for bulk LLM operations
+- Release pipeline now builds with `tantivy-search` feature enabled
+
+### Changed
+
+- Retrieval scoring model upgraded to composite scoring with recency
+  decay (flat 90-day half-life) and reference boost
+- Recency decay switched from per-category half-lives to flat 90-day
+- Expanded noise word list from 44 to 100+ entries for keyword extraction
+- Path prefix stripping eliminates home directory pollution from keywords
+
+### Fixed
+
+- Path prefix pollution in keyword extraction (home dir components
+  matched broadly but carried no semantic signal)
+- Dead learnings that kept being surfaced never decayed (last_surfaced
+  reset the decay clock despite 0% hit rate)
+
 ## [0.8.0] - 2026-03-07
 
 ### Added
@@ -226,7 +296,8 @@ Initial release of Grove, a compound learning gate for Claude Code.
 - Architecture design documents
 - Implementation task roadmap
 
-[Unreleased]: https://github.com/bivory/grove/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/bivory/grove/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/bivory/grove/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/bivory/grove/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/bivory/grove/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/bivory/grove/compare/v0.5.0...v0.6.0

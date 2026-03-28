@@ -10,18 +10,8 @@
 use crate::config::JudgeConfig;
 use crate::core::learning::CompoundLearning;
 
-/// Truncate a string to at most `max_bytes` bytes on a char boundary.
-pub(crate) fn truncate_str(s: &str, max_bytes: usize) -> &str {
-    if s.len() <= max_bytes {
-        return s;
-    }
-    // Find the last char boundary at or before max_bytes
-    let mut end = max_bytes;
-    while end > 0 && !s.is_char_boundary(end) {
-        end -= 1;
-    }
-    &s[..end]
-}
+// Re-export for crate-internal callers that historically used judge::truncate_str
+pub(crate) use crate::llm::truncate_str;
 
 /// Build the system prompt for the specificity judge.
 ///

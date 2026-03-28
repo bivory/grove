@@ -1,0 +1,13 @@
+# Sonnet Retroflect Benchmark
+# Date: 20260323
+# Model: claude-sonnet-4-20250514
+# Configs: boosted-adaptive,heuristic-enriched,intent-boost
+# Corpora: grove, pickup-rank, syantra
+#
+# Files:
+#   sonnet-results.txt/json  — Benchmarks with Sonnet-generated learnings
+#   haiku-results.txt/json   — Benchmarks with original Haiku-generated learnings
+#   retroflect-*.log         — Retroflect output per corpus
+#
+# To restore Haiku learnings:
+#   ./design/research/scripts/retroflect-sonnet.sh --restore

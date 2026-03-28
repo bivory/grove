@@ -5,7 +5,6 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::config::Config;
 use crate::core::{EventType, SessionState, SubagentObservation};
 use crate::error::{FailOpen, Result};
 use crate::storage::SessionStore;
@@ -67,14 +66,12 @@ impl ObserveOutput {
 /// The observe command implementation.
 pub struct ObserveCommand<S: SessionStore> {
     store: S,
-    #[allow(dead_code)]
-    config: Config,
 }
 
 impl<S: SessionStore> ObserveCommand<S> {
     /// Create a new observe command.
-    pub fn new(store: S, config: Config) -> Self {
-        Self { store, config }
+    pub fn new(store: S) -> Self {
+        Self { store }
     }
 
     /// Run the observe command with the given note.
@@ -196,13 +193,12 @@ mod tests {
     #[test]
     fn test_observe_basic() {
         let store = setup();
-        let config = Config::default();
 
         // Create initial session
         let session = SessionState::new("test-session", "/tmp", "/tmp/transcript.json");
         store.put(&session).unwrap();
 
-        let cmd = ObserveCommand::new(Arc::clone(&store), config);
+        let cmd = ObserveCommand::new(Arc::clone(&store));
         let options = ObserveOptions::default();
 
         let output = cmd.run(
@@ -227,12 +223,11 @@ mod tests {
     #[test]
     fn test_observe_multiple() {
         let store = setup();
-        let config = Config::default();
 
         let session = SessionState::new("test-session", "/tmp", "/tmp/transcript.json");
         store.put(&session).unwrap();
 
-        let cmd = ObserveCommand::new(Arc::clone(&store), config);
+        let cmd = ObserveCommand::new(Arc::clone(&store));
         let options = ObserveOptions::default();
 
         let output1 = cmd.run("test-session", "First observation", &options);
@@ -267,12 +262,11 @@ mod tests {
     #[test]
     fn test_observe_fails_with_empty_note() {
         let store = setup();
-        let config = Config::default();
 
         let session = SessionState::new("test-session", "/tmp", "/tmp/transcript.json");
         store.put(&session).unwrap();
 
-        let cmd = ObserveCommand::new(store, config);
+        let cmd = ObserveCommand::new(store);
         let options = ObserveOptions::default();
 
         let output = cmd.run("test-session", "", &options);
@@ -284,12 +278,11 @@ mod tests {
     #[test]
     fn test_observe_fails_with_whitespace_only_note() {
         let store = setup();
-        let config = Config::default();
 
         let session = SessionState::new("test-session", "/tmp", "/tmp/transcript.json");
         store.put(&session).unwrap();
 
-        let cmd = ObserveCommand::new(store, config);
+        let cmd = ObserveCommand::new(store);
         let options = ObserveOptions::default();
 
         let output = cmd.run("test-session", "   \n\t  ", &options);
@@ -301,12 +294,11 @@ mod tests {
     #[test]
     fn test_observe_trims_whitespace() {
         let store = setup();
-        let config = Config::default();
 
         let session = SessionState::new("test-session", "/tmp", "/tmp/transcript.json");
         store.put(&session).unwrap();
 
-        let cmd = ObserveCommand::new(Arc::clone(&store), config);
+        let cmd = ObserveCommand::new(Arc::clone(&store));
         let options = ObserveOptions::default();
 
         let output = cmd.run("test-session", "  trimmed note  ", &options);
@@ -321,10 +313,9 @@ mod tests {
     #[test]
     fn test_observe_creates_session_if_not_found() {
         let store = setup();
-        let config = Config::default();
 
         // Don't create session first
-        let cmd = ObserveCommand::new(Arc::clone(&store), config);
+        let cmd = ObserveCommand::new(Arc::clone(&store));
         let options = ObserveOptions::default();
 
         let output = cmd.run("new-session", "observation for new session", &options);
@@ -337,12 +328,11 @@ mod tests {
     #[test]
     fn test_observe_with_input() {
         let store = setup();
-        let config = Config::default();
 
         let session = SessionState::new("test-session", "/tmp", "/tmp/transcript.json");
         store.put(&session).unwrap();
 
-        let cmd = ObserveCommand::new(Arc::clone(&store), config);
+        let cmd = ObserveCommand::new(Arc::clone(&store));
 
         let input = ObserveInput {
             session_id: "test-session".to_string(),
@@ -359,8 +349,8 @@ mod tests {
     #[test]
     fn test_format_output_json() {
         let store = setup();
-        let config = Config::default();
-        let cmd = ObserveCommand::new(store, config);
+
+        let cmd = ObserveCommand::new(store);
 
         let output = ObserveOutput::success("test note", 1);
         let options = ObserveOptions {
@@ -376,8 +366,8 @@ mod tests {
     #[test]
     fn test_format_output_quiet() {
         let store = setup();
-        let config = Config::default();
-        let cmd = ObserveCommand::new(store, config);
+
+        let cmd = ObserveCommand::new(store);
 
         let output = ObserveOutput::success("test note", 1);
         let options = ObserveOptions {
@@ -392,8 +382,8 @@ mod tests {
     #[test]
     fn test_format_output_human_readable() {
         let store = setup();
-        let config = Config::default();
-        let cmd = ObserveCommand::new(store, config);
+
+        let cmd = ObserveCommand::new(store);
 
         let output = ObserveOutput::success("test observation note", 3);
         let options = ObserveOptions::default();
@@ -406,12 +396,11 @@ mod tests {
     #[test]
     fn test_observe_adds_trace_event() {
         let store = setup();
-        let config = Config::default();
 
         let session = SessionState::new("test-session", "/tmp", "/tmp/transcript.json");
         store.put(&session).unwrap();
 
-        let cmd = ObserveCommand::new(Arc::clone(&store), config);
+        let cmd = ObserveCommand::new(Arc::clone(&store));
         let options = ObserveOptions::default();
 
         cmd.run("test-session", "trace test observation", &options);
@@ -457,12 +446,11 @@ mod tests {
     #[test]
     fn test_observe_with_long_note() {
         let store = setup();
-        let config = Config::default();
 
         let session = SessionState::new("test-session", "/tmp", "/tmp/transcript.json");
         store.put(&session).unwrap();
 
-        let cmd = ObserveCommand::new(Arc::clone(&store), config);
+        let cmd = ObserveCommand::new(Arc::clone(&store));
         let options = ObserveOptions::default();
 
         let long_note = "x".repeat(1000);

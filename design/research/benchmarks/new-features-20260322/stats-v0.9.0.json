@@ -1,0 +1,30 @@
+{
+  "success": true,
+  "aggregates": {
+    "total_learnings": 24,
+    "total_archived": 0,
+    "active_learnings": 24,
+    "average_hit_rate": 0.0,
+    "cross_pollination_count": 0
+  },
+  "reflections": {
+    "completed": 48,
+    "skipped": 8,
+    "skip_rate": 0.14285714285714285
+  },
+  "write_gate": {
+    "total_evaluated": 48,
+    "total_accepted": 24,
+    "total_rejected": 24,
+    "pass_rate": 0.5,
+    "avg_specificity": 5.0
+  },
+  "insights": [],
+  "recommendations": {
+    "safe": [],
+    "aggressive": []
+  },
+  "warnings": [
+    "Filtered to 88 of 5058 log entries (version: 0.9.0)"
+  ]
+}

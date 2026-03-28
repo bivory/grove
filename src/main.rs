@@ -201,6 +201,9 @@ enum Commands {
         /// Apply safe configuration recommendations
         #[arg(long)]
         update_config: bool,
+        /// Filter stats to a specific grove version (e.g., "0.9.0" or "pre:0.9.0")
+        #[arg(long)]
+        version: Option<String>,
     },
 
     /// [User] Maintain learnings (archive stale, restore)
@@ -214,15 +217,6 @@ enum Commands {
         /// Suppress output
         #[arg(long, short, global = true)]
         quiet: bool,
-        /// Days until decay to consider stale
-        #[arg(long, global = true)]
-        stale_days: Option<u32>,
-        /// Perform archive without confirmation
-        #[arg(long, global = true)]
-        auto_archive: bool,
-        /// Show dry run only
-        #[arg(long, global = true)]
-        dry_run: bool,
     },
 
     /// [User] Initialize Grove configuration
@@ -427,6 +421,21 @@ enum EvalAction {
         #[arg(long, default_value = "0")]
         bootstrap: usize,
     },
+    /// Audit corpora for semantic duplicates using embedding similarity
+    DedupAudit {
+        /// Path to corpus manifest TOML file (uses all corpora)
+        #[arg(long, short)]
+        manifest: Option<String>,
+        /// Path to learnings file (single corpus mode)
+        #[arg(long)]
+        learnings_path: Option<String>,
+        /// Cosine similarity threshold for flagging pairs (default: 0.85)
+        #[arg(long, default_value = "0.85")]
+        threshold: f64,
+        /// Output as JSON
+        #[arg(long, short)]
+        json: bool,
+    },
     /// Run benchmarks across all corpora in a manifest
     Sweep {
         /// Path to corpus manifest TOML file
@@ -506,16 +515,38 @@ impl From<HookEvent> for HookType {
 #[derive(Subcommand)]
 enum MaintainAction {
     /// List stale learnings
-    List,
+    List {
+        /// Days until decay to consider stale
+        #[arg(long)]
+        stale_days: Option<u32>,
+        /// Perform archive without confirmation
+        #[arg(long)]
+        auto_archive: bool,
+        /// Show dry run only
+        #[arg(long)]
+        dry_run: bool,
+    },
     /// Archive specified learnings
     Archive {
         /// Learning IDs to archive
         learning_ids: Vec<String>,
+        /// Show dry run only
+        #[arg(long)]
+        dry_run: bool,
     },
     /// Restore archived learnings
     Restore {
         /// Learning IDs to restore
         learning_ids: Vec<String>,
+    },
+    /// Consolidate related learnings (group, merge, detect stale)
+    Consolidate {
+        /// Apply changes (default: dry-run)
+        #[arg(long)]
+        apply: bool,
+        /// Only detect stale references, skip LLM merge
+        #[arg(long)]
+        stale_only: bool,
     },
 }
 
@@ -635,15 +666,13 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
             detailed,
             rebuild,
             update_config,
-        } => run_stats(json, quiet, detailed, rebuild, update_config, &cwd),
+            version,
+        } => run_stats(json, quiet, detailed, rebuild, update_config, version, &cwd),
         Commands::Maintain {
             action,
             json,
             quiet,
-            stale_days,
-            auto_archive,
-            dry_run,
-        } => run_maintain(action, json, quiet, stale_days, auto_archive, dry_run, &cwd),
+        } => run_maintain(action, json, quiet, &cwd),
         Commands::Init { json, quiet, force } => run_init(json, quiet, force, &cwd),
         Commands::Backends { json, quiet } => run_backends(json, quiet, &cwd),
         Commands::Tickets { json, quiet } => run_tickets(json, quiet, &cwd),
@@ -782,7 +811,6 @@ fn run_skip(
     use grove::cli::skip::{SkipCommand, SkipOptions};
     use grove::core::SkipDecider;
 
-    let config = Config::load();
     let store = FileSessionStore::new()?;
 
     let decider = decider.map(|d| match d.to_lowercase().as_str() {
@@ -791,7 +819,7 @@ fn run_skip(
         _ => SkipDecider::User,
     });
 
-    let cmd = SkipCommand::new(store, config);
+    let cmd = SkipCommand::new(store);
     let options = SkipOptions {
         json,
         quiet,
@@ -818,10 +846,9 @@ fn run_ref(
 ) -> Result<ExitCode, Box<dyn std::error::Error>> {
     use grove::cli::ref_cmd::{RefCommand, RefOptions};
 
-    let config = Config::load();
     let store = FileSessionStore::new()?;
 
-    let cmd = RefCommand::new(store, config);
+    let cmd = RefCommand::new(store);
     let options = RefOptions { json, quiet, how };
 
     let output = cmd.run(session_id, learning_ids, &options);
@@ -842,10 +869,9 @@ fn run_observe(
 ) -> Result<ExitCode, Box<dyn std::error::Error>> {
     use grove::cli::observe::{ObserveCommand, ObserveOptions};
 
-    let config = Config::load();
     let store = FileSessionStore::new()?;
 
-    let cmd = ObserveCommand::new(store, config);
+    let cmd = ObserveCommand::new(store);
     let options = ObserveOptions { json, quiet };
 
     let output = cmd.run(session_id, note, &options);
@@ -872,7 +898,7 @@ fn run_search(
     let config = Config::load();
     let backend = create_primary_backend(cwd, Some(&config));
 
-    let cmd = SearchCommand::new(backend, config);
+    let cmd = SearchCommand::new(backend);
     let options = SearchOptions {
         json,
         quiet,
@@ -953,6 +979,7 @@ fn run_stats(
     detailed: bool,
     rebuild: bool,
     update_config: bool,
+    version: Option<String>,
     cwd: &Path,
 ) -> Result<ExitCode, Box<dyn std::error::Error>> {
     use grove::cli::stats::{StatsCommand, StatsOptions};
@@ -966,6 +993,7 @@ fn run_stats(
         detailed,
         rebuild,
         update_config,
+        version,
     };
 
     let output = cmd.run(&options);
@@ -982,9 +1010,6 @@ fn run_maintain(
     action: MaintainAction,
     json: bool,
     quiet: bool,
-    stale_days: Option<u32>,
-    auto_archive: bool,
-    dry_run: bool,
     cwd: &Path,
 ) -> Result<ExitCode, Box<dyn std::error::Error>> {
     use grove::cli::maintain::{
@@ -995,6 +1020,57 @@ fn run_maintain(
     let config = Config::load();
     let backend = create_primary_backend(cwd, Some(&config));
 
+    // Handle consolidate separately (different output type, doesn't need MaintainCommand)
+    if let MaintainAction::Consolidate { apply, stale_only } = action {
+        use grove::cli::consolidate::{self, ConsolidateOptions};
+
+        let consolidate_options = ConsolidateOptions {
+            json,
+            quiet,
+            apply,
+            stale_only,
+        };
+        let merge_fn = consolidate::default_merge_caller(&config.judge);
+        let output =
+            consolidate::run_consolidate(&backend, &config, &consolidate_options, cwd, &merge_fn);
+        let formatted = consolidate::format_output(&output, &consolidate_options);
+
+        if !formatted.is_empty() {
+            println!("{}", formatted);
+        }
+
+        return Ok(success_to_exit_code(output.success));
+    }
+
+    // Extract subcommand-specific flags
+    let (lib_action, learning_ids, stale_days, auto_archive, dry_run) = match action {
+        MaintainAction::List {
+            stale_days,
+            auto_archive,
+            dry_run,
+        } => (
+            MaintainActionLib::List,
+            vec![],
+            stale_days,
+            auto_archive,
+            dry_run,
+        ),
+        MaintainAction::Archive {
+            learning_ids,
+            dry_run,
+        } => (
+            MaintainActionLib::Archive,
+            learning_ids,
+            None,
+            false,
+            dry_run,
+        ),
+        MaintainAction::Restore { learning_ids } => {
+            (MaintainActionLib::Restore, learning_ids, None, false, false)
+        }
+        MaintainAction::Consolidate { .. } => unreachable!(),
+    };
+
     let cmd = MaintainCommand::new(backend, config);
     let options = MaintainOptions {
         json,
@@ -1002,12 +1078,6 @@ fn run_maintain(
         stale_days,
         auto_archive,
         dry_run,
-    };
-
-    let (lib_action, learning_ids) = match action {
-        MaintainAction::List => (MaintainActionLib::List, vec![]),
-        MaintainAction::Archive { learning_ids } => (MaintainActionLib::Archive, learning_ids),
-        MaintainAction::Restore { learning_ids } => (MaintainActionLib::Restore, learning_ids),
     };
 
     let input = MaintainInput {
@@ -1217,7 +1287,7 @@ fn run_review(
     let config = Config::load();
     let backend = create_primary_backend(cwd, Some(&config));
 
-    let cmd = ReviewCommand::new(backend, config);
+    let cmd = ReviewCommand::new(backend);
     let options = ReviewOptions { json, quiet, count };
 
     let output = cmd.run(&options, cwd);
@@ -1308,6 +1378,17 @@ fn run_eval(action: EvalAction) -> Result<ExitCode, Box<dyn std::error::Error>> 
             json,
             batch,
             bootstrap,
+        })?,
+        EvalAction::DedupAudit {
+            manifest,
+            learnings_path,
+            threshold,
+            json,
+        } => grove::cli::eval::run_dedup_audit(grove::cli::eval::EvalDedupAuditOptions {
+            manifest,
+            learnings_path,
+            threshold,
+            json,
         })?,
         EvalAction::Sweep {
             manifest,
@@ -1483,7 +1564,7 @@ mod tests {
         let cli = Cli::parse_from(["grove", "maintain", "list"]);
         match cli.command {
             Commands::Maintain { action, .. } => {
-                assert!(matches!(action, MaintainAction::List));
+                assert!(matches!(action, MaintainAction::List { .. }));
             }
             _ => panic!("Expected Maintain command"),
         }
@@ -1494,10 +1575,48 @@ mod tests {
         let cli = Cli::parse_from(["grove", "maintain", "archive", "id1", "id2"]);
         match cli.command {
             Commands::Maintain { action, .. } => {
-                if let MaintainAction::Archive { learning_ids } = action {
+                if let MaintainAction::Archive { learning_ids, .. } = action {
                     assert_eq!(learning_ids, vec!["id1", "id2"]);
                 } else {
                     panic!("Expected Archive action");
+                }
+            }
+            _ => panic!("Expected Maintain command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_maintain_consolidate() {
+        let cli = Cli::parse_from(["grove", "maintain", "consolidate"]);
+        match cli.command {
+            Commands::Maintain { action, .. } => {
+                if let MaintainAction::Consolidate { apply, stale_only } = action {
+                    assert!(!apply);
+                    assert!(!stale_only);
+                } else {
+                    panic!("Expected Consolidate action");
+                }
+            }
+            _ => panic!("Expected Maintain command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_maintain_consolidate_flags() {
+        let cli = Cli::parse_from([
+            "grove",
+            "maintain",
+            "consolidate",
+            "--apply",
+            "--stale-only",
+        ]);
+        match cli.command {
+            Commands::Maintain { action, .. } => {
+                if let MaintainAction::Consolidate { apply, stale_only } = action {
+                    assert!(apply);
+                    assert!(stale_only);
+                } else {
+                    panic!("Expected Consolidate action");
                 }
             }
             _ => panic!("Expected Maintain command"),
@@ -1621,6 +1740,28 @@ mod tests {
     }
 
     #[test]
+    fn test_cli_parse_stats_version_filter() {
+        let cli = Cli::parse_from(["grove", "stats", "--version", "0.9.0"]);
+        match cli.command {
+            Commands::Stats { version, .. } => {
+                assert_eq!(version, Some("0.9.0".to_string()));
+            }
+            _ => panic!("Expected Stats command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_stats_version_pre_filter() {
+        let cli = Cli::parse_from(["grove", "stats", "--version", "pre:0.9.0"]);
+        match cli.command {
+            Commands::Stats { version, .. } => {
+                assert_eq!(version, Some("pre:0.9.0".to_string()));
+            }
+            _ => panic!("Expected Stats command"),
+        }
+    }
+
+    #[test]
     fn test_cli_list_rejections_conflicts_with_stale() {
         // --rejections and --stale are mutually exclusive
         let result = Cli::try_parse_from(["grove", "list", "--rejections", "--stale"]);
@@ -1709,5 +1850,32 @@ mod tests {
             help_text.contains("--schema"),
             "after_help should mention --schema flag"
         );
+    }
+
+    #[test]
+    fn test_cli_parse_eval_dedup_audit() {
+        let cli = Cli::parse_from([
+            "grove",
+            "eval",
+            "dedup-audit",
+            "--manifest",
+            "corpora.toml",
+            "--threshold",
+            "0.90",
+        ]);
+        match cli.command {
+            Commands::Eval {
+                action:
+                    EvalAction::DedupAudit {
+                        manifest,
+                        threshold,
+                        ..
+                    },
+            } => {
+                assert_eq!(manifest, Some("corpora.toml".to_string()));
+                assert!((threshold - 0.90).abs() < f64::EPSILON);
+            }
+            _ => panic!("Expected Eval DedupAudit command"),
+        }
     }
 }

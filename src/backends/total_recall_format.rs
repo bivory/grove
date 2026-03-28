@@ -82,6 +82,9 @@ pub const LABEL_TICKET: &str = "Ticket:";
 /// Label for files metadata.
 pub const LABEL_FILES: &str = "Files:";
 
+/// Label for status metadata (used for archive/restore).
+pub const LABEL_STATUS: &str = "Status:";
+
 /// Label for category in personal learnings.
 pub const LABEL_CATEGORY: &str = "**Category:**";
 

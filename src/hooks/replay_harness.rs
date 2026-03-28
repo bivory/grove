@@ -794,19 +794,8 @@ struct StrictRelevanceScore {
 /// any measurable multi-signal overlap from zero/near-zero overlap matches.
 const STRICT_TP_THRESHOLD: f64 = 0.01;
 
-/// Truncate a string to at most `max_bytes` bytes, ensuring we don't split
-/// a multi-byte UTF-8 character. Returns a string slice that is always valid.
-fn truncate_str(s: &str, max_bytes: usize) -> &str {
-    if s.len() <= max_bytes {
-        return s;
-    }
-    // Walk backward from max_bytes to find a char boundary
-    let mut end = max_bytes;
-    while end > 0 && !s.is_char_boundary(end) {
-        end -= 1;
-    }
-    &s[..end]
-}
+/// Re-use the canonical truncate_str from the llm module.
+use crate::llm::truncate_str;
 
 // =============================================================================
 // Tests

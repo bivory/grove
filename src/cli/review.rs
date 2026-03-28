@@ -10,7 +10,7 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 
 use crate::backends::MemoryBackend;
-use crate::config::{project_stats_log_path, Config};
+use crate::config::project_stats_log_path;
 use crate::error::FailOpen;
 use crate::stats::StatsLogger;
 
@@ -104,14 +104,12 @@ impl ReviewOutput {
 /// The review command implementation.
 pub struct ReviewCommand<B: MemoryBackend> {
     backend: B,
-    #[allow(dead_code)]
-    config: Config,
 }
 
 impl<B: MemoryBackend> ReviewCommand<B> {
     /// Create a new review command.
-    pub fn new(backend: B, config: Config) -> Self {
-        Self { backend, config }
+    pub fn new(backend: B) -> Self {
+        Self { backend }
     }
 
     /// Run the review command.
@@ -285,7 +283,7 @@ impl<B: MemoryBackend> ReviewCommand<B> {
 mod tests {
     use super::*;
     use crate::backends::{SearchFilters, SearchQuery, SearchResult, WriteResult};
-    use crate::config::Config;
+
     use crate::core::{
         CompoundLearning, Confidence, LearningCategory, LearningScope, WriteGateCriterion,
     };
@@ -357,8 +355,8 @@ mod tests {
             .collect();
 
         let backend = MockBackend::new(learnings);
-        let config = Config::default();
-        let cmd = ReviewCommand::new(backend, config);
+
+        let cmd = ReviewCommand::new(backend);
         let options = ReviewOptions::default();
 
         let output = cmd.run_sample(&options);
@@ -380,8 +378,8 @@ mod tests {
             .collect();
 
         let backend = MockBackend::new(learnings);
-        let config = Config::default();
-        let cmd = ReviewCommand::new(backend, config);
+
+        let cmd = ReviewCommand::new(backend);
         let options = ReviewOptions {
             count: 3,
             ..Default::default()
@@ -401,8 +399,8 @@ mod tests {
         ];
 
         let backend = MockBackend::new(learnings);
-        let config = Config::default();
-        let cmd = ReviewCommand::new(backend, config);
+
+        let cmd = ReviewCommand::new(backend);
         let options = ReviewOptions {
             count: 5,
             ..Default::default()
@@ -417,8 +415,8 @@ mod tests {
     #[test]
     fn test_review_sample_empty_corpus() {
         let backend = MockBackend::new(Vec::new());
-        let config = Config::default();
-        let cmd = ReviewCommand::new(backend, config);
+
+        let cmd = ReviewCommand::new(backend);
         let options = ReviewOptions::default();
 
         let output = cmd.run_sample(&options);
@@ -433,8 +431,8 @@ mod tests {
         std::fs::create_dir_all(&grove_dir).unwrap();
 
         let backend = MockBackend::new(Vec::new());
-        let config = Config::default();
-        let cmd = ReviewCommand::new(backend, config);
+
+        let cmd = ReviewCommand::new(backend);
 
         let input = ReviewInput {
             ratings: vec![
@@ -491,8 +489,8 @@ mod tests {
     fn test_review_record_empty_ratings() {
         let dir = TempDir::new().unwrap();
         let backend = MockBackend::new(Vec::new());
-        let config = Config::default();
-        let cmd = ReviewCommand::new(backend, config);
+
+        let cmd = ReviewCommand::new(backend);
 
         let input = ReviewInput {
             ratings: Vec::new(),
@@ -506,8 +504,8 @@ mod tests {
     #[test]
     fn test_review_output_json_format() {
         let backend = MockBackend::new(Vec::new());
-        let config = Config::default();
-        let cmd = ReviewCommand::new(backend, config);
+
+        let cmd = ReviewCommand::new(backend);
 
         let output = ReviewOutput::rated(3);
         let options = ReviewOptions {
@@ -521,8 +519,8 @@ mod tests {
     #[test]
     fn test_review_output_quiet() {
         let backend = MockBackend::new(Vec::new());
-        let config = Config::default();
-        let cmd = ReviewCommand::new(backend, config);
+
+        let cmd = ReviewCommand::new(backend);
 
         let output = ReviewOutput::rated(3);
         let options = ReviewOptions {
@@ -542,8 +540,8 @@ mod tests {
         )];
 
         let backend = MockBackend::new(learnings);
-        let config = Config::default();
-        let cmd = ReviewCommand::new(backend, config);
+
+        let cmd = ReviewCommand::new(backend);
         let options = ReviewOptions {
             count: 1,
             ..Default::default()

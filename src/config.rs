@@ -38,6 +38,8 @@ pub struct Config {
     pub context: ContextConfig,
     /// LLM judge configuration for replay harness evaluation.
     pub judge: JudgeConfig,
+    /// Implicit reference detection configuration.
+    pub implicit_references: ImplicitReferencesConfig,
 }
 
 /// Ticketing system discovery configuration.
@@ -682,6 +684,36 @@ impl JudgeConfig {
     /// Get the batch timeout in seconds.
     pub fn batch_timeout(&self) -> u64 {
         self.batch_timeout
+    }
+}
+
+/// Implicit reference detection configuration.
+///
+/// When enabled, the stop hook extracts keywords from `last_assistant_message`
+/// and compares against injected learning summaries/tags. If overlap exceeds a
+/// threshold, the learning is marked as implicitly referenced instead of being
+/// dismissed at session end.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct ImplicitReferencesConfig {
+    /// Whether implicit reference detection is enabled.
+    /// Default: false (opt-in until benchmarked).
+    pub enabled: bool,
+    /// Minimum fraction of learning keywords found in the assistant message.
+    /// Default: 0.15.
+    pub min_overlap: f64,
+    /// Minimum number of keyword matches required to avoid false positives.
+    /// Default: 2.
+    pub min_keyword_matches: usize,
+}
+
+impl Default for ImplicitReferencesConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            min_overlap: 0.15,
+            min_keyword_matches: 2,
+        }
     }
 }
 
@@ -1360,6 +1392,21 @@ impl Config {
         }
         if other.judge.batch_timeout != default_judge.batch_timeout {
             self.judge.batch_timeout = other.judge.batch_timeout;
+        }
+
+        // Implicit references: merge field by field
+        let default_implicit = ImplicitReferencesConfig::default();
+        if other.implicit_references.enabled != default_implicit.enabled {
+            self.implicit_references.enabled = other.implicit_references.enabled;
+        }
+        if (other.implicit_references.min_overlap - default_implicit.min_overlap).abs()
+            > f64::EPSILON
+        {
+            self.implicit_references.min_overlap = other.implicit_references.min_overlap;
+        }
+        if other.implicit_references.min_keyword_matches != default_implicit.min_keyword_matches {
+            self.implicit_references.min_keyword_matches =
+                other.implicit_references.min_keyword_matches;
         }
 
         self
@@ -2239,6 +2286,7 @@ total-recall = false
             },
             context: ContextConfig::default(),
             judge: JudgeConfig::default(),
+            implicit_references: ImplicitReferencesConfig::default(),
         };
 
         let toml_str = toml::to_string(&config).unwrap();
@@ -2263,6 +2311,33 @@ max_blocks = 10
         // Defaults for unspecified sections
         assert!(config.gate.auto_skip.enabled);
         assert_eq!(config.decay.passive_duration_days, 90);
+        // Implicit references defaults
+        assert!(!config.implicit_references.enabled);
+        assert!((config.implicit_references.min_overlap - 0.15).abs() < f64::EPSILON);
+        assert_eq!(config.implicit_references.min_keyword_matches, 2);
+    }
+
+    #[test]
+    fn test_implicit_references_config_defaults() {
+        let config = ImplicitReferencesConfig::default();
+        assert!(!config.enabled);
+        assert!((config.min_overlap - 0.15).abs() < f64::EPSILON);
+        assert_eq!(config.min_keyword_matches, 2);
+    }
+
+    #[test]
+    fn test_implicit_references_toml_roundtrip() {
+        let toml_content = r#"
+[implicit_references]
+enabled = true
+min_overlap = 0.25
+min_keyword_matches = 3
+"#;
+
+        let config: Config = toml::from_str(toml_content).unwrap();
+        assert!(config.implicit_references.enabled);
+        assert!((config.implicit_references.min_overlap - 0.25).abs() < f64::EPSILON);
+        assert_eq!(config.implicit_references.min_keyword_matches, 3);
     }
 
     #[test]

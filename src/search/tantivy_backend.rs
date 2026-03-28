@@ -83,8 +83,6 @@ pub struct TantivySearchResult {
 pub struct TantivySearchIndex {
     index: Index,
     reader: IndexReader,
-    #[allow(dead_code)] // Kept for potential schema introspection
-    schema: Schema,
     // Field handles for document construction and querying
     id_field: Field,
     summary_field: Field,
@@ -99,37 +97,7 @@ impl TantivySearchIndex {
     pub fn in_memory() -> Result<Self> {
         let schema = Self::build_schema();
         let index = Index::create_in_ram(schema.clone());
-
-        // Register stemming tokenizer
-        Self::register_tokenizers(&index);
-
-        let reader = index
-            .reader_builder()
-            .reload_policy(ReloadPolicy::OnCommitWithDelay)
-            .try_into()
-            .map_err(|e| GroveError::backend(format!("Failed to create reader: {}", e)))?;
-
-        Ok(Self {
-            index,
-            reader,
-            id_field: schema.get_field("id").expect("schema must have id field"),
-            summary_field: schema
-                .get_field("summary")
-                .expect("schema must have summary field"),
-            detail_field: schema
-                .get_field("detail")
-                .expect("schema must have detail field"),
-            tags_field: schema
-                .get_field("tags")
-                .expect("schema must have tags field"),
-            category_field: schema
-                .get_field("category")
-                .expect("schema must have category field"),
-            relevance_context_field: schema
-                .get_field("relevance_context")
-                .expect("schema must have relevance_context field"),
-            schema,
-        })
+        Self::from_index_and_schema(index, schema)
     }
 
     /// Create a persistent index at the given path.
@@ -142,7 +110,11 @@ impl TantivySearchIndex {
             .or_else(|_| Index::open_in_dir(path))
             .map_err(|e| GroveError::backend(format!("Failed to open index: {}", e)))?;
 
-        // Register stemming tokenizer
+        Self::from_index_and_schema(index, schema)
+    }
+
+    /// Build a TantivySearchIndex from an index and schema, extracting field handles.
+    fn from_index_and_schema(index: Index, schema: Schema) -> Result<Self> {
         Self::register_tokenizers(&index);
 
         let reader = index
@@ -151,26 +123,21 @@ impl TantivySearchIndex {
             .try_into()
             .map_err(|e| GroveError::backend(format!("Failed to create reader: {}", e)))?;
 
+        let field = |name: &str| -> Result<Field> {
+            schema.get_field(name).map_err(|_| {
+                GroveError::backend(format!("Schema missing required field: {}", name))
+            })
+        };
+
         Ok(Self {
             index,
             reader,
-            id_field: schema.get_field("id").expect("schema must have id field"),
-            summary_field: schema
-                .get_field("summary")
-                .expect("schema must have summary field"),
-            detail_field: schema
-                .get_field("detail")
-                .expect("schema must have detail field"),
-            tags_field: schema
-                .get_field("tags")
-                .expect("schema must have tags field"),
-            category_field: schema
-                .get_field("category")
-                .expect("schema must have category field"),
-            relevance_context_field: schema
-                .get_field("relevance_context")
-                .expect("schema must have relevance_context field"),
-            schema,
+            id_field: field("id")?,
+            summary_field: field("summary")?,
+            detail_field: field("detail")?,
+            tags_field: field("tags")?,
+            category_field: field("category")?,
+            relevance_context_field: field("relevance_context")?,
         })
     }
 

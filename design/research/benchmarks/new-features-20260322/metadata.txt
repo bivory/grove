@@ -1,0 +1,11 @@
+# New Feature Benchmark
+# Date: 20260322
+# Branch: feature/stats-version-filter (40e742b)
+# Bootstrap: 1000
+# Manifest: /Users/bryanivory/GitHub/bryan/grove/.grove/corpora.toml
+#
+# Features tested:
+#   1. Stats --version filter (exact and pre: prefix)
+#   2. Dedup audit (semantic-dedup, cosine threshold 0.85)
+#   3. intent-boost    — Intent overlap ratio as (1+r) score multiplier
+#   4. heuristic-enriched — Corpus-size routing + vocabulary enrichment (production default)

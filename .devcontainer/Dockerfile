@@ -66,7 +66,8 @@ RUN cargo --version \
 
 # Install Claude Code
 RUN curl -fsSL https://claude.ai/install.sh | bash \
-    && claude install stable
+    && claude install latest
+    #&& claude install stable
 
 # Verify Claude Code
 RUN claude --version
@@ -90,40 +91,43 @@ RUN git config --global url."https://github.com/".insteadOf "git@github.com:"
 
 RUN claude plugin marketplace add bivory/claude-plugin-marketplace
 # Install roz
-RUN curl -fsSL https://raw.githubusercontent.com/bivory/roz/main/.claude-plugin/install.sh | bash -s -- v0.1.4
+RUN curl -fsSL https://raw.githubusercontent.com/bivory/roz/main/.claude-plugin/install.sh | bash -s -- v0.1.7
 RUN roz --version
 RUN claude plugin install roz@bivory
 RUN claude plugin list | grep -q roz
 
 # Install grove -- Release version
-#RUN curl -fsSL https://raw.githubusercontent.com/bivory/grove/main/.claude-plugin/install.sh | bash -s -- v0.4.0
-# Install grove -- Local version (binary + plugin)
-COPY --from=builder /app/target/release/grove /usr/local/bin/grove
-RUN grove --version
-RUN mkdir -p grove-plugin
-COPY --chown=vscode:vscode .claude-plugin ./grove-plugin/.claude-plugin
-COPY --chown=vscode:vscode agents ./grove-plugin/agents
-COPY --chown=vscode:vscode hooks ./grove-plugin/hooks
-COPY --chown=vscode:vscode rules ./grove-plugin/rules
-COPY --chown=vscode:vscode skills ./grove-plugin/skills
-RUN cat > ./grove-plugin/.claude-plugin/marketplace.json << 'EOF'
-{
-  "name": "local-market",
-  "owner": {
-    "name": "Bryan Ivory"
-  },
-  "plugins": [
-    {
-      "name": "grove",
-      "source": "./",
-      "description": "Compound learning gate for Claude Code"
-    }
-  ]
-}
-EOF
-RUN claude plugin marketplace add ./grove-plugin
-RUN claude plugin install grove@local-market
+RUN curl -fsSL https://raw.githubusercontent.com/bivory/grove/main/.claude-plugin/install.sh | bash -s -- v0.9.0
+RUN claude plugin install grove@bivory
 RUN claude plugin list | grep -q grove
+
+# Install grove -- Local version (binary + plugin)
+#COPY --from=builder /app/target/release/grove /usr/local/bin/grove
+#RUN grove --version
+#RUN mkdir -p grove-plugin
+#COPY --chown=vscode:vscode .claude-plugin ./grove-plugin/.claude-plugin
+#COPY --chown=vscode:vscode agents ./grove-plugin/agents
+#COPY --chown=vscode:vscode hooks ./grove-plugin/hooks
+#COPY --chown=vscode:vscode rules ./grove-plugin/rules
+#COPY --chown=vscode:vscode skills ./grove-plugin/skills
+#RUN cat > ./grove-plugin/.claude-plugin/marketplace.json << 'EOF'
+#{
+#  "name": "local-market",
+#  "owner": {
+#    "name": "Bryan Ivory"
+#  },
+#  "plugins": [
+#    {
+#      "name": "grove",
+#      "source": "./",
+#      "description": "Compound learning gate for Claude Code"
+#    }
+#  ]
+#}
+#EOF
+#RUN claude plugin marketplace add ./grove-plugin
+#RUN claude plugin install grove@local-market
+#RUN claude plugin list | grep -q grove
 
 # Install Total Recall for grove
 RUN claude plugin marketplace add davegoldblatt/recall-marketplace

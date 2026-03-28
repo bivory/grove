@@ -7,7 +7,7 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-use crate::config::{project_stats_log_path, Config};
+use crate::config::project_stats_log_path;
 use crate::core::{EventType, SessionState};
 use crate::error::{FailOpen, Result};
 use crate::stats::StatsLogger;
@@ -63,14 +63,12 @@ impl RefOutput {
 /// The ref command implementation.
 pub struct RefCommand<S: SessionStore> {
     store: S,
-    #[allow(dead_code)]
-    config: Config,
 }
 
 impl<S: SessionStore> RefCommand<S> {
     /// Create a new ref command.
-    pub fn new(store: S, config: Config) -> Self {
-        Self { store, config }
+    pub fn new(store: S) -> Self {
+        Self { store }
     }
 
     /// Run the ref command with the given learning IDs.
@@ -196,12 +194,11 @@ mod tests {
     #[test]
     fn test_ref_basic() {
         let store = setup();
-        let config = Config::default();
 
         let session = SessionState::new("test-session", "/tmp", "/tmp/transcript.json");
         store.put(&session).unwrap();
 
-        let cmd = RefCommand::new(Arc::clone(&store), config);
+        let cmd = RefCommand::new(Arc::clone(&store));
         let options = RefOptions::default();
 
         let output = cmd.run("test-session", &["cl_001".to_string()], &options);
@@ -214,12 +211,11 @@ mod tests {
     #[test]
     fn test_ref_multiple() {
         let store = setup();
-        let config = Config::default();
 
         let session = SessionState::new("test-session", "/tmp", "/tmp/transcript.json");
         store.put(&session).unwrap();
 
-        let cmd = RefCommand::new(Arc::clone(&store), config);
+        let cmd = RefCommand::new(Arc::clone(&store));
         let options = RefOptions::default();
 
         let ids = vec![
@@ -237,8 +233,8 @@ mod tests {
     #[test]
     fn test_ref_rejects_empty() {
         let store = setup();
-        let config = Config::default();
-        let cmd = RefCommand::new(store, config);
+
+        let cmd = RefCommand::new(store);
         let options = RefOptions::default();
 
         let output = cmd.run("test-session", &[], &options);
@@ -250,10 +246,9 @@ mod tests {
     #[test]
     fn test_ref_creates_session_if_not_found() {
         let store = setup();
-        let config = Config::default();
 
         // Don't create session first
-        let cmd = RefCommand::new(Arc::clone(&store), config);
+        let cmd = RefCommand::new(Arc::clone(&store));
         let options = RefOptions::default();
 
         let output = cmd.run("new-session", &["cl_001".to_string()], &options);
@@ -265,7 +260,6 @@ mod tests {
     #[test]
     fn test_ref_marks_injected_learning() {
         let store = setup();
-        let config = Config::default();
 
         let mut session = SessionState::new("test-session", "/tmp", "/tmp/transcript.json");
         session
@@ -278,7 +272,7 @@ mod tests {
             .push(InjectedLearning::new("cl_002", 0.70));
         store.put(&session).unwrap();
 
-        let cmd = RefCommand::new(Arc::clone(&store), config);
+        let cmd = RefCommand::new(Arc::clone(&store));
         let options = RefOptions::default();
 
         let output = cmd.run("test-session", &["cl_001".to_string()], &options);
@@ -307,12 +301,11 @@ mod tests {
     #[test]
     fn test_ref_adds_trace_event() {
         let store = setup();
-        let config = Config::default();
 
         let session = SessionState::new("test-session", "/tmp", "/tmp/transcript.json");
         store.put(&session).unwrap();
 
-        let cmd = RefCommand::new(Arc::clone(&store), config);
+        let cmd = RefCommand::new(Arc::clone(&store));
         let options = RefOptions::default();
 
         cmd.run(
@@ -336,8 +329,8 @@ mod tests {
     #[test]
     fn test_format_output_json() {
         let store = setup();
-        let config = Config::default();
-        let cmd = RefCommand::new(store, config);
+
+        let cmd = RefCommand::new(store);
 
         let output = RefOutput::success(vec!["cl_001".to_string()]);
         let options = RefOptions {
@@ -354,8 +347,8 @@ mod tests {
     #[test]
     fn test_format_output_quiet() {
         let store = setup();
-        let config = Config::default();
-        let cmd = RefCommand::new(store, config);
+
+        let cmd = RefCommand::new(store);
 
         let output = RefOutput::success(vec!["cl_001".to_string()]);
         let options = RefOptions {
@@ -370,8 +363,8 @@ mod tests {
     #[test]
     fn test_format_output_human_readable() {
         let store = setup();
-        let config = Config::default();
-        let cmd = RefCommand::new(store, config);
+
+        let cmd = RefCommand::new(store);
 
         let output = RefOutput::success(vec!["cl_001".to_string(), "cl_002".to_string()]);
         let options = RefOptions::default();
@@ -385,12 +378,11 @@ mod tests {
     #[test]
     fn test_ref_how_included_in_trace() {
         let store = setup();
-        let config = Config::default();
 
         let session = SessionState::new("test-session", "/tmp", "/tmp/transcript.json");
         store.put(&session).unwrap();
 
-        let cmd = RefCommand::new(Arc::clone(&store), config);
+        let cmd = RefCommand::new(Arc::clone(&store));
         let options = RefOptions {
             how: Some("followed auth ordering pattern".to_string()),
             ..Default::default()

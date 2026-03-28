@@ -184,6 +184,18 @@ pub enum StatsEventType {
         context: String,
     },
 
+    /// A learning was implicitly referenced (detected via keyword overlap with assistant message).
+    ImplicitlyReferenced {
+        /// The learning that was implicitly referenced.
+        learning_id: String,
+        /// The session where it was implicitly referenced.
+        session_id: String,
+        /// The fraction of learning keywords found in the assistant message.
+        overlap_ratio: f64,
+        /// Keywords that matched between the learning and assistant message.
+        matched_keywords: Vec<String>,
+    },
+
     /// A retroflect (retroactive reflection) was completed.
     Retroflect {
         /// The Grove session ID.
@@ -346,6 +358,21 @@ impl StatsEventType {
         }
     }
 
+    /// Create an implicitly referenced event.
+    pub fn implicitly_referenced(
+        learning_id: impl Into<String>,
+        session_id: impl Into<String>,
+        overlap_ratio: f64,
+        matched_keywords: Vec<String>,
+    ) -> Self {
+        Self::ImplicitlyReferenced {
+            learning_id: learning_id.into(),
+            session_id: session_id.into(),
+            overlap_ratio,
+            matched_keywords,
+        }
+    }
+
     /// Create a retroflect event.
     pub fn retroflect(
         session_id: impl Into<String>,
@@ -376,6 +403,7 @@ impl StatsEventType {
             Self::Restored { .. } => "restored",
             Self::Rejected { .. } => "rejected",
             Self::Rated { .. } => "rated",
+            Self::ImplicitlyReferenced { .. } => "implicitly_referenced",
             Self::Retroflect { .. } => "retroflect",
         }
     }
@@ -574,6 +602,23 @@ impl StatsLogger {
         context: impl Into<String>,
     ) -> Result<()> {
         let event = StatsEvent::new(StatsEventType::rated(learning_id, useful, context));
+        self.append(&event)
+    }
+
+    /// Append an implicitly referenced event.
+    pub fn append_implicitly_referenced(
+        &self,
+        learning_id: impl Into<String>,
+        session_id: impl Into<String>,
+        overlap_ratio: f64,
+        matched_keywords: Vec<String>,
+    ) -> Result<()> {
+        let event = StatsEvent::new(StatsEventType::implicitly_referenced(
+            learning_id,
+            session_id,
+            overlap_ratio,
+            matched_keywords,
+        ));
         self.append(&event)
     }
 
@@ -1322,6 +1367,86 @@ mod tests {
                 assert_eq!(context, "review");
             }
             other => panic!("Expected Rated, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_implicitly_referenced_event() {
+        let event = StatsEventType::implicitly_referenced(
+            "L001",
+            "session-123",
+            0.35,
+            vec!["database".to_string(), "indexing".to_string()],
+        );
+        assert_eq!(event.event_name(), "implicitly_referenced");
+
+        if let StatsEventType::ImplicitlyReferenced {
+            learning_id,
+            session_id,
+            overlap_ratio,
+            matched_keywords,
+        } = event
+        {
+            assert_eq!(learning_id, "L001");
+            assert_eq!(session_id, "session-123");
+            assert!((overlap_ratio - 0.35).abs() < f64::EPSILON);
+            assert_eq!(matched_keywords, vec!["database", "indexing"]);
+        } else {
+            panic!("Expected ImplicitlyReferenced event");
+        }
+    }
+
+    #[test]
+    fn test_implicitly_referenced_serialization() {
+        let event = StatsEvent::new(StatsEventType::implicitly_referenced(
+            "L001",
+            "session-abc",
+            0.42,
+            vec!["database".to_string(), "queries".to_string()],
+        ));
+        let json = serde_json::to_string(&event).unwrap();
+
+        assert!(json.contains(r#""event":"implicitly_referenced""#));
+        assert!(json.contains(r#""learning_id":"L001""#));
+        assert!(json.contains(r#""session_id":"session-abc""#));
+        assert!(json.contains(r#""overlap_ratio""#));
+
+        // Round-trip
+        let parsed: StatsEvent = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.data, event.data);
+    }
+
+    #[test]
+    fn test_logger_append_implicitly_referenced() {
+        let temp = TempDir::new().unwrap();
+        let path = temp.path().join("stats.log");
+        let logger = StatsLogger::new(&path);
+
+        logger
+            .append_implicitly_referenced(
+                "L001",
+                "s1",
+                0.25,
+                vec!["keyword1".to_string(), "keyword2".to_string()],
+            )
+            .unwrap();
+
+        let events = logger.read_all().unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].data.event_name(), "implicitly_referenced");
+
+        if let StatsEventType::ImplicitlyReferenced {
+            learning_id,
+            overlap_ratio,
+            matched_keywords,
+            ..
+        } = &events[0].data
+        {
+            assert_eq!(learning_id, "L001");
+            assert!((overlap_ratio - 0.25).abs() < f64::EPSILON);
+            assert_eq!(matched_keywords.len(), 2);
+        } else {
+            panic!("Expected ImplicitlyReferenced event");
         }
     }
 }

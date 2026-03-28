@@ -113,15 +113,20 @@ impl GroveError {
     ///
     /// All Grove errors are considered infrastructure errors that should
     /// not block work. This method returns true for all error types.
+    #[cfg(test)]
     pub fn is_fail_open(&self) -> bool {
         true
     }
 }
 
 impl From<io::Error> for GroveError {
+    /// Convert an io::Error into a GroveError with an unknown path.
+    ///
+    /// Prefer `GroveError::storage(path, err)` to preserve the file path
+    /// context in error messages.
     fn from(err: io::Error) -> Self {
         Self::Storage {
-            path: PathBuf::new(),
+            path: PathBuf::from("<unknown>"),
             source: err,
         }
     }

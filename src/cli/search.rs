@@ -5,7 +5,6 @@
 use serde::{Deserialize, Serialize};
 
 use crate::backends::{MemoryBackend, SearchFilters, SearchQuery, SearchResult};
-use crate::config::Config;
 
 /// Options for the search command.
 #[derive(Debug, Clone, Default)]
@@ -94,14 +93,12 @@ impl SearchOutput {
 /// The search command implementation.
 pub struct SearchCommand<B: MemoryBackend> {
     backend: B,
-    #[allow(dead_code)]
-    config: Config,
 }
 
 impl<B: MemoryBackend> SearchCommand<B> {
     /// Create a new search command.
-    pub fn new(backend: B, config: Config) -> Self {
-        Self { backend, config }
+    pub fn new(backend: B) -> Self {
+        Self { backend }
     }
 
     /// Run the search command with the given query.
@@ -296,9 +293,8 @@ This pattern has been archived.
     #[test]
     fn test_search_basic() {
         let (_temp, backend) = setup_with_learnings();
-        let config = Config::default();
 
-        let cmd = SearchCommand::new(backend, config);
+        let cmd = SearchCommand::new(backend);
         let options = SearchOptions::default();
 
         let output = cmd.run("error", &options);
@@ -312,9 +308,8 @@ This pattern has been archived.
     #[test]
     fn test_search_with_multiple_keywords() {
         let (_temp, backend) = setup_with_learnings();
-        let config = Config::default();
 
-        let cmd = SearchCommand::new(backend, config);
+        let cmd = SearchCommand::new(backend);
         let options = SearchOptions::default();
 
         let output = cmd.run("mutex deadlock", &options);
@@ -326,9 +321,8 @@ This pattern has been archived.
     #[test]
     fn test_search_empty_query_fails() {
         let (_temp, backend) = setup_with_learnings();
-        let config = Config::default();
 
-        let cmd = SearchCommand::new(backend, config);
+        let cmd = SearchCommand::new(backend);
         let options = SearchOptions::default();
 
         let output = cmd.run("", &options);
@@ -340,9 +334,8 @@ This pattern has been archived.
     #[test]
     fn test_search_whitespace_only_query_fails() {
         let (_temp, backend) = setup_with_learnings();
-        let config = Config::default();
 
-        let cmd = SearchCommand::new(backend, config);
+        let cmd = SearchCommand::new(backend);
         let options = SearchOptions::default();
 
         let output = cmd.run("   \n\t  ", &options);
@@ -353,9 +346,8 @@ This pattern has been archived.
     #[test]
     fn test_search_excludes_archived_by_default() {
         let (_temp, backend) = setup_with_learnings();
-        let config = Config::default();
 
-        let cmd = SearchCommand::new(backend, config);
+        let cmd = SearchCommand::new(backend);
         let options = SearchOptions::default();
 
         let output = cmd.run("archived", &options);
@@ -371,9 +363,8 @@ This pattern has been archived.
     #[test]
     fn test_search_includes_archived_when_requested() {
         let (_temp, backend) = setup_with_learnings();
-        let config = Config::default();
 
-        let cmd = SearchCommand::new(backend, config);
+        let cmd = SearchCommand::new(backend);
         let options = SearchOptions {
             include_archived: true,
             ..Default::default()
@@ -389,9 +380,8 @@ This pattern has been archived.
     #[test]
     fn test_search_with_limit() {
         let (_temp, backend) = setup_with_learnings();
-        let config = Config::default();
 
-        let cmd = SearchCommand::new(backend, config);
+        let cmd = SearchCommand::new(backend);
         let options = SearchOptions {
             limit: Some(1),
             ..Default::default()
@@ -407,9 +397,8 @@ This pattern has been archived.
     #[test]
     fn test_search_no_results() {
         let (_temp, backend) = setup_with_learnings();
-        let config = Config::default();
 
-        let cmd = SearchCommand::new(backend, config);
+        let cmd = SearchCommand::new(backend);
         let options = SearchOptions::default();
 
         let output = cmd.run("nonexistentkeyword12345", &options);
@@ -422,8 +411,8 @@ This pattern has been archived.
     #[test]
     fn test_format_output_json() {
         let (_temp, backend) = setup_with_learnings();
-        let config = Config::default();
-        let cmd = SearchCommand::new(backend, config);
+
+        let cmd = SearchCommand::new(backend);
 
         let output = SearchOutput::success("test", vec![]);
         let options = SearchOptions {
@@ -439,8 +428,8 @@ This pattern has been archived.
     #[test]
     fn test_format_output_quiet() {
         let (_temp, backend) = setup_with_learnings();
-        let config = Config::default();
-        let cmd = SearchCommand::new(backend, config);
+
+        let cmd = SearchCommand::new(backend);
 
         let output = SearchOutput::success("test", vec![]);
         let options = SearchOptions {
@@ -455,8 +444,8 @@ This pattern has been archived.
     #[test]
     fn test_format_output_human_readable() {
         let (_temp, backend) = setup_with_learnings();
-        let config = Config::default();
-        let cmd = SearchCommand::new(backend, config);
+
+        let cmd = SearchCommand::new(backend);
 
         let results = vec![SearchResultInfo {
             id: "cl_001".to_string(),
@@ -478,8 +467,8 @@ This pattern has been archived.
     #[test]
     fn test_format_output_no_results() {
         let (_temp, backend) = setup_with_learnings();
-        let config = Config::default();
-        let cmd = SearchCommand::new(backend, config);
+
+        let cmd = SearchCommand::new(backend);
 
         let output = SearchOutput::success("missing", vec![]);
         let options = SearchOptions::default();

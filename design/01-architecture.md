@@ -341,23 +341,26 @@ Discovery order is configurable. Individual systems can be disabled.
 
 ```mermaid
 flowchart TD
-    A[Session Start] --> B{Config declares backend?}
-    B -->|Yes| C[Use configured backend]
-    B -->|No| D{Total Recall detected?}
-    D -->|Yes| E[Total Recall active]
-    D -->|No| F[Built-in markdown]
+    A[Session Start] --> B{Config overrides?}
+    B -->|Yes| C[Use configured order]
+    B -->|No| D[Use default order]
+    C --> E
+    D --> E
+
+    E{Total Recall detected?} -->|Yes| F[Total Recall active]
+    E -->|No| G[Built-in markdown]
 ```
 
-Default discovery order: `config → total-recall → markdown`
+Default discovery order: `total-recall → markdown`
 
 | Backend | Detection |
 |---------|-----------|
-| Config explicit | `.grove/config.toml` declares a backend |
 | Total Recall | `memory/` directory + `rules/total-recall.md` exists |
 | Markdown | Always available (built-in fallback) |
 
 Multiple backends can be active simultaneously. Learnings route by scope.
-Discovery order is configurable. Individual backends can be disabled.
+Discovery order is configurable via `backends.discovery`. Individual backends
+can be disabled via `backends.overrides`.
 
 ### 5.3 Total Recall Integration Details
 
@@ -993,12 +996,18 @@ When Total Recall is the active backend:
 | `write(learning)` | Write a learning to the backend |
 | `search(query, filters)` | Search for relevant learnings |
 | `ping()` | Health check / availability |
+| `name()` | Get the backend name for logging and stats |
+| `archive(learning_id)` | Archive a learning by ID |
+| `restore(learning_id)` | Restore an archived learning by ID |
+| `list_all()` | List all learnings (default: search with empty query) |
+| `next_id()` | Generate a unique ID for a new learning (`cl_YYYYMMDD_NNN`) |
+| `next_ids(count)` | Generate multiple unique IDs for a batch of learnings |
 
 **Search semantics vary by backend:**
 
 | Backend | Search Implementation |
 |---------|---------------------|
-| **Markdown** | Parse `.grove/learnings.md`, match tags against query tags (exact match = 1.0, partial = 0.5), match file paths against `context_files` (overlap = 0.8), keyword substring match against summary and detail (0.3). Return all matches with relevance scores. |
+| **Markdown** | Parse `.grove/learnings.md`, match tags against query tags (exact match = 1.0, partial = 0.5), match file paths against `context_files` (overlap = 0.8), keyword substring match against summary and detail (0.5). Return all matches with relevance scores. |
 | **Total Recall** | Read daily logs (last 14 days) and registers directly, filtering for `grove:` prefixed entries. Match query terms against content. Grove applies its own composite scoring. Note: search results may be partial (not all learning metadata is preserved in Total Recall's format). |
 
 The `query` parameter is a structured object containing available context:
@@ -1044,15 +1053,29 @@ no config exists.
 |---------|-----|---------|-------------|
 | ticketing | discovery | `[tissue, beads, tasks, session]` | Ordered probe list |
 | ticketing | overrides | `{}` | Per-system enable/disable |
-| backends | discovery | `[config, total-recall, markdown]` | Ordered probe list |
+| backends | discovery | `[total-recall, markdown]` | Ordered probe list |
 | backends | overrides | `{}` | Per-backend enable/disable |
 | gate | auto_skip.enabled | `true` | Allow auto-skip for trivial changes |
 | gate | auto_skip.line_threshold | `5` | Diff size below which auto-skip applies |
 | gate | auto_skip.decider | `agent` | Who decides: `agent`, `always`, `never` |
+| gate | write_gate.mode | `strict` | Write gate mode: `strict`, `lenient`, `disabled` |
+| gate | write_gate.quality_check | `enforce` | Quality check: `enforce`, `warn`, `disabled` |
+| gate | write_gate.min_specificity_score | `1.5` | Min composite specificity score |
+| gate | write_gate.judge_enabled | `false` | LLM judge for borderline learnings |
+| gate | write_gate.judge_min_score | `1.5` | Min borderline score for LLM judge |
+| gate | write_gate.judge_max_score | `2.5` | Max borderline score for LLM judge |
+| gate | write_gate.judge_rescue_threshold | `3.0` | Min LLM judge score to rescue |
+| gate | semantic_dedup.enabled | `false` | Semantic dedup (requires feature) |
+| gate | semantic_dedup.similarity_threshold | `0.90` | Cosine similarity threshold |
+| gate | skip_counts_as_dismissal | `false` | Count skips as dismissals |
 | decay | passive_duration_days | `90` | Days without reference before archival |
-| decay | immunity_hit_rate | `0.8` | Hit rate above which decay is skipped |
+| decay | immunity_hit_rate | `0.3` | Hit rate above which decay is skipped |
+| decay | min_dismissals_for_decay | `3` | Min dismissals before decay can occur |
+| decay | category_aware | `true` | Category-specific decay thresholds |
+| decay | fast_track_surfacings | `5` | Surfacings with 0 refs before fast-track |
 | retrieval | max_injections | `5` | Max learnings injected per session |
 | retrieval | strategy | `moderate` | `conservative`, `moderate`, `aggressive` |
+| retrieval | min_pool_size | `20` | Below this, conservative downgrades to moderate |
 | retrieval | scoring_backend | `bm25` | `bm25` or `keyword` |
 | retrieval | corpus_enrichment | `true` | Augment queries with corpus-derived vocabulary |
 | retrieval | corpus_size_threshold | `50` | Heuristic: boosted BM25 below, plain above |
@@ -1061,10 +1084,27 @@ no config exists.
 | retrieval | min_confidence_threshold | `0.1` | Suppress injection if top score below this |
 | retrieval | min_score_gap | `0.05` | Suppress if top-to-median gap below this |
 | retrieval | recency_half_life_days | `90` | Global recency decay half-life |
+| retrieval | category_half_lives.* | `90` | Per-category half-life overrides |
 | retrieval | intent_filter.enabled | `false` | Post-retrieval intent keyword filter |
+| retrieval | intent_filter.min_overlap | `1` | Min keyword overlap to keep a learning |
+| retrieval | intent_filter.max_keywords | `15` | Max keywords to extract from user message |
 | retrieval | rerank.enabled | `false` | LLM reranking of retrieved learnings |
+| retrieval | rerank.timeout_seconds | `15` | Timeout for reranking LLM call |
+| retrieval | rerank.model | `haiku` | Model for reranking |
+| retrieval | rerank.backend | `cli` | Backend: `cli` or `api` |
 | circuit_breaker | max_blocks | `3` | Blocks before forced approve |
 | circuit_breaker | cooldown_seconds | `300` | Cooldown before breaker resets |
+| context | active_ticket_query | `true` | Query ticketing CLI for active ticket |
+| context | active_ticket_timeout_ms | `2000` | Timeout for ticketing CLI queries |
+| context | deferred_injection | `true` | Deferred injection via PreToolUse hook |
+| judge | backend | `cli` | LLM backend: `api` or `cli` |
+| judge | model | `haiku` | LLM model for judge calls |
+| judge | api_url | `https://api.anthropic.com/v1/messages` | API base URL |
+| judge | cache_path | `""` | Path to judge cache file |
+| judge | batch_timeout | `3600` | Max seconds for batch completion |
+| implicit_references | enabled | `false` | Implicit reference detection |
+| implicit_references | min_overlap | `0.15` | Min keyword overlap fraction |
+| implicit_references | min_keyword_matches | `2` | Min keyword match count |
 
 ## 12. Error Philosophy
 

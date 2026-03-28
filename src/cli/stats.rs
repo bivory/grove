@@ -14,7 +14,7 @@ use crate::discovery::create_primary_backend;
 use crate::stats::{
     apply_safe_recommendations, generate_insights, generate_recommendations, AggregateStats,
     ConfigRecommendation, Insight, InsightConfig, Recommendations, ReflectionStats, StatsCache,
-    StatsCacheManager, WriteGateStats,
+    StatsCacheManager, StatsLogger, WriteGateStats,
 };
 
 /// Options for the stats command.
@@ -30,6 +30,8 @@ pub struct StatsOptions {
     pub rebuild: bool,
     /// Apply safe configuration recommendations.
     pub update_config: bool,
+    /// Filter stats to a specific grove version (e.g., "0.9.0" or "pre:0.9.0").
+    pub version: Option<String>,
 }
 
 /// Output format for the stats command.
@@ -146,6 +148,9 @@ pub struct AggregateStatsInfo {
     pub average_hit_rate: f64,
     /// Cross-pollination count.
     pub cross_pollination_count: usize,
+    /// Total implicit references detected via keyword overlap.
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub total_implicit_referenced: u32,
 }
 
 impl From<&AggregateStats> for AggregateStatsInfo {
@@ -156,8 +161,14 @@ impl From<&AggregateStats> for AggregateStatsInfo {
             active_learnings: stats.total_learnings.saturating_sub(stats.total_archived),
             average_hit_rate: sanitize_f64(stats.average_hit_rate),
             cross_pollination_count: stats.cross_pollination_count,
+            total_implicit_referenced: stats.total_implicit_referenced,
         }
     }
+}
+
+/// Helper for serde skip_serializing_if on u32 fields.
+fn is_zero_u32(val: &u32) -> bool {
+    *val == 0
 }
 
 /// Sanitize a float value for safe display and serialization.
@@ -283,6 +294,7 @@ impl StatsOutput {
                 active_learnings: 0,
                 average_hit_rate: 0.0,
                 cross_pollination_count: 0,
+                total_implicit_referenced: 0,
             },
             reflections: ReflectionStatsInfo {
                 completed: 0,
@@ -315,6 +327,7 @@ impl StatsOutput {
                 active_learnings: 0,
                 average_hit_rate: 0.0,
                 cross_pollination_count: 0,
+                total_implicit_referenced: 0,
             },
             reflections: ReflectionStatsInfo {
                 completed: 0,
@@ -383,7 +396,53 @@ impl StatsCommand {
         };
         let cache_manager = StatsCacheManager::new(&cache_path, &log_path);
 
-        let cache = if options.rebuild {
+        let cache = if let Some(ref version_filter) = options.version {
+            // Version-filtered stats: replay log with event filtering (not cached)
+            let logger = StatsLogger::new(&log_path);
+            let events = match logger.read_all() {
+                Ok(e) => e,
+                Err(e) => {
+                    warnings.push(format!("Failed to read stats log: {}", e));
+                    return StatsOutput::empty(warnings);
+                }
+            };
+
+            let filtered: Vec<_> = if let Some(target) = version_filter.strip_prefix("pre:") {
+                // "pre:0.9.0" matches events without grove_version or with version < target
+                let target_parts: Vec<u64> =
+                    target.split('.').filter_map(|s| s.parse().ok()).collect();
+                events
+                    .into_iter()
+                    .filter(|e| match &e.grove_version {
+                        None => true,
+                        Some(v) => {
+                            let v_parts: Vec<u64> =
+                                v.split('.').filter_map(|s| s.parse().ok()).collect();
+                            v_parts < target_parts
+                        }
+                    })
+                    .collect()
+            } else {
+                // "0.9.0" matches events with that exact version
+                events
+                    .into_iter()
+                    .filter(|e| {
+                        e.grove_version
+                            .as_ref()
+                            .is_some_and(|v| v == version_filter)
+                    })
+                    .collect()
+            };
+
+            warnings.push(format!(
+                "Filtered to {} of {} log entries (version: {})",
+                filtered.len(),
+                logger.count().unwrap_or(0),
+                version_filter,
+            ));
+
+            StatsCache::from_events(&filtered)
+        } else if options.rebuild {
             match cache_manager.force_rebuild() {
                 Ok(c) => c,
                 Err(e) => {
@@ -534,9 +593,16 @@ impl StatsCommand {
             output.aggregates.average_hit_rate * 100.0
         ));
         lines.push(format!(
-            "   Cross-pollination events: {}\n",
+            "   Cross-pollination events: {}",
             output.aggregates.cross_pollination_count
         ));
+        if output.aggregates.total_implicit_referenced > 0 {
+            lines.push(format!(
+                "   Implicit references: {}",
+                output.aggregates.total_implicit_referenced
+            ));
+        }
+        lines.push(String::new());
 
         // Reflections
         lines.push("🔄 Reflections".to_string());
@@ -898,6 +964,7 @@ mod tests {
             total_archived: 3,
             average_hit_rate: 0.75,
             cross_pollination_count: 5,
+            total_implicit_referenced: 0,
             by_category: HashMap::new(),
             by_scope: HashMap::new(),
         };
@@ -907,6 +974,7 @@ mod tests {
         assert_eq!(info.total_archived, 3);
         assert_eq!(info.active_learnings, 7);
         assert_eq!(info.cross_pollination_count, 5);
+        assert_eq!(info.total_implicit_referenced, 0);
     }
 
     #[test]
@@ -992,6 +1060,7 @@ mod tests {
             total_archived: 3,
             average_hit_rate: f64::NAN, // Simulate corrupted data
             cross_pollination_count: 5,
+            total_implicit_referenced: 0,
             by_category: HashMap::new(),
             by_scope: HashMap::new(),
         };
@@ -1045,5 +1114,160 @@ mod tests {
         };
         assert!(!info.is_empty());
         assert!(info.has_safe());
+    }
+
+    fn setup_with_versioned_stats() -> TempDir {
+        let temp = setup();
+        let log_path = temp.path().join(".grove").join("stats.log");
+
+        // Events: 2 without version (pre-0.9.0), 2 with version 0.9.0
+        let events = concat!(
+            r#"{"ts":"2026-01-01T00:00:00Z","v":1,"event":"surfaced","learning_id":"cl_001","session_id":"s1"}"#,
+            "\n",
+            r#"{"ts":"2026-01-02T00:00:00Z","v":1,"event":"referenced","learning_id":"cl_001","session_id":"s1","ticket_id":"T1"}"#,
+            "\n",
+            r#"{"ts":"2026-03-21T00:00:00Z","v":1,"grove_version":"0.9.0","event":"surfaced","learning_id":"cl_002","session_id":"s2"}"#,
+            "\n",
+            r#"{"ts":"2026-03-22T00:00:00Z","v":1,"grove_version":"0.9.0","event":"referenced","learning_id":"cl_002","session_id":"s2","ticket_id":"T2"}"#,
+            "\n",
+        );
+        fs::write(&log_path, events).unwrap();
+        temp
+    }
+
+    #[test]
+    fn test_stats_version_filter_exact() {
+        let temp = setup_with_versioned_stats();
+        let config = Config::default();
+
+        let cmd = StatsCommand::new(config, temp.path());
+        let options = StatsOptions {
+            version: Some("0.9.0".to_string()),
+            ..Default::default()
+        };
+
+        let output = cmd.run(&options);
+        assert!(output.success);
+        // Should only see cl_002 (the 0.9.0 events)
+        assert!(output
+            .warnings
+            .iter()
+            .any(|w| w.contains("Filtered to 2 of 4")));
+    }
+
+    #[test]
+    fn test_stats_version_filter_pre() {
+        let temp = setup_with_versioned_stats();
+        let config = Config::default();
+
+        let cmd = StatsCommand::new(config, temp.path());
+        let options = StatsOptions {
+            version: Some("pre:0.9.0".to_string()),
+            ..Default::default()
+        };
+
+        let output = cmd.run(&options);
+        assert!(output.success);
+        // Should only see cl_001 (the pre-0.9.0 events without grove_version)
+        assert!(output
+            .warnings
+            .iter()
+            .any(|w| w.contains("Filtered to 2 of 4")));
+    }
+
+    #[test]
+    fn test_stats_version_filter_no_match() {
+        let temp = setup_with_versioned_stats();
+        let config = Config::default();
+
+        let cmd = StatsCommand::new(config, temp.path());
+        let options = StatsOptions {
+            version: Some("1.0.0".to_string()),
+            ..Default::default()
+        };
+
+        let output = cmd.run(&options);
+        assert!(output.success);
+        assert!(output
+            .warnings
+            .iter()
+            .any(|w| w.contains("Filtered to 0 of 4")));
+        assert_eq!(output.aggregates.total_learnings, 0);
+    }
+
+    #[test]
+    fn test_stats_no_version_filter_uses_cache() {
+        let temp = setup_with_versioned_stats();
+        let config = Config::default();
+
+        let cmd = StatsCommand::new(config, temp.path());
+        let options = StatsOptions::default();
+
+        let output = cmd.run(&options);
+        assert!(output.success);
+        // Without version filter, no "Filtered to" warning should appear
+        assert!(!output.warnings.iter().any(|w| w.contains("Filtered to")));
+    }
+
+    #[test]
+    fn test_format_output_hides_implicit_refs_when_zero() {
+        let temp = setup();
+        let config = Config::default();
+        let cmd = StatsCommand::new(config, temp.path());
+
+        let output = StatsOutput::empty(vec![]);
+        let options = StatsOptions::default();
+
+        let formatted = cmd.format_output(&output, &options);
+        assert!(!formatted.contains("Implicit references"));
+    }
+
+    #[test]
+    fn test_format_output_shows_implicit_refs_when_nonzero() {
+        let temp = setup();
+        let config = Config::default();
+        let cmd = StatsCommand::new(config, temp.path());
+
+        let mut output = StatsOutput::empty(vec![]);
+        output.aggregates.total_implicit_referenced = 5;
+        let options = StatsOptions::default();
+
+        let formatted = cmd.format_output(&output, &options);
+        assert!(formatted.contains("Implicit references: 5"));
+    }
+
+    #[test]
+    fn test_stats_version_filter_pre_semver_ordering() {
+        // Verify that "pre:0.10.0" correctly includes 0.9.0 events.
+        // Lexicographic comparison would fail here ("0.9.0" > "0.10.0").
+        let temp = setup();
+        let log_path = temp.path().join(".grove").join("stats.log");
+
+        let events = concat!(
+            r#"{"ts":"2026-01-01T00:00:00Z","v":1,"grove_version":"0.9.0","event":"surfaced","learning_id":"cl_001","session_id":"s1"}"#,
+            "\n",
+            r#"{"ts":"2026-01-02T00:00:00Z","v":1,"grove_version":"0.10.0","event":"surfaced","learning_id":"cl_002","session_id":"s2"}"#,
+            "\n",
+        );
+        fs::write(&log_path, events).unwrap();
+
+        let config = Config::default();
+        let cmd = StatsCommand::new(config, temp.path());
+        let options = StatsOptions {
+            version: Some("pre:0.10.0".to_string()),
+            ..Default::default()
+        };
+
+        let output = cmd.run(&options);
+        assert!(output.success);
+        // 0.9.0 < 0.10.0, so only the first event should pass
+        assert!(
+            output
+                .warnings
+                .iter()
+                .any(|w| w.contains("Filtered to 1 of 2")),
+            "0.9.0 should be less than 0.10.0 with semver comparison: {:?}",
+            output.warnings
+        );
     }
 }

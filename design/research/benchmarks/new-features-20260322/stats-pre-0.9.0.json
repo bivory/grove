@@ -1,0 +1,43 @@
+{
+  "success": true,
+  "aggregates": {
+    "total_learnings": 1325,
+    "total_archived": 0,
+    "active_learnings": 1325,
+    "average_hit_rate": 0.0029644268774703555,
+    "cross_pollination_count": 0
+  },
+  "reflections": {
+    "completed": 2610,
+    "skipped": 426,
+    "skip_rate": 0.14031620553359683
+  },
+  "write_gate": {
+    "total_evaluated": 2630,
+    "total_accepted": 1325,
+    "total_rejected": 1305,
+    "pass_rate": 0.5038022813688213,
+    "avg_specificity": 5.0
+  },
+  "insights": [
+    {
+      "kind": "Low Hit Category",
+      "message": "Pattern category has 0% average hit rate across 23 learnings",
+      "suggestion": "Consider being more specific when capturing learnings in this category",
+      "priority": 2
+    },
+    {
+      "kind": "Over-Surfaced Learning",
+      "message": "13 learnings surfaced 5+ times with ≤10% hit rate (worst: 'cl_20260317_028' at 44 surfacings)",
+      "suggestion": "Consider editing these learnings to add project-specific terms, or archive them with `grove maintain --archive`",
+      "priority": 2
+    }
+  ],
+  "recommendations": {
+    "safe": [],
+    "aggressive": []
+  },
+  "warnings": [
+    "Filtered to 4970 of 5058 log entries (version: pre:0.9.0)"
+  ]
+}

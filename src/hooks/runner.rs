@@ -3,7 +3,7 @@
 //! This module implements the hook dispatch and individual hook handlers.
 //! Hooks integrate with Claude Code at key points in the session lifecycle.
 
-use std::io::{self, Read};
+use std::io;
 use std::path::Path;
 
 use crate::backends::{SearchFilters, SearchQuery};
@@ -51,6 +51,7 @@ pub enum HookType {
 
 impl HookType {
     /// Parse hook type from string.
+    #[cfg(test)]
     pub fn parse(s: &str) -> Option<Self> {
         match s.to_lowercase().as_str() {
             "session-start" | "sessionstart" | "session_start" => Some(Self::SessionStart),
@@ -94,6 +95,17 @@ impl<S: SessionStore> HookRunner<S> {
                 "Failed to save session state (fail-open: continuing anyway)"
             );
         }
+    }
+
+    /// Load all learnings from the backend for implicit reference detection.
+    ///
+    /// Callers should use `unwrap_or_default()` for fail-open behavior.
+    fn load_learnings_for_implicit_refs(
+        &self,
+        cwd: &Path,
+    ) -> Result<Vec<crate::core::CompoundLearning>> {
+        let backend = create_primary_backend(cwd, Some(&self.config));
+        backend.list_all()
     }
 
     /// Run a hook with input from stdin.
@@ -243,7 +255,13 @@ impl<S: SessionStore> HookRunner<S> {
             let status_str = match session.gate.status {
                 GateStatus::Pending => "Pending",
                 GateStatus::Blocked => "Blocked",
-                _ => unreachable!("requires_reflection() returned true for non-blocking state"),
+                other => {
+                    warn!(
+                        status = ?other,
+                        "requires_reflection() returned true for unexpected state (fail-open: treating as Pending)"
+                    );
+                    "Pending"
+                }
             };
 
             let mut gate_notice = format!(
@@ -608,6 +626,50 @@ impl<S: SessionStore> HookRunner<S> {
         };
 
         session.add_trace(EventType::StopHookCalled, None);
+
+        // Implicit reference detection: compare last_assistant_message keywords
+        // against injected learnings before any state transitions.
+        if let Some(ref message) = hook_input.last_assistant_message {
+            if self.config.implicit_references.enabled
+                && !session.gate.injected_learnings.is_empty()
+            {
+                // Load full learnings for keyword comparison
+                let cwd = Path::new(&hook_input.common.cwd);
+                let learnings = self
+                    .load_learnings_for_implicit_refs(cwd)
+                    .unwrap_or_default();
+
+                let matches = detect_implicit_references(
+                    message,
+                    &session.gate.injected_learnings,
+                    &learnings,
+                    &self.config.implicit_references,
+                );
+
+                if !matches.is_empty() {
+                    let stats_path = project_stats_log_path(cwd);
+                    let logger = StatsLogger::new(&stats_path);
+
+                    for (learning_id, overlap_ratio, matched_keywords) in &matches {
+                        // Mark as implicitly referenced in session state
+                        for inj in &mut session.gate.injected_learnings {
+                            if inj.learning_id == *learning_id
+                                && inj.outcome == crate::core::state::InjectionOutcome::Pending
+                            {
+                                inj.mark_implicitly_referenced();
+                            }
+                        }
+                        // Log stats event
+                        let _ = logger.append_implicitly_referenced(
+                            learning_id,
+                            &session.id,
+                            *overlap_ratio,
+                            matched_keywords.clone(),
+                        );
+                    }
+                }
+            }
+        }
 
         // If stop_hook_active is true, the agent is already in a stop-hook-triggered
         // continuation trying to resolve the block. Don't block again to prevent loops.
@@ -1966,10 +2028,13 @@ pub fn adaptive_dk_ratio(
     ratio.clamp(0.15, 0.6)
 }
 
-/// Read input from stdin.
+/// Read input from stdin with a size limit to prevent memory exhaustion.
 fn read_stdin() -> Result<String> {
+    use std::io::Read as _;
+    const MAX_STDIN_SIZE: u64 = 10 * 1024 * 1024; // 10 MB
     let mut input = String::new();
     io::stdin()
+        .take(MAX_STDIN_SIZE)
         .read_to_string(&mut input)
         .map_err(|e| GroveError::storage("stdin", e))?;
     Ok(input)
@@ -2284,6 +2349,113 @@ pub fn learning_matches_intent(
         .count();
 
     overlap >= min_overlap
+}
+
+/// Compute the intent overlap ratio for a learning against intent keywords.
+///
+/// Returns a value in [0.0, 1.0] representing the fraction of intent keywords
+/// found in the learning's text. Used by the intent-boost scoring variant
+/// to multiply the BM25 composite score proportionally to overlap.
+pub fn intent_overlap_ratio(summary: &str, detail: &str, intent_keywords: &[String]) -> f64 {
+    if intent_keywords.is_empty() {
+        return 0.0;
+    }
+
+    let mut learning_words: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let combined = format!("{} {}", summary, detail);
+    for word in combined.split(|c: char| !c.is_alphanumeric() && c != '_') {
+        let lower = word.to_lowercase();
+        if lower.len() >= 4 {
+            learning_words.insert(lower);
+        }
+    }
+
+    let overlap = intent_keywords
+        .iter()
+        .filter(|kw| learning_words.contains(kw.as_str()))
+        .count();
+
+    overlap as f64 / intent_keywords.len() as f64
+}
+
+/// Detect implicit references by comparing `last_assistant_message` keywords
+/// against injected learning text (summary + detail + tags).
+///
+/// Returns a list of (learning_id, overlap_ratio, matched_keywords) for each
+/// learning that exceeds the configured thresholds.
+pub fn detect_implicit_references(
+    message: &str,
+    injected_learnings: &[crate::core::state::InjectedLearning],
+    learnings_store: &[crate::core::CompoundLearning],
+    config: &crate::config::ImplicitReferencesConfig,
+) -> Vec<(String, f64, Vec<String>)> {
+    use std::collections::{HashMap, HashSet};
+
+    if message.is_empty() || injected_learnings.is_empty() {
+        return Vec::new();
+    }
+
+    // Tokenize assistant message into keyword set (min length 4, lowercased)
+    let message_keywords: HashSet<String> = message
+        .split(|c: char| !c.is_alphanumeric() && c != '_')
+        .map(|w| w.to_lowercase())
+        .filter(|w| w.len() >= 4)
+        .collect();
+
+    if message_keywords.is_empty() {
+        return Vec::new();
+    }
+
+    // Build lookup map for full learnings
+    let learnings_map: HashMap<&str, &crate::core::CompoundLearning> =
+        learnings_store.iter().map(|l| (l.id.as_str(), l)).collect();
+
+    let mut results = Vec::new();
+
+    for injected in injected_learnings {
+        // Only check learnings still in Pending state
+        if injected.outcome != crate::core::state::InjectionOutcome::Pending {
+            continue;
+        }
+
+        // Look up full learning
+        let Some(learning) = learnings_map.get(injected.learning_id.as_str()) else {
+            continue;
+        };
+
+        // Build keyword set from learning: summary + detail + tags
+        let combined = format!(
+            "{} {} {}",
+            learning.summary,
+            learning.detail,
+            learning.tags.join(" ")
+        );
+        let learning_keywords: HashSet<String> = combined
+            .split(|c: char| !c.is_alphanumeric() && c != '_')
+            .map(|w| w.to_lowercase())
+            .filter(|w| w.len() >= 4)
+            .collect();
+
+        if learning_keywords.is_empty() {
+            continue;
+        }
+
+        // Compute overlap: learning keywords found in message keywords
+        let matched: Vec<String> = learning_keywords
+            .iter()
+            .filter(|kw| message_keywords.contains(kw.as_str()))
+            .cloned()
+            .collect();
+
+        let overlap_count = matched.len();
+        let overlap_ratio = overlap_count as f64 / learning_keywords.len() as f64;
+
+        if overlap_count >= config.min_keyword_matches && overlap_ratio >= config.min_overlap {
+            results.push((injected.learning_id.clone(), overlap_ratio, matched));
+        }
+    }
+
+    results
 }
 
 /// Extract keywords from a user's prompt text for mid-session re-retrieval.
@@ -9954,6 +10126,291 @@ behavior_changing: true\nstatus: active\n---\n";
                 "Database learning should be filtered by Phoenix intent"
             );
         }
+    }
+
+    // =========================================================================
+    // intent_overlap_ratio tests
+    // =========================================================================
+
+    #[test]
+    fn intent_overlap_ratio_empty_keywords_returns_zero() {
+        let ratio = intent_overlap_ratio("some summary", "some detail", &[]);
+        assert!((ratio - 0.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn intent_overlap_ratio_no_overlap() {
+        let keywords = vec!["phoenix".to_string(), "liveview".to_string()];
+        let ratio = intent_overlap_ratio(
+            "database indexing strategy",
+            "add indexes on foreign keys",
+            &keywords,
+        );
+        assert!((ratio - 0.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn intent_overlap_ratio_full_overlap() {
+        let keywords = vec!["database".to_string(), "indexing".to_string()];
+        let ratio =
+            intent_overlap_ratio("database indexing strategy", "optimize queries", &keywords);
+        assert!((ratio - 1.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn intent_overlap_ratio_partial_overlap() {
+        let keywords = vec![
+            "database".to_string(),
+            "phoenix".to_string(),
+            "indexing".to_string(),
+        ];
+        // "database" and "indexing" match, "phoenix" does not → 2/3
+        let ratio =
+            intent_overlap_ratio("database indexing strategy", "optimize queries", &keywords);
+        let expected = 2.0 / 3.0;
+        assert!((ratio - expected).abs() < 0.001);
+    }
+
+    #[test]
+    fn intent_overlap_ratio_case_insensitive() {
+        let keywords = vec!["database".to_string()];
+        let ratio = intent_overlap_ratio("Database Strategy", "", &keywords);
+        assert!((ratio - 1.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn intent_overlap_ratio_checks_detail_too() {
+        let keywords = vec!["indexing".to_string()];
+        // Word only in detail, not in summary
+        let ratio = intent_overlap_ratio("strategy overview", "add indexing on keys", &keywords);
+        assert!((ratio - 1.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn intent_overlap_ratio_skips_short_words() {
+        // Words < 4 chars in learning text are excluded from matching
+        let keywords = vec!["keys".to_string()];
+        let ratio = intent_overlap_ratio("add keys to db", "use keys for auth", &keywords);
+        assert!((ratio - 1.0).abs() < f64::EPSILON);
+    }
+
+    // =========================================================================
+    // detect_implicit_references tests
+    // =========================================================================
+
+    fn make_test_learning(
+        id: &str,
+        summary: &str,
+        detail: &str,
+        tags: Vec<&str>,
+    ) -> crate::core::CompoundLearning {
+        use crate::core::learning::*;
+        let mut learning = CompoundLearning::new(
+            LearningCategory::Pattern,
+            summary,
+            detail,
+            LearningScope::Project,
+            Confidence::High,
+            vec![WriteGateCriterion::BehaviorChanging],
+            tags.into_iter().map(|t| t.to_string()).collect(),
+            "test-session",
+        );
+        learning.id = id.to_string();
+        learning
+    }
+
+    #[test]
+    fn detect_implicit_refs_empty_message_returns_empty() {
+        let config = crate::config::ImplicitReferencesConfig {
+            enabled: true,
+            min_overlap: 0.15,
+            min_keyword_matches: 2,
+        };
+        let injected = vec![crate::core::state::InjectedLearning::new("L001", 0.9)];
+        let learnings = vec![make_test_learning(
+            "L001",
+            "database indexing strategy",
+            "optimize queries with indexes",
+            vec!["database"],
+        )];
+
+        let results = detect_implicit_references("", &injected, &learnings, &config);
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn detect_implicit_refs_no_injected_returns_empty() {
+        let config = crate::config::ImplicitReferencesConfig {
+            enabled: true,
+            min_overlap: 0.15,
+            min_keyword_matches: 2,
+        };
+        let results = detect_implicit_references("some message about database", &[], &[], &config);
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn detect_implicit_refs_no_overlap() {
+        let config = crate::config::ImplicitReferencesConfig {
+            enabled: true,
+            min_overlap: 0.15,
+            min_keyword_matches: 2,
+        };
+        let injected = vec![crate::core::state::InjectedLearning::new("L001", 0.9)];
+        let learnings = vec![make_test_learning(
+            "L001",
+            "database indexing strategy",
+            "optimize queries with indexes",
+            vec!["postgres"],
+        )];
+
+        let results = detect_implicit_references(
+            "I fixed the authentication middleware and updated the tests",
+            &injected,
+            &learnings,
+            &config,
+        );
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn detect_implicit_refs_below_threshold() {
+        let config = crate::config::ImplicitReferencesConfig {
+            enabled: true,
+            min_overlap: 0.5, // High threshold
+            min_keyword_matches: 2,
+        };
+        let injected = vec![crate::core::state::InjectedLearning::new("L001", 0.9)];
+        let learnings = vec![make_test_learning(
+            "L001",
+            "database indexing strategy for postgres optimization",
+            "use composite indexes for multi-column queries in the analytics module",
+            vec!["postgres", "performance"],
+        )];
+
+        // Only matches "database" and "indexing" — not enough for 0.5 ratio
+        let results = detect_implicit_references(
+            "Added database indexing to the user table",
+            &injected,
+            &learnings,
+            &config,
+        );
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn detect_implicit_refs_matches_at_threshold() {
+        let config = crate::config::ImplicitReferencesConfig {
+            enabled: true,
+            min_overlap: 0.15,
+            min_keyword_matches: 2,
+        };
+        let injected = vec![crate::core::state::InjectedLearning::new("L001", 0.9)];
+        let learnings = vec![make_test_learning(
+            "L001",
+            "database indexing strategy",
+            "optimize queries with indexes",
+            vec!["postgres"],
+        )];
+
+        let results = detect_implicit_references(
+            "I optimized the database queries and added indexing to improve performance",
+            &injected,
+            &learnings,
+            &config,
+        );
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].0, "L001");
+        assert!(results[0].1 >= 0.15);
+        assert!(results[0].2.len() >= 2);
+    }
+
+    #[test]
+    fn detect_implicit_refs_multiple_learnings_mixed() {
+        let config = crate::config::ImplicitReferencesConfig {
+            enabled: true,
+            min_overlap: 0.15,
+            min_keyword_matches: 2,
+        };
+        let injected = vec![
+            crate::core::state::InjectedLearning::new("L001", 0.9),
+            crate::core::state::InjectedLearning::new("L002", 0.8),
+        ];
+        let learnings = vec![
+            make_test_learning(
+                "L001",
+                "database indexing strategy",
+                "optimize queries with indexes",
+                vec!["postgres"],
+            ),
+            make_test_learning(
+                "L002",
+                "authentication middleware",
+                "validate tokens in request pipeline",
+                vec!["security"],
+            ),
+        ];
+
+        let results = detect_implicit_references(
+            "I fixed the database queries and added better indexing for performance",
+            &injected,
+            &learnings,
+            &config,
+        );
+        // Should match L001 (database, queries, indexing) but not L002 (no auth keywords)
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].0, "L001");
+    }
+
+    #[test]
+    fn detect_implicit_refs_skips_non_pending() {
+        let config = crate::config::ImplicitReferencesConfig {
+            enabled: true,
+            min_overlap: 0.15,
+            min_keyword_matches: 2,
+        };
+        let mut injected_ref = crate::core::state::InjectedLearning::new("L001", 0.9);
+        injected_ref.mark_referenced(); // Already referenced
+        let injected = vec![injected_ref];
+        let learnings = vec![make_test_learning(
+            "L001",
+            "database indexing strategy",
+            "optimize queries with indexes",
+            vec!["postgres"],
+        )];
+
+        let results = detect_implicit_references(
+            "I optimized the database queries and added indexing",
+            &injected,
+            &learnings,
+            &config,
+        );
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn detect_implicit_refs_min_keyword_matches_guard() {
+        let config = crate::config::ImplicitReferencesConfig {
+            enabled: true,
+            min_overlap: 0.01,      // Very low ratio threshold
+            min_keyword_matches: 3, // But require 3 matches
+        };
+        let injected = vec![crate::core::state::InjectedLearning::new("L001", 0.9)];
+        let learnings = vec![make_test_learning(
+            "L001",
+            "database indexing strategy for query optimization in analytics",
+            "use composite indexes for multi-column queries",
+            vec!["postgres", "performance"],
+        )];
+
+        // Only 2 keyword matches (database, queries) — below min_keyword_matches of 3
+        let results = detect_implicit_references(
+            "Fixed database queries in the user module",
+            &injected,
+            &learnings,
+            &config,
+        );
+        assert!(results.is_empty());
     }
 
     // =========================================================================

@@ -112,8 +112,6 @@ grove debug <session_id>       # Full session state dump
 grove trace <session_id>       # Show trace events for session
 grove clean --before 30d       # Remove old session files
 grove review                   # Sample learnings for quality rating
-grove eval run                 # Run retrieval quality benchmark
-grove eval compare             # Compare multiple benchmark configs
 grove retroflect               # Mine past sessions for retroactive learnings
 ```
 
@@ -140,6 +138,17 @@ grove hook stop                # Gate enforcement (reads stdin JSON)
 grove hook task-completed      # Task completion detection (reads stdin JSON)
 grove hook session-end         # Dismissed detection, cleanup (reads stdin JSON)
 grove hook user-prompt-submit  # Mid-session re-retrieval (reads stdin JSON)
+```
+
+### 4.4 Developer/Eval Commands
+
+Commands for retrieval quality evaluation and benchmarking.
+
+```text
+grove eval run                 # Run a retrieval benchmark and output scorecard
+grove eval compare             # Compare multiple benchmark configurations
+grove eval dedup-audit         # Audit corpora for semantic duplicates
+grove eval sweep               # Run benchmarks across all corpora in a manifest
 ```
 
 All commands support `--json` for machine output and `--quiet` for ID-only

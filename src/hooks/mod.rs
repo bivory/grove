@@ -24,7 +24,8 @@ pub use output::{
 pub use runner::{
     adaptive_dk_ratio, apply_adaptive_threshold, apply_dynamic_k, extract_tool_input_keywords,
     extract_tool_input_keywords_v2, extract_tool_input_keywords_v2_with_options,
-    extract_user_intent_keywords, learning_matches_intent, HookRunner, HookType,
+    extract_user_intent_keywords, intent_overlap_ratio, learning_matches_intent, HookRunner,
+    HookType,
 };
 
 // Re-export benchmark-only functions within the crate

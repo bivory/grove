@@ -14,7 +14,8 @@ use {
     crate::hooks::{
         apply_adaptive_threshold, apply_dynamic_k, build_tantivy_query_string_boosted,
         build_tantivy_query_string_boosted_with_params, extract_tool_input_keywords_v2,
-        extract_user_intent_keywords, learning_matches_intent, rerank_with_llm,
+        extract_user_intent_keywords, intent_overlap_ratio, learning_matches_intent,
+        rerank_with_llm,
     },
     crate::search::TantivySearchIndex,
     crate::stats::scoring::{recency, recency_weight, reference_boost, CompositeScore, Strategy},
@@ -120,8 +121,13 @@ pub enum BenchmarkConfig {
     Bm25Heuristic(usize),
     /// BM25 with corpus-derived vocabulary enrichment + adaptive threshold.
     Bm25CorpusEnriched,
+    /// BM25 with heuristic routing + corpus enrichment (matches production default).
+    Bm25HeuristicEnriched(usize),
     /// BM25 + adaptive threshold + per-query adaptive dynamic K.
     Bm25AdaptiveDk,
+    /// BM25 boosted + adaptive threshold + intent keywords as score boost.
+    /// Applies intent boost *before* dynamic K so it influences selection.
+    Bm25IntentBoost,
 }
 
 impl BenchmarkConfig {
@@ -141,6 +147,20 @@ impl BenchmarkConfig {
         {
             let params = BoostParams::parse(params_str)?;
             return Ok(Self::Bm25BoostedCustom(params));
+        }
+
+        // Check for heuristic-enriched(N) syntax (must come before heuristic(N))
+        if let Some(threshold_str) = name
+            .strip_prefix("heuristic-enriched(")
+            .and_then(|s| s.strip_suffix(')'))
+        {
+            let threshold: usize = threshold_str.trim().parse().map_err(|_| {
+                crate::GroveError::config(format!(
+                    "Invalid heuristic-enriched threshold '{}': expected a number",
+                    threshold_str
+                ))
+            })?;
+            return Ok(Self::Bm25HeuristicEnriched(threshold));
         }
 
         // Check for heuristic(N) syntax
@@ -167,11 +187,14 @@ impl BenchmarkConfig {
             "flat-recency" => Ok(Self::Bm25FlatRecency),
             "heuristic" => Ok(Self::Bm25Heuristic(50)),
             "corpus-enriched" => Ok(Self::Bm25CorpusEnriched),
+            "heuristic-enriched" => Ok(Self::Bm25HeuristicEnriched(50)),
             "adaptive-dk" => Ok(Self::Bm25AdaptiveDk),
+            "intent-boost" => Ok(Self::Bm25IntentBoost),
             _ => Err(crate::GroveError::config(format!(
                 "Unknown benchmark config: '{}'. Valid: bm25, adaptive, intent-filter, \
                  boosted-adaptive, adaptive-rerank, boosted-adaptive-rerank, flat-recency, \
-                 heuristic, heuristic(N), corpus-enriched, adaptive-dk, boosted(kw=F,tag=F,dk=F)",
+                 heuristic, heuristic(N), corpus-enriched, heuristic-enriched, \
+                 heuristic-enriched(N), adaptive-dk, intent-boost, boosted(kw=F,tag=F,dk=F)",
                 name
             ))),
         }
@@ -190,7 +213,11 @@ impl BenchmarkConfig {
             Self::Bm25BoostedCustom(params) => params.name.clone(),
             Self::Bm25Heuristic(threshold) => format!("heuristic({})", threshold),
             Self::Bm25CorpusEnriched => "corpus-enriched".to_string(),
+            Self::Bm25HeuristicEnriched(threshold) => {
+                format!("heuristic-enriched({})", threshold)
+            }
             Self::Bm25AdaptiveDk => "adaptive-dk".to_string(),
+            Self::Bm25IntentBoost => "intent-boost".to_string(),
         }
     }
 
@@ -211,6 +238,7 @@ impl BenchmarkConfig {
             Self::Bm25BoostedAdaptive
                 | Self::Bm25BoostedAdaptiveRerank
                 | Self::Bm25BoostedCustom(_)
+                | Self::Bm25IntentBoost
         )
     }
 
@@ -240,7 +268,7 @@ impl BenchmarkConfig {
     #[cfg(feature = "tantivy-search")]
     fn heuristic_threshold(&self) -> Option<usize> {
         match self {
-            Self::Bm25Heuristic(t) => Some(*t),
+            Self::Bm25Heuristic(t) | Self::Bm25HeuristicEnriched(t) => Some(*t),
             _ => None,
         }
     }
@@ -248,13 +276,22 @@ impl BenchmarkConfig {
     /// Whether this config uses corpus vocabulary enrichment.
     #[cfg(feature = "tantivy-search")]
     fn uses_corpus_enrichment(&self) -> bool {
-        matches!(self, Self::Bm25CorpusEnriched)
+        matches!(
+            self,
+            Self::Bm25CorpusEnriched | Self::Bm25HeuristicEnriched(_)
+        )
     }
 
     /// Whether this config uses per-query adaptive dynamic K.
     #[cfg(feature = "tantivy-search")]
     fn uses_adaptive_dk(&self) -> bool {
         matches!(self, Self::Bm25AdaptiveDk)
+    }
+
+    /// Whether this config uses intent keywords as a score boost.
+    #[cfg(feature = "tantivy-search")]
+    fn uses_intent_boost(&self) -> bool {
+        matches!(self, Self::Bm25IntentBoost)
     }
 }
 
@@ -453,7 +490,34 @@ fn surface_learnings(
                     sessions_suppressed += 1;
                     continue;
                 }
-                Some(passed) => {
+                Some(mut passed) => {
+                    // Intent boost: apply *before* dynamic K so boosted items
+                    // influence which results survive the top-N cut.
+                    if config.uses_intent_boost() {
+                        let transcript_path = transcript_dir.join(&ctx.session_file);
+                        let intent_keywords =
+                            extract_user_intent_keywords(&transcript_path, max_user_keywords);
+                        if !intent_keywords.is_empty() {
+                            for cs in &mut passed {
+                                let ratio = intent_overlap_ratio(
+                                    &cs.learning.summary,
+                                    &cs.learning.detail,
+                                    &intent_keywords,
+                                );
+                                // Additive tiebreaker: add a small fraction of the
+                                // score gap between this item and the min. This avoids
+                                // large reorderings while preferring intent-matching
+                                // results among items with similar scores.
+                                cs.score += 0.1 * ratio;
+                            }
+                            passed.sort_by(|a, b| {
+                                b.score
+                                    .partial_cmp(&a.score)
+                                    .unwrap_or(std::cmp::Ordering::Equal)
+                            });
+                        }
+                    }
+
                     let dk = if config.uses_adaptive_dk() {
                         let score_values: Vec<f64> = passed.iter().map(|s| s.score).collect();
                         crate::hooks::adaptive_dk_ratio(
@@ -913,18 +977,9 @@ pub fn run_benchmark(
     ))
 }
 
-/// Truncate a string to at most `max_bytes` bytes without splitting UTF-8.
+/// Re-use the canonical truncate_str from the llm module.
 #[cfg(feature = "tantivy-search")]
-fn truncate_str(s: &str, max_bytes: usize) -> &str {
-    if s.len() <= max_bytes {
-        return s;
-    }
-    let mut end = max_bytes;
-    while end > 0 && !s.is_char_boundary(end) {
-        end -= 1;
-    }
-    &s[..end]
-}
+use crate::llm::truncate_str;
 
 #[cfg(test)]
 mod tests {
@@ -943,6 +998,7 @@ mod tests {
             ("heuristic", "heuristic(50)"),
             ("corpus-enriched", "corpus-enriched"),
             ("adaptive-dk", "adaptive-dk"),
+            ("intent-boost", "intent-boost"),
         ];
         for (input, expected_name) in cases {
             let config = BenchmarkConfig::from_name(input).unwrap();
@@ -983,6 +1039,10 @@ mod tests {
         assert!(
             msg.contains("boosted(kw=F,tag=F,dk=F)"),
             "Should list parameterized syntax: {msg}"
+        );
+        assert!(
+            msg.contains("intent-boost"),
+            "Should list intent-boost: {msg}"
         );
     }
 
@@ -1091,5 +1151,45 @@ mod tests {
     fn corpus_enriched_parses() {
         let config = BenchmarkConfig::from_name("corpus-enriched").unwrap();
         assert_eq!(config.name(), "corpus-enriched");
+    }
+
+    #[test]
+    fn heuristic_enriched_default_threshold_is_50() {
+        let config = BenchmarkConfig::from_name("heuristic-enriched").unwrap();
+        assert_eq!(config.name(), "heuristic-enriched(50)");
+        if let BenchmarkConfig::Bm25HeuristicEnriched(t) = config {
+            assert_eq!(t, 50);
+        } else {
+            panic!("Expected Bm25HeuristicEnriched");
+        }
+    }
+
+    #[test]
+    fn heuristic_enriched_custom_threshold() {
+        let config = BenchmarkConfig::from_name("heuristic-enriched(40)").unwrap();
+        assert_eq!(config.name(), "heuristic-enriched(40)");
+        if let BenchmarkConfig::Bm25HeuristicEnriched(t) = config {
+            assert_eq!(t, 40);
+        } else {
+            panic!("Expected Bm25HeuristicEnriched");
+        }
+    }
+
+    #[test]
+    fn heuristic_enriched_invalid_threshold_errors() {
+        assert!(BenchmarkConfig::from_name("heuristic-enriched(abc)").is_err());
+    }
+
+    #[test]
+    fn intent_boost_parses() {
+        let config = BenchmarkConfig::from_name("intent-boost").unwrap();
+        assert_eq!(config.name(), "intent-boost");
+    }
+
+    #[cfg(feature = "tantivy-search")]
+    #[test]
+    fn intent_boost_uses_intent_boost() {
+        let config = BenchmarkConfig::from_name("intent-boost").unwrap();
+        assert!(config.uses_intent_boost());
     }
 }

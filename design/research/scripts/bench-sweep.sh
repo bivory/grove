@@ -31,7 +31,7 @@ COMMIT="$(git -C "${REPO_ROOT}" rev-parse --short HEAD)"
 
 # Configs
 BASELINE_CONFIGS="bm25,boosted-adaptive"
-NEW_CONFIGS="heuristic,corpus-enriched"
+NEW_CONFIGS="heuristic,corpus-enriched,heuristic-enriched,intent-boost"
 ALL_CONFIGS="${BASELINE_CONFIGS},${NEW_CONFIGS}"
 
 # Defaults
@@ -176,6 +176,8 @@ cat > "${OUT_DIR}/metadata.txt" <<METADATA
 #   corpus-enriched   — Corpus-agnostic vocabulary enrichment.
 #                       Extracts domain terms from learning text and uses them
 #                       to bridge BM25 vocabulary gap at query time.
+#   heuristic-enriched — Heuristic routing + corpus enrichment (production default).
+#                       Combines corpus-size routing with vocabulary enrichment.
 METADATA
 
 echo ""

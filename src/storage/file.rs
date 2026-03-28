@@ -120,11 +120,14 @@ impl FileSessionStore {
 
 impl Default for FileSessionStore {
     fn default() -> Self {
-        // Default::default() should not panic per Rust conventions.
-        // Fall back to /tmp/grove/sessions if home directory unavailable.
         Self::new().unwrap_or_else(|_| {
             let fallback = std::path::PathBuf::from("/tmp/grove/sessions");
-            Self::with_dir(fallback).expect("Failed to create fallback session store in /tmp")
+            Self::with_dir(fallback).unwrap_or_else(|_| {
+                // Last resort: use a temp dir that should always be writable
+                let dir = std::env::temp_dir().join("grove-sessions");
+                Self::with_dir(dir)
+                    .expect("Failed to create session store in any writable directory")
+            })
         })
     }
 }

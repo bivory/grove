@@ -159,6 +159,16 @@ impl StatsCache {
                 stats.dismissed += 1;
             }
 
+            StatsEventType::ImplicitlyReferenced {
+                learning_id,
+                session_id: _,
+                overlap_ratio: _,
+                matched_keywords: _,
+            } => {
+                let stats = self.learnings.entry(learning_id.clone()).or_default();
+                stats.implicit_referenced += 1;
+            }
+
             StatsEventType::Corrected {
                 learning_id,
                 session_id: _,
@@ -305,17 +315,23 @@ impl StatsCache {
         let mut total_archived = 0;
         let mut total_hit_rate = 0.0;
         let mut hit_rate_count = 0;
+        let mut total_implicit_referenced: u32 = 0;
 
         for stats in self.learnings.values_mut() {
             // Compute hit rate for this learning, clamped to [0.0, 1.0]
+            // Implicit references count at half weight since detection is less certain.
             // Referenced can exceed surfaced if events are processed out of order
             // or if there are duplicate reference events
             if stats.surfaced > 0 {
-                let raw_rate = stats.referenced as f64 / stats.surfaced as f64;
+                let effective_refs =
+                    stats.referenced as f64 + (stats.implicit_referenced as f64 * 0.5);
+                let raw_rate = effective_refs / stats.surfaced as f64;
                 stats.hit_rate = raw_rate.clamp(0.0, 1.0);
                 total_hit_rate += stats.hit_rate;
                 hit_rate_count += 1;
             }
+
+            total_implicit_referenced += stats.implicit_referenced;
 
             if stats.archived {
                 total_archived += 1;
@@ -347,6 +363,7 @@ impl StatsCache {
             0.0
         };
         self.aggregates.cross_pollination_count = self.cross_pollination.len();
+        self.aggregates.total_implicit_referenced = total_implicit_referenced;
     }
 
     /// Check if the cache is stale compared to the log.
@@ -482,11 +499,14 @@ pub struct LearningStats {
     pub surfaced: u32,
     /// Number of times referenced.
     pub referenced: u32,
+    /// Number of times implicitly referenced (detected via keyword overlap).
+    #[serde(default)]
+    pub implicit_referenced: u32,
     /// Number of times dismissed.
     pub dismissed: u32,
     /// Number of times corrected.
     pub corrected: u32,
-    /// Hit rate (referenced / surfaced).
+    /// Hit rate (referenced / surfaced), includes implicit refs at half weight.
     pub hit_rate: f64,
     /// Last time surfaced.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -584,6 +604,9 @@ pub struct AggregateStats {
     pub average_hit_rate: f64,
     /// Number of cross-pollination events.
     pub cross_pollination_count: usize,
+    /// Total implicit references across all learnings.
+    #[serde(default)]
+    pub total_implicit_referenced: u32,
     /// Stats by category.
     pub by_category: HashMap<LearningCategory, CategoryStats>,
     /// Stats by scope.
@@ -936,6 +959,68 @@ mod tests {
             stats.hit_rate
         );
         assert!((stats.hit_rate - 1.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_implicit_referenced_count() {
+        let events = vec![
+            surfaced_event("L001", "s1"),
+            surfaced_event("L001", "s2"),
+            StatsEvent::new(StatsEventType::ImplicitlyReferenced {
+                learning_id: "L001".to_string(),
+                session_id: "s1".to_string(),
+                overlap_ratio: 0.3,
+                matched_keywords: vec!["database".to_string()],
+            }),
+        ];
+
+        let cache = StatsCache::from_events(&events);
+        let stats = cache.learnings.get("L001").unwrap();
+        assert_eq!(stats.implicit_referenced, 1);
+        assert_eq!(stats.referenced, 0);
+    }
+
+    #[test]
+    fn test_implicit_referenced_half_weight_hit_rate() {
+        let events = vec![
+            surfaced_event("L001", "s1"),
+            surfaced_event("L001", "s2"),
+            StatsEvent::new(StatsEventType::ImplicitlyReferenced {
+                learning_id: "L001".to_string(),
+                session_id: "s1".to_string(),
+                overlap_ratio: 0.3,
+                matched_keywords: vec!["database".to_string(), "indexing".to_string()],
+            }),
+        ];
+
+        let cache = StatsCache::from_events(&events);
+        let stats = cache.learnings.get("L001").unwrap();
+        // 0 explicit + 1 implicit * 0.5 = 0.5 effective refs
+        // 0.5 / 2 surfaced = 0.25 hit_rate
+        assert!((stats.hit_rate - 0.25).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_implicit_and_explicit_refs_combined_hit_rate() {
+        let events = vec![
+            surfaced_event("L001", "s1"),
+            surfaced_event("L001", "s2"),
+            surfaced_event("L001", "s3"),
+            surfaced_event("L001", "s4"),
+            referenced_event("L001", "s1", None),
+            StatsEvent::new(StatsEventType::ImplicitlyReferenced {
+                learning_id: "L001".to_string(),
+                session_id: "s2".to_string(),
+                overlap_ratio: 0.3,
+                matched_keywords: vec!["test".to_string()],
+            }),
+        ];
+
+        let cache = StatsCache::from_events(&events);
+        let stats = cache.learnings.get("L001").unwrap();
+        // 1 explicit + 1 implicit * 0.5 = 1.5 effective refs
+        // 1.5 / 4 surfaced = 0.375 hit_rate
+        assert!((stats.hit_rate - 0.375).abs() < f64::EPSILON);
     }
 
     #[test]

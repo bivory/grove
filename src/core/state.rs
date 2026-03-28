@@ -25,7 +25,8 @@ pub struct SessionState {
     /// Gate state for this session.
     pub gate: GateState,
     /// DEPRECATED: Use session.gate.ticket instead. This field is kept for
-    /// backwards compatibility during serialization but should not be accessed directly.
+    /// backwards compatibility during deserialization but should not be accessed directly.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ticket: Option<TicketContext>,
     /// Trace events for debugging.
     pub trace: Vec<TraceEvent>,
@@ -502,6 +503,11 @@ impl InjectedLearning {
         self.outcome = InjectionOutcome::Dismissed;
     }
 
+    /// Mark as implicitly referenced (detected via keyword overlap).
+    pub fn mark_implicitly_referenced(&mut self) {
+        self.outcome = InjectionOutcome::ImplicitlyReferenced;
+    }
+
     /// Mark as corrected.
     pub fn mark_corrected(&mut self) {
         self.outcome = InjectionOutcome::Corrected;
@@ -517,6 +523,8 @@ pub enum InjectionOutcome {
     Pending,
     /// Learning was referenced during the session.
     Referenced,
+    /// Learning was implicitly referenced (detected via keyword overlap with assistant message).
+    ImplicitlyReferenced,
     /// Learning was not used.
     Dismissed,
     /// Learning was corrected (superseded).
@@ -804,6 +812,7 @@ mod tests {
         let outcomes = vec![
             InjectionOutcome::Pending,
             InjectionOutcome::Referenced,
+            InjectionOutcome::ImplicitlyReferenced,
             InjectionOutcome::Dismissed,
             InjectionOutcome::Corrected,
         ];

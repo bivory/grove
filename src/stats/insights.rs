@@ -871,6 +871,7 @@ mod tests {
         LearningStats {
             surfaced: 0,
             referenced: 0,
+            implicit_referenced: 0,
             // Default to 3 to meet min_dismissals_for_decay threshold for decay tests
             dismissed: 3,
             corrected: 0,

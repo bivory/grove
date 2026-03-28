@@ -26,16 +26,6 @@ impl FallbackBackend {
     pub fn new(primary: Box<dyn MemoryBackend>, fallback: Box<dyn MemoryBackend>) -> Self {
         Self { primary, fallback }
     }
-
-    /// Get the primary backend name.
-    pub fn primary_name(&self) -> &'static str {
-        self.primary.name()
-    }
-
-    /// Get the fallback backend name.
-    pub fn fallback_name(&self) -> &'static str {
-        self.fallback.name()
-    }
 }
 
 impl MemoryBackend for FallbackBackend {
@@ -153,7 +143,7 @@ impl MemoryBackend for FallbackBackend {
         if let Some((prefix, counter)) = parse_learning_id(&start_id) {
             let mut ids = Vec::with_capacity(count);
             for i in 0..count {
-                ids.push(format!("{}_{:03}", prefix, counter + i as u32));
+                ids.push(format!("{}{:03}", prefix, counter + i as u32));
             }
             ids
         } else {
@@ -181,16 +171,12 @@ impl MemoryBackend for FallbackBackend {
     }
 }
 
-/// Parse a learning ID into its prefix and counter.
-/// Format: cl_YYYYMMDD_NNN -> ("cl_YYYYMMDD", NNN)
+/// Parse a learning ID into its prefix (including trailing underscore) and counter.
+/// Format: cl_YYYYMMDD_NNN -> ("cl_YYYYMMDD_", NNN)
 fn parse_learning_id(id: &str) -> Option<(String, u32)> {
-    // Split on the last underscore to get prefix and counter
-    let parts: Vec<&str> = id.rsplitn(2, '_').collect();
-    if parts.len() != 2 {
-        return None;
-    }
-    let counter_str = parts[0];
-    let prefix = parts[1];
+    let underscore_pos = id.rfind('_')?;
+    let counter_str = &id[underscore_pos + 1..];
+    let prefix = &id[..=underscore_pos]; // includes the trailing underscore
     let counter = counter_str.parse::<u32>().ok()?;
     Some((prefix.to_string(), counter))
 }
@@ -342,21 +328,21 @@ mod tests {
     #[test]
     fn test_parse_learning_id_valid() {
         let (prefix, counter) = parse_learning_id("cl_20260212_005").unwrap();
-        assert_eq!(prefix, "cl_20260212");
+        assert_eq!(prefix, "cl_20260212_");
         assert_eq!(counter, 5);
     }
 
     #[test]
     fn test_parse_learning_id_zero_padded() {
         let (prefix, counter) = parse_learning_id("cl_20260212_000").unwrap();
-        assert_eq!(prefix, "cl_20260212");
+        assert_eq!(prefix, "cl_20260212_");
         assert_eq!(counter, 0);
     }
 
     #[test]
     fn test_parse_learning_id_large_counter() {
         let (prefix, counter) = parse_learning_id("cl_20260212_999").unwrap();
-        assert_eq!(prefix, "cl_20260212");
+        assert_eq!(prefix, "cl_20260212_");
         assert_eq!(counter, 999);
     }
 

@@ -7,7 +7,7 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-use crate::config::{project_stats_log_path, Config};
+use crate::config::project_stats_log_path;
 use crate::core::{EventType, GateStatus, SessionState, SkipDecider, SkipDecision};
 use crate::error::{FailOpen, Result};
 use crate::stats::StatsLogger;
@@ -80,14 +80,12 @@ impl SkipOutput {
 /// The skip command implementation.
 pub struct SkipCommand<S: SessionStore> {
     store: S,
-    #[allow(dead_code)]
-    config: Config,
 }
 
 impl<S: SessionStore> SkipCommand<S> {
     /// Create a new skip command.
-    pub fn new(store: S, config: Config) -> Self {
-        Self { store, config }
+    pub fn new(store: S) -> Self {
+        Self { store }
     }
 
     /// Run the skip command with the given reason.
@@ -219,13 +217,12 @@ mod tests {
     #[test]
     fn test_skip_basic() {
         let store = setup();
-        let config = Config::default();
 
         // Create initial session
         let session = SessionState::new("test-session", "/tmp", "/tmp/transcript.json");
         store.put(&session).unwrap();
 
-        let cmd = SkipCommand::new(Arc::clone(&store), config);
+        let cmd = SkipCommand::new(Arc::clone(&store));
         let options = SkipOptions::default();
 
         let output = cmd.run("test-session", "trivial change", &options);
@@ -247,12 +244,11 @@ mod tests {
     #[test]
     fn test_skip_with_agent_decider() {
         let store = setup();
-        let config = Config::default();
 
         let session = SessionState::new("test-session", "/tmp", "/tmp/transcript.json");
         store.put(&session).unwrap();
 
-        let cmd = SkipCommand::new(Arc::clone(&store), config);
+        let cmd = SkipCommand::new(Arc::clone(&store));
         let options = SkipOptions {
             decider: Some(SkipDecider::Agent),
             lines_changed: Some(3),
@@ -273,12 +269,11 @@ mod tests {
     #[test]
     fn test_skip_with_auto_threshold() {
         let store = setup();
-        let config = Config::default();
 
         let session = SessionState::new("test-session", "/tmp", "/tmp/transcript.json");
         store.put(&session).unwrap();
 
-        let cmd = SkipCommand::new(Arc::clone(&store), config);
+        let cmd = SkipCommand::new(Arc::clone(&store));
         let options = SkipOptions {
             decider: Some(SkipDecider::AutoThreshold),
             lines_changed: Some(2),
@@ -294,13 +289,12 @@ mod tests {
     #[test]
     fn test_skip_fails_if_already_reflected() {
         let store = setup();
-        let config = Config::default();
 
         let mut session = SessionState::new("test-session", "/tmp", "/tmp/transcript.json");
         session.gate.status = GateStatus::Reflected;
         store.put(&session).unwrap();
 
-        let cmd = SkipCommand::new(store, config);
+        let cmd = SkipCommand::new(store);
         let options = SkipOptions::default();
 
         let output = cmd.run("test-session", "want to skip", &options);
@@ -312,13 +306,12 @@ mod tests {
     #[test]
     fn test_skip_fails_if_already_skipped() {
         let store = setup();
-        let config = Config::default();
 
         let mut session = SessionState::new("test-session", "/tmp", "/tmp/transcript.json");
         session.gate.status = GateStatus::Skipped;
         store.put(&session).unwrap();
 
-        let cmd = SkipCommand::new(store, config);
+        let cmd = SkipCommand::new(store);
         let options = SkipOptions::default();
 
         let output = cmd.run("test-session", "skip again", &options);
@@ -330,10 +323,9 @@ mod tests {
     #[test]
     fn test_skip_creates_session_if_not_found() {
         let store = setup();
-        let config = Config::default();
 
         // Don't create session first
-        let cmd = SkipCommand::new(Arc::clone(&store), config);
+        let cmd = SkipCommand::new(Arc::clone(&store));
         let options = SkipOptions::default();
 
         let output = cmd.run("new-session", "no session exists", &options);
@@ -345,12 +337,11 @@ mod tests {
     #[test]
     fn test_skip_with_input() {
         let store = setup();
-        let config = Config::default();
 
         let session = SessionState::new("test-session", "/tmp", "/tmp/transcript.json");
         store.put(&session).unwrap();
 
-        let cmd = SkipCommand::new(Arc::clone(&store), config);
+        let cmd = SkipCommand::new(Arc::clone(&store));
 
         let input = SkipInput {
             session_id: "test-session".to_string(),
@@ -374,8 +365,8 @@ mod tests {
     #[test]
     fn test_format_output_json() {
         let store = setup();
-        let config = Config::default();
-        let cmd = SkipCommand::new(store, config);
+
+        let cmd = SkipCommand::new(store);
 
         let output = SkipOutput::success("test reason", SkipDecider::User);
         let options = SkipOptions {
@@ -391,8 +382,8 @@ mod tests {
     #[test]
     fn test_format_output_quiet() {
         let store = setup();
-        let config = Config::default();
-        let cmd = SkipCommand::new(store, config);
+
+        let cmd = SkipCommand::new(store);
 
         let output = SkipOutput::success("test reason", SkipDecider::User);
         let options = SkipOptions {
@@ -407,8 +398,8 @@ mod tests {
     #[test]
     fn test_format_output_human_readable() {
         let store = setup();
-        let config = Config::default();
-        let cmd = SkipCommand::new(store, config);
+
+        let cmd = SkipCommand::new(store);
 
         let output = SkipOutput::success("trivial change", SkipDecider::Agent);
         let options = SkipOptions::default();
@@ -421,12 +412,11 @@ mod tests {
     #[test]
     fn test_skip_adds_trace_event() {
         let store = setup();
-        let config = Config::default();
 
         let session = SessionState::new("test-session", "/tmp", "/tmp/transcript.json");
         store.put(&session).unwrap();
 
-        let cmd = SkipCommand::new(Arc::clone(&store), config);
+        let cmd = SkipCommand::new(Arc::clone(&store));
         let options = SkipOptions::default();
 
         cmd.run("test-session", "trace test", &options);
@@ -449,8 +439,8 @@ mod tests {
     #[test]
     fn test_skip_rejects_empty_reason() {
         let store = setup();
-        let config = Config::default();
-        let cmd = SkipCommand::new(store, config);
+
+        let cmd = SkipCommand::new(store);
         let options = SkipOptions::default();
 
         // Empty string

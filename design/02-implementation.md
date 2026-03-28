@@ -12,13 +12,17 @@ grove/
 ├── src/
 │   ├── lib.rs                 # Library root
 │   ├── main.rs                # CLI entry point (clap-based)
+│   ├── util.rs                # Shared utilities (file size limits, truncation)
 │   │
 │   ├── core/
 │   │   ├── mod.rs
 │   │   ├── state.rs           # SessionState, GateState, GateStatus
 │   │   ├── gate.rs            # Gate state machine, skip evaluation
 │   │   ├── reflect.rs         # Reflection parsing, write gate filter
-│   │   └── learning.rs        # CompoundLearning, LearningCategory
+│   │   ├── learning.rs        # CompoundLearning, LearningCategory
+│   │   ├── quality.rs         # Specificity scoring (NED, PSTF, generic phrases)
+│   │   ├── judge.rs           # LLM judge for borderline learnings
+│   │   └── embeddings.rs      # Cosine similarity for semantic dedup
 │   │
 │   ├── discovery/
 │   │   ├── mod.rs
@@ -29,15 +33,18 @@ grove/
 │   │   ├── mod.rs
 │   │   ├── traits.rs          # MemoryBackend trait
 │   │   ├── markdown.rs        # Built-in append-only markdown
-│   │   └── total_recall.rs    # Total Recall adapter
+│   │   ├── total_recall.rs    # Total Recall adapter
+│   │   ├── total_recall_format.rs  # Total Recall format helpers
+│   │   └── fallback.rs        # Fallback backend (primary + secondary)
 │   │
 │   ├── stats/
 │   │   ├── mod.rs
-│   │   ├── tracker.rs         # Per-learning usage tracking
+│   │   ├── tracker.rs         # JSONL event log writer (12 event types)
+│   │   ├── cache.rs           # Materialized stats cache from event log
 │   │   ├── decay.rs           # Passive decay evaluation
 │   │   ├── scoring.rs         # Retrieval composite scoring
-│   │   ├── insights.rs        # Pattern detection, recommendations
-│   │   └── skip.rs            # Skip decision tracking
+│   │   ├── insights.rs        # Pattern detection, tuning suggestions
+│   │   └── recommendations.rs # Config recommendations from stats
 │   │
 │   ├── storage/
 │   │   ├── mod.rs
@@ -49,7 +56,8 @@ grove/
 │   │   ├── mod.rs
 │   │   ├── input.rs           # HookInput deserialization
 │   │   ├── output.rs          # HookOutput serialization
-│   │   └── runner.rs          # Hook dispatch
+│   │   ├── runner.rs          # Hook dispatch, retrieval, scoring
+│   │   └── replay_harness.rs  # Replay harness for evaluation
 │   │
 │   ├── eval/
 │   │   ├── mod.rs             # Offline evaluation harness
@@ -58,26 +66,36 @@ grove/
 │   │   ├── metrics.rs         # Metrics aggregation and formatting
 │   │   └── runner.rs          # Benchmark orchestration
 │   │
+│   ├── search/
+│   │   ├── mod.rs             # Feature-gated search module
+│   │   └── tantivy_backend.rs # Tantivy BM25 full-text search
+│   │
+│   ├── llm/
+│   │   ├── mod.rs             # Shared LLM call infrastructure
+│   │   └── batch.rs           # Batch API support
+│   │
 │   ├── cli/
 │   │   ├── mod.rs
-│   │   ├── hook.rs            # hook command (runner)
 │   │   ├── reflect.rs         # reflect command
 │   │   ├── skip.rs            # skip command
+│   │   ├── ref_cmd.rs         # ref command (record references)
+│   │   ├── observe.rs         # observe command (subagent logging)
 │   │   ├── search.rs          # search command
 │   │   ├── list.rs            # list command
 │   │   ├── stats.rs           # stats command (dashboard)
-│   │   ├── maintain.rs        # maintain command
+│   │   ├── maintain.rs        # maintain command (archive/restore)
+│   │   ├── consolidate.rs    # consolidate command (LLM-powered merge/staleness)
 │   │   ├── init.rs            # init command (scaffold)
 │   │   ├── backends_cmd.rs    # backends command
 │   │   ├── tickets_cmd.rs     # tickets command
-│   │   ├── observe.rs         # observe command (subagent logging)
 │   │   ├── sessions.rs        # sessions command (list sessions)
 │   │   ├── debug.rs           # debug command
 │   │   ├── trace.rs           # trace command
 │   │   ├── clean.rs           # clean command
-│   │   └── retroflect.rs      # retroflect command (retroactive reflection)
+│   │   ├── review.rs          # review command (quality rating)
+│   │   ├── retroflect.rs      # retroflect command (retroactive reflection)
+│   │   └── eval.rs            # eval command (benchmarks)
 │   │
-│   ├── llm.rs                 # Shared LLM call infrastructure (CLI + API)
 │   ├── config.rs              # Configuration loading
 │   └── error.rs               # Error types
 │
@@ -176,14 +194,14 @@ grove/
 |------|--------|-------------|
 | `StatsEvent` | `stats/tracker` | Single JSONL event entry with `v: u8` version field |
 | `StatsEventType` | `stats/tracker` | Enum of event types |
-| `StatsCache` | `stats/tracker` | Materialized aggregate from event log |
-| `LearningStats` | `stats/tracker` | Per-learning usage counters (derived from log) |
+| `StatsCache` | `stats/cache` | Materialized aggregate from event log |
+| `LearningStats` | `stats/cache` | Per-learning usage counters (derived from log) |
 | `InjectedLearning` | `core/state` | Tracks what was injected + outcome |
 | `InjectionOutcome` | `core/state` | Referenced/Dismissed/Corrected |
-| `ReflectionStats` | `stats/tracker` | Per-reflection event metrics (derived from log) |
-| `SkipStats` | `stats/skip` | Skip decision log entry |
-| `AggregateStats` | `stats/tracker` | Rollup totals and category breakdown |
-| `CrossPollination` | `stats/tracker` | Learning referenced outside origin ticket |
+| `ReflectionStats` | `stats/cache` | Per-reflection event metrics (derived from log) |
+
+| `AggregateStats` | `stats/cache` | Rollup totals and category breakdown |
+| `CrossPollinationEdge` | `stats/cache` | Cross-ticket learning reference |
 | `Insight` | `stats/insights` | Generated tuning recommendation |
 
 `StatsEventType::Retroflect` fields:
@@ -268,8 +286,14 @@ functions.
 | Method | Description |
 |--------|-------------|
 | `write(learning) -> WriteResult` | Write learning to storage |
-| `search(query, filters) -> Vec<CompoundLearning>` | Search learnings |
+| `search(query, filters) -> Vec<SearchResult>` | Search learnings |
 | `ping() -> bool` | Health check |
+| `name() -> &str` | Get backend name for logging and stats |
+| `archive(learning_id)` | Archive a learning by ID (default: error) |
+| `restore(learning_id)` | Restore an archived learning (default: error) |
+| `list_all() -> Vec<CompoundLearning>` | List all learnings (default: empty search) |
+| `next_id() -> String` | Generate unique ID (`cl_YYYYMMDD_NNN`) |
+| `next_ids(count) -> Vec<String>` | Generate batch of unique IDs |
 
 ### 4.2 Markdown Backend
 
@@ -648,6 +672,7 @@ Fallback mechanism — may not fire reliably in all configurations.
 | `grove maintain` | `cli/maintain` | Review stale learnings, list candidates |
 | `grove maintain archive <ids>` | `cli/maintain` | Archive specific learnings by ID |
 | `grove maintain restore <ids>` | `cli/maintain` | Restore archived learnings by ID |
+| `grove maintain consolidate` | `cli/consolidate` | Group related learnings, merge via LLM, detect stale refs |
 | `grove review` | `cli/review` | Sample learnings for quality rating (feedback loop) |
 | `grove retroflect` | `cli/retroflect` | Retroactive reflection from session history |
 | `grove init` | `cli/init` | Scaffold config, learnings file, session dir |
@@ -664,6 +689,8 @@ Fallback mechanism — may not fire reliably in all configurations.
 | `grove clean --before <duration>` | `cli/clean` | Remove old session files |
 | `grove eval run` | `cli/eval` | Run benchmark, output scorecard |
 | `grove eval compare` | `cli/eval` | Run multiple configs, show comparison |
+| `grove eval dedup-audit` | `cli/eval` | Audit corpora for semantic duplicates |
+| `grove eval sweep` | `cli/eval` | Run benchmarks across all corpora in a manifest |
 
 **Note:** Debug commands are intended for development and troubleshooting only.
 They may expose internal state manipulation (e.g., `--set-gate`) that bypasses
@@ -688,6 +715,10 @@ the gate needs to be manually controlled.
 | `IntentFilterConfig` | Post-retrieval intent-based filtering |
 | `RerankConfig` | LLM reranking during deferred injection |
 | `CircuitBreakerConfig` | Max blocks, cooldown |
+| `WriteGateConfig` | Mode (strict/lenient/disabled), quality checks, LLM judge |
+| `ContextConfig` | Active ticket query, deferred injection |
+| `JudgeConfig` | LLM backend, model, API URL, cache, batch timeout |
+| `ImplicitReferencesConfig` | Implicit reference detection thresholds |
 
 ### 7.2 Config Precedence
 
@@ -701,13 +732,25 @@ the gate needs to be manually controlled.
 | Setting | Default |
 |---------|---------|
 | `ticketing.discovery` | `["tissue", "beads", "tasks", "session"]` |
-| `backends.discovery` | `["config", "total-recall", "markdown"]` |
+| `backends.discovery` | `["total-recall", "markdown"]` |
 | `gate.auto_skip.enabled` | `true` |
 | `gate.auto_skip.line_threshold` | `5` |
 | `gate.auto_skip.decider` | `"agent"` |
+| `gate.write_gate.mode` | `"strict"` |
+| `gate.write_gate.quality_check` | `"enforce"` |
+| `gate.write_gate.min_specificity_score` | `1.5` |
+| `gate.write_gate.judge_enabled` | `false` |
+| `gate.semantic_dedup.enabled` | `false` |
+| `gate.semantic_dedup.similarity_threshold` | `0.90` |
+| `gate.skip_counts_as_dismissal` | `false` |
 | `decay.passive_duration_days` | `90` |
+| `decay.immunity_hit_rate` | `0.3` |
+| `decay.min_dismissals_for_decay` | `3` |
+| `decay.category_aware` | `true` |
+| `decay.fast_track_surfacings` | `5` |
 | `retrieval.max_injections` | `5` |
 | `retrieval.strategy` | `"moderate"` |
+| `retrieval.min_pool_size` | `20` |
 | `retrieval.scoring_backend` | `"bm25"` |
 | `retrieval.corpus_enrichment` | `true` |
 | `retrieval.corpus_size_threshold` | `50` |
@@ -726,6 +769,15 @@ the gate needs to be manually controlled.
 | `retrieval.rerank.backend` | `"cli"` |
 | `circuit_breaker.max_blocks` | `3` |
 | `circuit_breaker.cooldown_seconds` | `300` |
+| `context.active_ticket_query` | `true` |
+| `context.active_ticket_timeout_ms` | `2000` |
+| `context.deferred_injection` | `true` |
+| `judge.backend` | `"cli"` |
+| `judge.model` | `"haiku"` |
+| `judge.batch_timeout` | `3600` |
+| `implicit_references.enabled` | `false` |
+| `implicit_references.min_overlap` | `0.15` |
+| `implicit_references.min_keyword_matches` | `2` |
 
 ## 8. Error Handling
 

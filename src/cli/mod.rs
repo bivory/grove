@@ -13,6 +13,7 @@ pub mod reflect;
 pub mod skip;
 
 // User commands
+pub mod consolidate;
 pub mod list;
 pub mod maintain;
 pub mod retroflect;

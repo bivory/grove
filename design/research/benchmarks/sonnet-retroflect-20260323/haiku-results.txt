@@ -1,0 +1,1862 @@
+Sweep: 3 corpora x 3 configs
+
+--- Corpus: grove ---
+  Transcripts: /Users/bryanivory/.claude/projects/-Users-bryanivory-GitHub-bryan-grove
+  Learnings:   /Users/bryanivory/GitHub/bryan/grove/.grove/learnings.md
+  Cache:       /Users/bryanivory/.grove/judge_cache_grove.json
+  Loaded 54 learnings, 33 sessions
+
+--- Corpus: pickup-rank ---
+  Transcripts: /Users/bryanivory/.claude/projects/-Users-bryanivory-GitHub-bryan-pickup-rank
+  Learnings:   /Users/bryanivory/GitHub/bryan/pickup-rank/.grove/learnings.md
+  Cache:       /Users/bryanivory/.grove/judge_cache_pickup-rank.json
+  Loaded 44 learnings, 41 sessions
+
+--- Corpus: syantra ---
+  Transcripts: /Users/bryanivory/.claude/projects/-Users-bryanivory-GitHub-Mentorhead-Syantra
+  Learnings:   /Users/bryanivory/GitHub/Mentorhead/Syantra/.grove/learnings.md
+  Cache:       /Users/bryanivory/.grove/judge_cache_syantra.json
+  Loaded 18 learnings, 75 sessions
+  Running: boosted-adaptive on grove
+
+======================================================================
+BOOSTED-ADAPTIVE — cli backend (haiku)
+======================================================================
+    score=2 composite=0.508 cl_20260317_016 | Add progress indicators and running totals to long-running b
+    score=4 composite=0.426 cl_20260317_037 | Below ~500 pages, context stuffing beats RAG; Grove's value 
+    score=5 composite=0.421 cl_20260317_048 | Use fail-open philosophy for external service calls to ensur
+    score=4 composite=0.420 cl_20260317_027 | Wire mid-session re-retrieval via UserPromptSubmit hook to c
+    score=5 composite=0.319 cl_20260317_008 | Config fields for timeout/duration settings should be u64 in
+    score=2 composite=0.508 cl_20260317_016 | Add progress indicators and running totals to long-running b
+    score=4 composite=0.411 cl_20260317_023 | Use judge cache as ground truth for multi-config eval compar
+    score=4 composite=0.342 cl_20260317_048 | Use fail-open philosophy for external service calls to ensur
+    score=4 composite=0.334 cl_20260317_037 | Below ~500 pages, context stuffing beats RAG; Grove's value 
+    score=5 composite=0.290 cl_20260317_017 | Use per-session aggregation instead of global metrics when p
+    score=2 composite=0.508 cl_20260317_016 | Add progress indicators and running totals to long-running b
+    score=1 composite=0.412 cl_20260317_048 | Use fail-open philosophy for external service calls to ensur
+    score=2 composite=0.409 cl_20260317_037 | Below ~500 pages, context stuffing beats RAG; Grove's value 
+    score=1 composite=0.293 cl_20260317_003 | Use batch mode with --all when targeting multiple projects d
+    score=2 composite=0.249 cl_20260317_000 | Anthropic Console credits and API credits are completely sep
+    score=5 composite=0.508 cl_20260317_027 | Wire mid-session re-retrieval via UserPromptSubmit hook to c
+    score=2 composite=0.382 cl_20260317_016 | Add progress indicators and running totals to long-running b
+    score=5 composite=0.316 cl_20260317_048 | Use fail-open philosophy for external service calls to ensur
+    score=4 composite=0.308 cl_20260317_037 | Below ~500 pages, context stuffing beats RAG; Grove's value 
+    score=2 composite=0.222 cl_20260317_003 | Use batch mode with --all when targeting multiple projects d
+    score=3 composite=0.508 cl_20260317_038 | Use optional indexed fields in search backends to embed retr
+    score=3 composite=0.366 cl_20260317_021 | Add explicit source/provenance markers to synthetically gene
+    score=2 composite=0.359 cl_20260317_001 | API error responses may lack nested 'type' field, allowing e
+    score=3 composite=0.352 cl_20260317_041 | Keep design documents and implementation synchronized by usi
+    score=5 composite=0.319 cl_20260317_019 | Session history cache (~1300+ JSONL files per project) is a 
+    score=2 composite=0.508 cl_20260317_016 | Add progress indicators and running totals to long-running b
+    score=4 composite=0.413 cl_20260317_037 | Below ~500 pages, context stuffing beats RAG; Grove's value 
+    score=4 composite=0.366 cl_20260317_048 | Use fail-open philosophy for external service calls to ensur
+    score=5 composite=0.318 cl_20260317_023 | Use judge cache as ground truth for multi-config eval compar
+    score=1 composite=0.271 cl_20260317_003 | Use batch mode with --all when targeting multiple projects d
+    score=5 composite=0.508 cl_20260317_016 | Add progress indicators and running totals to long-running b
+    score=5 composite=0.420 cl_20260317_003 | Use batch mode with --all when targeting multiple projects d
+    score=5 composite=0.361 cl_20260317_037 | Below ~500 pages, context stuffing beats RAG; Grove's value 
+    score=5 composite=0.344 cl_20260317_048 | Use fail-open philosophy for external service calls to ensur
+    score=5 composite=0.285 cl_20260317_034 | CLI commands should re-export subcommand modules in the pare
+    score=5 composite=0.508 cl_20260317_027 | Wire mid-session re-retrieval via UserPromptSubmit hook to c
+    score=2 composite=0.327 cl_20260317_016 | Add progress indicators and running totals to long-running b
+    score=4 composite=0.292 cl_20260317_048 | Use fail-open philosophy for external service calls to ensur
+    score=4 composite=0.250 cl_20260317_037 | Below ~500 pages, context stuffing beats RAG; Grove's value 
+    score=2 composite=0.183 cl_20260317_003 | Use batch mode with --all when targeting multiple projects d
+    score=5 composite=0.508 cl_20260317_016 | Add progress indicators and running totals to long-running b
+    score=3 composite=0.389 cl_20260317_003 | Use batch mode with --all when targeting multiple projects d
+    score=5 composite=0.372 cl_20260317_048 | Use fail-open philosophy for external service calls to ensur
+    score=4 composite=0.285 cl_20260317_000 | Anthropic Console credits and API credits are completely sep
+    score=4 composite=0.265 cl_20260317_037 | Below ~500 pages, context stuffing beats RAG; Grove's value 
+    score=3 composite=0.508 cl_20260317_016 | Add progress indicators and running totals to long-running b
+    score=5 composite=0.384 cl_20260317_037 | Below ~500 pages, context stuffing beats RAG; Grove's value 
+    score=5 composite=0.376 cl_20260317_048 | Use fail-open philosophy for external service calls to ensur
+    score=5 composite=0.347 cl_20260317_027 | Wire mid-session re-retrieval via UserPromptSubmit hook to c
+    score=1 composite=0.263 cl_20260317_003 | Use batch mode with --all when targeting multiple projects d
+    score=3 composite=0.508 cl_20260317_048 | Use fail-open philosophy for external service calls to ensur
+    score=2 composite=0.482 cl_20260317_016 | Add progress indicators and running totals to long-running b
+    score=4 composite=0.413 cl_20260317_037 | Below ~500 pages, context stuffing beats RAG; Grove's value 
+    score=4 composite=0.296 cl_20260317_021 | Add explicit source/provenance markers to synthetically gene
+    score=2 composite=0.290 cl_20260317_014 | Backend initialization paths must receive the full resource 
+    score=2 composite=0.508 cl_20260317_016 | Add progress indicators and running totals to long-running b
+    score=3 composite=0.447 cl_20260317_048 | Use fail-open philosophy for external service calls to ensur
+    score=3 composite=0.391 cl_20260317_037 | Below ~500 pages, context stuffing beats RAG; Grove's value 
+    score=1 composite=0.281 cl_20260317_003 | Use batch mode with --all when targeting multiple projects d
+    score=2 composite=0.264 cl_20260317_023 | Use judge cache as ground truth for multi-config eval compar
+    score=2 composite=0.508 cl_20260317_016 | Add progress indicators and running totals to long-running b
+    score=5 composite=0.428 cl_20260317_027 | Wire mid-session re-retrieval via UserPromptSubmit hook to c
+    score=5 composite=0.405 cl_20260317_037 | Below ~500 pages, context stuffing beats RAG; Grove's value 
+    score=5 composite=0.383 cl_20260317_048 | Use fail-open philosophy for external service calls to ensur
+    score=4 composite=0.267 cl_20260317_041 | Keep design documents and implementation synchronized by usi
+    score=3 composite=0.508 cl_20260317_037 | Below ~500 pages, context stuffing beats RAG; Grove's value 
+    score=2 composite=0.364 cl_20260317_003 | Use batch mode with --all when targeting multiple projects d
+    score=3 composite=0.508 cl_20260317_027 | Wire mid-session re-retrieval via UserPromptSubmit hook to c
+    score=5 composite=0.467 cl_20260317_019 | Session history cache (~1300+ JSONL files per project) is a 
+    score=2 composite=0.393 cl_20260317_016 | Add progress indicators and running totals to long-running b
+    score=3 composite=0.385 cl_20260317_048 | Use fail-open philosophy for external service calls to ensur
+    score=3 composite=0.292 cl_20260317_021 | Add explicit source/provenance markers to synthetically gene
+    score=2 composite=0.508 cl_20260317_016 | Add progress indicators and running totals to long-running b
+    score=2 composite=0.504 cl_20260317_027 | Wire mid-session re-retrieval via UserPromptSubmit hook to c
+    score=2 composite=0.478 cl_20260317_048 | Use fail-open philosophy for external service calls to ensur
+    score=2 composite=0.391 cl_20260317_003 | Use batch mode with --all when targeting multiple projects d
+    score=2 composite=0.350 cl_20260317_000 | Anthropic Console credits and API credits are completely sep
+    score=5 composite=0.508 cl_20260317_027 | Wire mid-session re-retrieval via UserPromptSubmit hook to c
+    score=2 composite=0.336 cl_20260317_016 | Add progress indicators and running totals to long-running b
+    score=5 composite=0.291 cl_20260317_048 | Use fail-open philosophy for external service calls to ensur
+    score=3 composite=0.275 cl_20260317_037 | Below ~500 pages, context stuffing beats RAG; Grove's value 
+    score=2 composite=0.197 cl_20260317_003 | Use batch mode with --all when targeting multiple projects d
+    score=5 composite=0.508 cl_20260317_027 | Wire mid-session re-retrieval via UserPromptSubmit hook to c
+    score=2 composite=0.446 cl_20260317_016 | Add progress indicators and running totals to long-running b
+    score=4 composite=0.335 cl_20260317_037 | Below ~500 pages, context stuffing beats RAG; Grove's value 
+    score=4 composite=0.331 cl_20260317_048 | Use fail-open philosophy for external service calls to ensur
+    score=2 composite=0.234 cl_20260317_003 | Use batch mode with --all when targeting multiple projects d
+    score=2 composite=0.508 cl_20260317_041 | Keep design documents and implementation synchronized by usi
+    score=2 composite=0.353 cl_20260317_028 | Use multi-corpus benchmark sweep with manifest and policy va
+    score=1 composite=0.324 cl_20260317_034 | CLI commands should re-export subcommand modules in the pare
+    score=2 composite=0.295 cl_20260317_009 | When batch module code integration fails, check that batch i
+    score=3 composite=0.273 cl_20260317_048 | Use fail-open philosophy for external service calls to ensur
+    score=5 composite=0.508 cl_20260317_048 | Use fail-open philosophy for external service calls to ensur
+    score=2 composite=0.451 cl_20260317_016 | Add progress indicators and running totals to long-running b
+    score=5 composite=0.351 cl_20260317_037 | Below ~500 pages, context stuffing beats RAG; Grove's value 
+    score=2 composite=0.277 cl_20260317_027 | Wire mid-session re-retrieval via UserPromptSubmit hook to c
+    score=2 composite=0.260 cl_20260317_003 | Use batch mode with --all when targeting multiple projects d
+    score=2 composite=0.508 cl_20260317_016 | Add progress indicators and running totals to long-running b
+    score=5 composite=0.399 cl_20260317_037 | Below ~500 pages, context stuffing beats RAG; Grove's value 
+    score=2 composite=0.397 cl_20260317_048 | Use fail-open philosophy for external service calls to ensur
+    score=1 composite=0.291 cl_20260317_003 | Use batch mode with --all when targeting multiple projects d
+    score=1 composite=0.230 cl_20260317_000 | Anthropic Console credits and API credits are completely sep
+    score=1 composite=0.508 cl_20260317_016 | Add progress indicators and running totals to long-running b
+    score=1 composite=0.247 cl_20260317_038 | Use optional indexed fields in search backends to embed retr
+    score=2 composite=0.247 cl_20260317_000 | Anthropic Console credits and API credits are completely sep
+    score=1 composite=0.240 cl_20260317_048 | Use fail-open philosophy for external service calls to ensur
+    score=1 composite=0.210 cl_20260317_013 | Don't skip dry-run mode checks before expensive operations l
+    score=4 composite=0.508 cl_20260317_027 | Wire mid-session re-retrieval via UserPromptSubmit hook to c
+    score=3 composite=0.372 cl_20260317_037 | Below ~500 pages, context stuffing beats RAG; Grove's value 
+    score=2 composite=0.369 cl_20260317_016 | Add progress indicators and running totals to long-running b
+    score=4 composite=0.312 cl_20260317_048 | Use fail-open philosophy for external service calls to ensur
+    score=2 composite=0.231 cl_20260317_003 | Use batch mode with --all when targeting multiple projects d
+    score=3 composite=0.508 cl_20260317_016 | Add progress indicators and running totals to long-running b
+    score=4 composite=0.410 cl_20260317_023 | Use judge cache as ground truth for multi-config eval compar
+    score=3 composite=0.388 cl_20260317_037 | Below ~500 pages, context stuffing beats RAG; Grove's value 
+    score=3 composite=0.345 cl_20260317_048 | Use fail-open philosophy for external service calls to ensur
+    score=5 composite=0.284 cl_20260317_017 | Use per-session aggregation instead of global metrics when p
+    score=1 composite=0.508 cl_20260317_033 | When unused import warnings appear only without a feature fl
+    score=2 composite=0.382 cl_20260317_030 | Use feature flags to gate complex subsystems and allow shipp
+    score=2 composite=0.334 cl_20260317_019 | Session history cache (~1300+ JSONL files per project) is a 
+    score=1 composite=0.286 cl_20260317_052 | For opt-in features, use default=false in config and require
+    score=3 composite=0.205 cl_20260317_021 | Add explicit source/provenance markers to synthetically gene
+    score=1 composite=0.508 cl_20260317_016 | Add progress indicators and running totals to long-running b
+    score=5 composite=0.386 cl_20260317_037 | Below ~500 pages, context stuffing beats RAG; Grove's value 
+    score=3 composite=0.373 cl_20260317_048 | Use fail-open philosophy for external service calls to ensur
+    score=1 composite=0.285 cl_20260317_003 | Use batch mode with --all when targeting multiple projects d
+    score=5 composite=0.263 cl_20260317_027 | Wire mid-session re-retrieval via UserPromptSubmit hook to c
+    score=5 composite=0.508 cl_20260317_016 | Add progress indicators and running totals to long-running b
+    score=4 composite=0.390 cl_20260317_003 | Use batch mode with --all when targeting multiple projects d
+    score=5 composite=0.305 cl_20260317_048 | Use fail-open philosophy for external service calls to ensur
+    score=4 composite=0.260 cl_20260317_037 | Below ~500 pages, context stuffing beats RAG; Grove's value 
+    score=4 composite=0.254 cl_20260317_034 | CLI commands should re-export subcommand modules in the pare
+    score=5 composite=0.508 cl_20260317_016 | Add progress indicators and running totals to long-running b
+    score=5 composite=0.415 cl_20260317_003 | Use batch mode with --all when targeting multiple projects d
+    score=5 composite=0.371 cl_20260317_048 | Use fail-open philosophy for external service calls to ensur
+    score=4 composite=0.329 cl_20260317_037 | Below ~500 pages, context stuffing beats RAG; Grove's value 
+    score=5 composite=0.257 cl_20260317_009 | When batch module code integration fails, check that batch i
+    score=4 composite=0.508 cl_20260317_041 | Keep design documents and implementation synchronized by usi
+    score=2 composite=0.494 cl_20260317_027 | Wire mid-session re-retrieval via UserPromptSubmit hook to c
+    score=1 composite=0.308 cl_20260317_029 | Implement LLM reranking in deferred injection to refine lear
+    score=2 composite=0.291 cl_20260317_019 | Session history cache (~1300+ JSONL files per project) is a 
+    score=1 composite=0.245 cl_20260317_020 | Broken path encoding (/, ., _ all→-) makes session UUID re
+    score=2 composite=0.508 cl_20260317_016 | Add progress indicators and running totals to long-running b
+    score=5 composite=0.467 cl_20260317_023 | Use judge cache as ground truth for multi-config eval compar
+    score=3 composite=0.405 cl_20260317_037 | Below ~500 pages, context stuffing beats RAG; Grove's value 
+    score=5 composite=0.365 cl_20260317_017 | Use per-session aggregation instead of global metrics when p
+    score=3 composite=0.334 cl_20260317_048 | Use fail-open philosophy for external service calls to ensur
+    score=2 composite=0.508 cl_20260317_016 | Add progress indicators and running totals to long-running b
+    score=4 composite=0.393 cl_20260317_048 | Use fail-open philosophy for external service calls to ensur
+    score=5 composite=0.388 cl_20260317_037 | Below ~500 pages, context stuffing beats RAG; Grove's value 
+    score=5 composite=0.325 cl_20260317_027 | Wire mid-session re-retrieval via UserPromptSubmit hook to c
+    score=2 composite=0.284 cl_20260317_003 | Use batch mode with --all when targeting multiple projects d
+  Running: heuristic-enriched(50) on grove
+
+======================================================================
+HEURISTIC-ENRICHED(50) — cli backend (haiku)
+======================================================================
+    score=2 composite=0.508 cl_20260317_014 | Backend initialization paths must receive the full resource 
+    score=5 composite=0.347 cl_20260317_008 | Config fields for timeout/duration settings should be u64 in
+    score=4 composite=0.321 cl_20260317_027 | Wire mid-session re-retrieval via UserPromptSubmit hook to c
+    score=5 composite=0.191 cl_20260317_052 | For opt-in features, use default=false in config and require
+    score=2 composite=0.177 cl_20260317_023 | Use judge cache as ground truth for multi-config eval compar
+    score=4 composite=0.508 cl_20260317_023 | Use judge cache as ground truth for multi-config eval compar
+    score=5 composite=0.382 cl_20260317_017 | Use per-session aggregation instead of global metrics when p
+    score=4 composite=0.362 cl_20260317_024 | Per-position metrics (P@K) require per-session computation t
+    score=4 composite=0.328 cl_20260317_008 | Config fields for timeout/duration settings should be u64 in
+    score=4 composite=0.284 cl_20260317_037 | Below ~500 pages, context stuffing beats RAG; Grove's value 
+    score=1 composite=0.508 cl_20260317_001 | API error responses may lack nested 'type' field, allowing e
+    score=1 composite=0.464 cl_20260317_010 | Hardcoded max_tokens limits in LLM calls truncate structured
+    score=2 composite=0.453 cl_20260317_037 | Below ~500 pages, context stuffing beats RAG; Grove's value 
+    score=1 composite=0.325 cl_20260317_003 | Use batch mode with --all when targeting multiple projects d
+    score=5 composite=0.508 cl_20260317_025 | Use intent keyword extraction as a post-retrieval filter to 
+    score=4 composite=0.397 cl_20260317_008 | Config fields for timeout/duration settings should be u64 in
+    score=4 composite=0.378 cl_20260317_037 | Below ~500 pages, context stuffing beats RAG; Grove's value 
+    score=2 composite=0.323 cl_20260317_031 | Extract test-only infrastructure from monolithic harnesses i
+    score=2 composite=0.317 cl_20260317_038 | Use optional indexed fields in search backends to embed retr
+    score=3 composite=0.508 cl_20260317_038 | Use optional indexed fields in search backends to embed retr
+    score=2 composite=0.375 cl_20260317_001 | API error responses may lack nested 'type' field, allowing e
+    score=3 composite=0.346 cl_20260317_041 | Keep design documents and implementation synchronized by usi
+    score=2 composite=0.299 cl_20260317_008 | Config fields for timeout/duration settings should be u64 in
+    score=3 composite=0.280 cl_20260317_021 | Add explicit source/provenance markers to synthetically gene
+    score=4 composite=0.508 cl_20260317_037 | Below ~500 pages, context stuffing beats RAG; Grove's value 
+    score=4 composite=0.464 cl_20260317_039 | Query expansion defeats adaptive threshold calibration — a
+    score=5 composite=0.445 cl_20260317_025 | Use intent keyword extraction as a post-retrieval filter to 
+    score=5 composite=0.434 cl_20260317_040 | Single-corpus validation hides regressions — always valida
+    score=5 composite=0.399 cl_20260317_044 | Query expansion (adding keywords) can degrade precision by e
+    score=5 composite=0.508 cl_20260317_003 | Use batch mode with --all when targeting multiple projects d
+    score=5 composite=0.390 cl_20260317_040 | Single-corpus validation hides regressions — always valida
+    score=4 composite=0.373 cl_20260317_036 | Query expansion fails on small corpora with strong baselines
+    score=5 composite=0.321 cl_20260317_006 | Use custom_id field in batch requests for deterministic resu
+    score=5 composite=0.283 cl_20260317_037 | Below ~500 pages, context stuffing beats RAG; Grove's value 
+    score=4 composite=0.508 cl_20260317_014 | Backend initialization paths must receive the full resource 
+    score=3 composite=0.319 cl_20260317_008 | Config fields for timeout/duration settings should be u64 in
+    score=4 composite=0.213 cl_20260317_052 | For opt-in features, use default=false in config and require
+    score=2 composite=0.166 cl_20260317_001 | API error responses may lack nested 'type' field, allowing e
+    score=2 composite=0.163 cl_20260317_023 | Use judge cache as ground truth for multi-config eval compar
+    score=4 composite=0.508 cl_20260317_000 | Anthropic Console credits and API credits are completely sep
+    score=5 composite=0.453 cl_20260317_001 | API error responses may lack nested 'type' field, allowing e
+    score=5 composite=0.329 cl_20260317_010 | Hardcoded max_tokens limits in LLM calls truncate structured
+    score=5 composite=0.257 cl_20260317_013 | Don't skip dry-run mode checks before expensive operations l
+    score=5 composite=0.240 cl_20260317_016 | Add progress indicators and running totals to long-running b
+    score=5 composite=0.508 cl_20260317_031 | Extract test-only infrastructure from monolithic harnesses i
+    score=2 composite=0.377 cl_20260317_009 | When batch module code integration fails, check that batch i
+    score=5 composite=0.248 cl_20260317_037 | Below ~500 pages, context stuffing beats RAG; Grove's value 
+    score=4 composite=0.232 cl_20260317_005 | Extract shared retrieval pipeline into helper functions to a
+    score=5 composite=0.231 cl_20260317_045 | Language/framework keywords are too broad in monoglot codeba
+    score=2 composite=0.508 cl_20260317_014 | Backend initialization paths must receive the full resource 
+    score=5 composite=0.410 cl_20260317_038 | Use optional indexed fields in search backends to embed retr
+    score=2 composite=0.343 cl_20260317_026 | Use category-specific decay rates to tune recency weighting 
+    score=4 composite=0.316 cl_20260317_037 | Below ~500 pages, context stuffing beats RAG; Grove's value 
+    score=2 composite=0.295 cl_20260317_035 | Formalize cascade ranking and intent-based filtering before 
+    score=2 composite=0.508 cl_20260317_023 | Use judge cache as ground truth for multi-config eval compar
+    score=4 composite=0.372 cl_20260317_008 | Config fields for timeout/duration settings should be u64 in
+    score=1 composite=0.365 cl_20260317_017 | Use per-session aggregation instead of global metrics when p
+    score=2 composite=0.314 cl_20260317_024 | Per-position metrics (P@K) require per-session computation t
+    score=3 composite=0.299 cl_20260317_037 | Below ~500 pages, context stuffing beats RAG; Grove's value 
+    score=5 composite=0.508 cl_20260317_025 | Use intent keyword extraction as a post-retrieval filter to 
+    score=5 composite=0.481 cl_20260317_038 | Use optional indexed fields in search backends to embed retr
+    score=5 composite=0.367 cl_20260317_044 | Query expansion (adding keywords) can degrade precision by e
+    score=4 composite=0.345 cl_20260317_047 | Use post-retrieval keyword filtering (intersection of learni
+    score=5 composite=0.339 cl_20260317_027 | Wire mid-session re-retrieval via UserPromptSubmit hook to c
+    score=3 composite=0.508 cl_20260317_037 | Below ~500 pages, context stuffing beats RAG; Grove's value 
+    score=2 composite=0.364 cl_20260317_003 | Use batch mode with --all when targeting multiple projects d
+    score=5 composite=0.508 cl_20260317_019 | Session history cache (~1300+ JSONL files per project) is a 
+    score=2 composite=0.314 cl_20260317_052 | For opt-in features, use default=false in config and require
+    score=2 composite=0.288 cl_20260317_020 | Broken path encoding (/, ., _ all→-) makes session UUID re
+    score=3 composite=0.261 cl_20260317_027 | Wire mid-session re-retrieval via UserPromptSubmit hook to c
+    score=2 composite=0.236 cl_20260317_037 | Below ~500 pages, context stuffing beats RAG; Grove's value 
+    score=4 composite=0.508 cl_20260317_008 | Config fields for timeout/duration settings should be u64 in
+    score=2 composite=0.490 cl_20260317_033 | When unused import warnings appear only without a feature fl
+    score=2 composite=0.459 cl_20260317_048 | Use fail-open philosophy for external service calls to ensur
+    score=2 composite=0.424 cl_20260317_019 | Session history cache (~1300+ JSONL files per project) is a 
+    score=2 composite=0.409 cl_20260317_052 | For opt-in features, use default=false in config and require
+    score=5 composite=0.379 cl_20260317_008 | Config fields for timeout/duration settings should be u64 in
+    score=5 composite=0.351 cl_20260317_027 | Wire mid-session re-retrieval via UserPromptSubmit hook to c
+    score=2 composite=0.334 cl_20260317_033 | When unused import warnings appear only without a feature fl
+    score=5 composite=0.318 cl_20260210_000 | Testing gate mechanism works correctly
+    score=2 composite=0.212 cl_20260317_030 | Use feature flags to gate complex subsystems and allow shipp
+    score=5 composite=0.508 cl_20260317_027 | Wire mid-session re-retrieval via UserPromptSubmit hook to c
+    score=5 composite=0.466 cl_20260317_038 | Use optional indexed fields in search backends to embed retr
+    score=4 composite=0.455 cl_20260317_035 | Formalize cascade ranking and intent-based filtering before 
+    score=5 composite=0.417 cl_20260317_025 | Use intent keyword extraction as a post-retrieval filter to 
+    score=2 composite=0.409 cl_20260317_014 | Backend initialization paths must receive the full resource 
+    score=2 composite=0.508 cl_20260317_041 | Keep design documents and implementation synchronized by usi
+    score=2 composite=0.353 cl_20260317_028 | Use multi-corpus benchmark sweep with manifest and policy va
+    score=1 composite=0.324 cl_20260317_034 | CLI commands should re-export subcommand modules in the pare
+    score=2 composite=0.295 cl_20260317_009 | When batch module code integration fails, check that batch i
+    score=3 composite=0.273 cl_20260317_048 | Use fail-open philosophy for external service calls to ensur
+    score=3 composite=0.508 cl_20260317_008 | Config fields for timeout/duration settings should be u64 in
+    score=5 composite=0.395 cl_20260317_037 | Below ~500 pages, context stuffing beats RAG; Grove's value 
+    score=2 composite=0.360 cl_20260317_039 | Query expansion defeats adaptive threshold calibration — a
+    score=2 composite=0.299 cl_20260317_023 | Use judge cache as ground truth for multi-config eval compar
+    score=2 composite=0.294 cl_20260317_027 | Wire mid-session re-retrieval via UserPromptSubmit hook to c
+    score=5 composite=0.508 cl_20260317_019 | Session history cache (~1300+ JSONL files per project) is a 
+    score=2 composite=0.478 cl_20260317_023 | Use judge cache as ground truth for multi-config eval compar
+    score=5 composite=0.413 cl_20260317_037 | Below ~500 pages, context stuffing beats RAG; Grove's value 
+    score=5 composite=0.386 cl_20260317_038 | Use optional indexed fields in search backends to embed retr
+    score=2 composite=0.381 cl_20260317_035 | Formalize cascade ranking and intent-based filtering before 
+    score=4 composite=0.508 cl_20260317_027 | Wire mid-session re-retrieval via UserPromptSubmit hook to c
+    score=3 composite=0.460 cl_20260317_029 | Implement LLM reranking in deferred injection to refine lear
+    score=2 composite=0.343 cl_20260317_015 | Make expensive operations injectable via closures for testab
+    score=2 composite=0.313 cl_20260317_038 | Use optional indexed fields in search backends to embed retr
+    score=3 composite=0.270 cl_20260317_037 | Below ~500 pages, context stuffing beats RAG; Grove's value 
+    score=4 composite=0.508 cl_20260317_023 | Use judge cache as ground truth for multi-config eval compar
+    score=5 composite=0.365 cl_20260317_017 | Use per-session aggregation instead of global metrics when p
+    score=5 composite=0.325 cl_20260317_028 | Use multi-corpus benchmark sweep with manifest and policy va
+    score=5 composite=0.319 cl_20260317_018 | Don't tune defaults to a single corpus without validation on
+    score=5 composite=0.314 cl_20260317_024 | Per-position metrics (P@K) require per-session computation t
+    score=1 composite=0.508 cl_20260317_033 | When unused import warnings appear only without a feature fl
+    score=2 composite=0.382 cl_20260317_030 | Use feature flags to gate complex subsystems and allow shipp
+    score=2 composite=0.334 cl_20260317_019 | Session history cache (~1300+ JSONL files per project) is a 
+    score=1 composite=0.286 cl_20260317_052 | For opt-in features, use default=false in config and require
+    score=3 composite=0.205 cl_20260317_021 | Add explicit source/provenance markers to synthetically gene
+    score=5 composite=0.508 cl_20260317_025 | Use intent keyword extraction as a post-retrieval filter to 
+    score=5 composite=0.457 cl_20260317_035 | Formalize cascade ranking and intent-based filtering before 
+    score=5 composite=0.429 cl_20260317_038 | Use optional indexed fields in search backends to embed retr
+    score=5 composite=0.405 cl_20260317_037 | Below ~500 pages, context stuffing beats RAG; Grove's value 
+    score=4 composite=0.351 cl_20260317_047 | Use post-retrieval keyword filtering (intersection of learni
+    score=3 composite=0.508 cl_20260317_014 | Backend initialization paths must receive the full resource 
+    score=5 composite=0.305 cl_20260317_019 | Session history cache (~1300+ JSONL files per project) is a 
+    score=5 composite=0.261 cl_20260317_041 | Keep design documents and implementation synchronized by usi
+    score=3 composite=0.224 cl_20260317_018 | Don't tune defaults to a single corpus without validation on
+    score=5 composite=0.224 cl_20260317_052 | For opt-in features, use default=false in config and require
+    score=5 composite=0.508 cl_20260317_003 | Use batch mode with --all when targeting multiple projects d
+    score=5 composite=0.469 cl_20260317_009 | When batch module code integration fails, check that batch i
+    score=5 composite=0.425 cl_20260317_041 | Keep design documents and implementation synchronized by usi
+    score=5 composite=0.384 cl_20260317_007 | Implement three-phase batch execution: collect → submit & 
+    score=5 composite=0.374 cl_20260317_052 | For opt-in features, use default=false in config and require
+    score=4 composite=0.508 cl_20260317_041 | Keep design documents and implementation synchronized by usi
+    score=2 composite=0.494 cl_20260317_027 | Wire mid-session re-retrieval via UserPromptSubmit hook to c
+    score=1 composite=0.308 cl_20260317_029 | Implement LLM reranking in deferred injection to refine lear
+    score=2 composite=0.291 cl_20260317_019 | Session history cache (~1300+ JSONL files per project) is a 
+    score=1 composite=0.245 cl_20260317_020 | Broken path encoding (/, ., _ all→-) makes session UUID re
+    score=3 composite=0.508 cl_20260317_037 | Below ~500 pages, context stuffing beats RAG; Grove's value 
+    score=4 composite=0.490 cl_20260317_047 | Use post-retrieval keyword filtering (intersection of learni
+    score=3 composite=0.489 cl_20260317_029 | Implement LLM reranking in deferred injection to refine lear
+    score=5 composite=0.445 cl_20260317_044 | Query expansion (adding keywords) can degrade precision by e
+    score=5 composite=0.431 cl_20260317_035 | Formalize cascade ranking and intent-based filtering before 
+    score=2 composite=0.508 cl_20260317_023 | Use judge cache as ground truth for multi-config eval compar
+    score=5 composite=0.426 cl_20260317_038 | Use optional indexed fields in search backends to embed retr
+    score=3 composite=0.367 cl_20260317_019 | Session history cache (~1300+ JSONL files per project) is a 
+    score=5 composite=0.362 cl_20260317_037 | Below ~500 pages, context stuffing beats RAG; Grove's value 
+    score=2 composite=0.357 cl_20260317_014 | Backend initialization paths must receive the full resource 
+  Running: intent-boost on grove
+
+======================================================================
+INTENT-BOOST — cli backend (haiku)
+======================================================================
+    score=2 composite=0.508 cl_20260317_016 | Add progress indicators and running totals to long-running b
+    score=4 composite=0.447 cl_20260317_027 | Wire mid-session re-retrieval via UserPromptSubmit hook to c
+    score=4 composite=0.439 cl_20260317_037 | Below ~500 pages, context stuffing beats RAG; Grove's value 
+    score=5 composite=0.427 cl_20260317_048 | Use fail-open philosophy for external service calls to ensur
+    score=5 composite=0.319 cl_20260317_008 | Config fields for timeout/duration settings should be u64 in
+    score=2 composite=0.534 cl_20260317_016 | Add progress indicators and running totals to long-running b
+    score=4 composite=0.438 cl_20260317_023 | Use judge cache as ground truth for multi-config eval compar
+    score=4 composite=0.361 cl_20260317_037 | Below ~500 pages, context stuffing beats RAG; Grove's value 
+    score=4 composite=0.342 cl_20260317_048 | Use fail-open philosophy for external service calls to ensur
+    score=5 composite=0.304 cl_20260317_017 | Use per-session aggregation instead of global metrics when p
+    score=2 composite=0.508 cl_20260317_016 | Add progress indicators and running totals to long-running b
+    score=1 composite=0.421 cl_20260317_048 | Use fail-open philosophy for external service calls to ensur
+    score=2 composite=0.418 cl_20260317_037 | Below ~500 pages, context stuffing beats RAG; Grove's value 
+    score=1 composite=0.302 cl_20260317_003 | Use batch mode with --all when targeting multiple projects d
+    score=2 composite=0.249 cl_20260317_000 | Anthropic Console credits and API credits are completely sep
+    score=5 composite=0.521 cl_20260317_027 | Wire mid-session re-retrieval via UserPromptSubmit hook to c
+    score=2 composite=0.382 cl_20260317_016 | Add progress indicators and running totals to long-running b
+    score=5 composite=0.322 cl_20260317_048 | Use fail-open philosophy for external service calls to ensur
+    score=4 composite=0.322 cl_20260317_037 | Below ~500 pages, context stuffing beats RAG; Grove's value 
+    score=2 composite=0.222 cl_20260317_003 | Use batch mode with --all when targeting multiple projects d
+    score=3 composite=0.514 cl_20260317_038 | Use optional indexed fields in search backends to embed retr
+    score=3 composite=0.366 cl_20260317_021 | Add explicit source/provenance markers to synthetically gene
+    score=2 composite=0.359 cl_20260317_001 | API error responses may lack nested 'type' field, allowing e
+    score=3 composite=0.358 cl_20260317_041 | Keep design documents and implementation synchronized by usi
+    score=5 composite=0.326 cl_20260317_019 | Session history cache (~1300+ JSONL files per project) is a 
+    score=2 composite=0.508 cl_20260317_016 | Add progress indicators and running totals to long-running b
+    score=4 composite=0.433 cl_20260317_037 | Below ~500 pages, context stuffing beats RAG; Grove's value 
+    score=4 composite=0.380 cl_20260317_048 | Use fail-open philosophy for external service calls to ensur
+    score=5 composite=0.345 cl_20260317_023 | Use judge cache as ground truth for multi-config eval compar
+    score=1 composite=0.278 cl_20260317_003 | Use batch mode with --all when targeting multiple projects d
+    score=5 composite=0.517 cl_20260317_016 | Add progress indicators and running totals to long-running b
+    score=5 composite=0.429 cl_20260317_003 | Use batch mode with --all when targeting multiple projects d
+    score=5 composite=0.371 cl_20260317_037 | Below ~500 pages, context stuffing beats RAG; Grove's value 
+    score=5 composite=0.353 cl_20260317_048 | Use fail-open philosophy for external service calls to ensur
+    score=5 composite=0.285 cl_20260317_034 | CLI commands should re-export subcommand modules in the pare
+    score=5 composite=0.508 cl_20260317_027 | Wire mid-session re-retrieval via UserPromptSubmit hook to c
+    score=2 composite=0.327 cl_20260317_016 | Add progress indicators and running totals to long-running b
+    score=4 composite=0.306 cl_20260317_048 | Use fail-open philosophy for external service calls to ensur
+    score=4 composite=0.250 cl_20260317_037 | Below ~500 pages, context stuffing beats RAG; Grove's value 
+    score=2 composite=0.183 cl_20260317_003 | Use batch mode with --all when targeting multiple projects d
+    score=5 composite=0.514 cl_20260317_016 | Add progress indicators and running totals to long-running b
+    score=3 composite=0.389 cl_20260317_003 | Use batch mode with --all when targeting multiple projects d
+    score=5 composite=0.378 cl_20260317_048 | Use fail-open philosophy for external service calls to ensur
+    score=4 composite=0.311 cl_20260317_000 | Anthropic Console credits and API credits are completely sep
+    score=4 composite=0.272 cl_20260317_037 | Below ~500 pages, context stuffing beats RAG; Grove's value 
+    score=3 composite=0.508 cl_20260317_016 | Add progress indicators and running totals to long-running b
+    score=5 composite=0.397 cl_20260317_037 | Below ~500 pages, context stuffing beats RAG; Grove's value 
+    score=5 composite=0.383 cl_20260317_048 | Use fail-open philosophy for external service calls to ensur
+    score=5 composite=0.353 cl_20260317_027 | Wire mid-session re-retrieval via UserPromptSubmit hook to c
+    score=1 composite=0.263 cl_20260317_003 | Use batch mode with --all when targeting multiple projects d
+    score=3 composite=0.514 cl_20260317_048 | Use fail-open philosophy for external service calls to ensur
+    score=2 composite=0.495 cl_20260317_016 | Add progress indicators and running totals to long-running b
+    score=4 composite=0.433 cl_20260317_037 | Below ~500 pages, context stuffing beats RAG; Grove's value 
+    score=4 composite=0.309 cl_20260317_021 | Add explicit source/provenance markers to synthetically gene
+    score=2 composite=0.296 cl_20260317_014 | Backend initialization paths must receive the full resource 
+    score=2 composite=0.508 cl_20260317_016 | Add progress indicators and running totals to long-running b
+    score=3 composite=0.453 cl_20260317_048 | Use fail-open philosophy for external service calls to ensur
+    score=3 composite=0.398 cl_20260317_037 | Below ~500 pages, context stuffing beats RAG; Grove's value 
+    score=1 composite=0.281 cl_20260317_003 | Use batch mode with --all when targeting multiple projects d
+    score=2 composite=0.264 cl_20260317_023 | Use judge cache as ground truth for multi-config eval compar
+    score=2 composite=0.514 cl_20260317_016 | Add progress indicators and running totals to long-running b
+    score=5 composite=0.448 cl_20260317_027 | Wire mid-session re-retrieval via UserPromptSubmit hook to c
+    score=5 composite=0.425 cl_20260317_037 | Below ~500 pages, context stuffing beats RAG; Grove's value 
+    score=5 composite=0.390 cl_20260317_048 | Use fail-open philosophy for external service calls to ensur
+    score=4 composite=0.274 cl_20260317_041 | Keep design documents and implementation synchronized by usi
+    score=3 composite=0.608 cl_20260317_037 | Below ~500 pages, context stuffing beats RAG; Grove's value 
+    score=2 composite=0.364 cl_20260317_003 | Use batch mode with --all when targeting multiple projects d
+    score=3 composite=0.201 cl_20260317_041 | Keep design documents and implementation synchronized by usi
+    score=3 composite=0.200 cl_20260317_028 | Use multi-corpus benchmark sweep with manifest and policy va
+    score=2 composite=0.197 cl_20260317_040 | Single-corpus validation hides regressions — always valida
+    score=3 composite=0.514 cl_20260317_027 | Wire mid-session re-retrieval via UserPromptSubmit hook to c
+    score=5 composite=0.474 cl_20260317_019 | Session history cache (~1300+ JSONL files per project) is a 
+    score=2 composite=0.399 cl_20260317_016 | Add progress indicators and running totals to long-running b
+    score=3 composite=0.399 cl_20260317_048 | Use fail-open philosophy for external service calls to ensur
+    score=2 composite=0.293 cl_20260317_037 | Below ~500 pages, context stuffing beats RAG; Grove's value 
+    score=2 composite=0.518 cl_20260317_027 | Wire mid-session re-retrieval via UserPromptSubmit hook to c
+    score=2 composite=0.514 cl_20260317_016 | Add progress indicators and running totals to long-running b
+    score=2 composite=0.484 cl_20260317_048 | Use fail-open philosophy for external service calls to ensur
+    score=2 composite=0.391 cl_20260317_003 | Use batch mode with --all when targeting multiple projects d
+    score=2 composite=0.350 cl_20260317_000 | Anthropic Console credits and API credits are completely sep
+    score=5 composite=0.521 cl_20260317_027 | Wire mid-session re-retrieval via UserPromptSubmit hook to c
+    score=2 composite=0.343 cl_20260317_016 | Add progress indicators and running totals to long-running b
+    score=5 composite=0.305 cl_20260317_048 | Use fail-open philosophy for external service calls to ensur
+    score=3 composite=0.281 cl_20260317_037 | Below ~500 pages, context stuffing beats RAG; Grove's value 
+    score=2 composite=0.211 cl_20260317_003 | Use batch mode with --all when targeting multiple projects d
+    score=5 composite=0.521 cl_20260317_027 | Wire mid-session re-retrieval via UserPromptSubmit hook to c
+    score=2 composite=0.446 cl_20260317_016 | Add progress indicators and running totals to long-running b
+    score=4 composite=0.369 cl_20260317_037 | Below ~500 pages, context stuffing beats RAG; Grove's value 
+    score=4 composite=0.338 cl_20260317_048 | Use fail-open philosophy for external service calls to ensur
+    score=2 composite=0.234 cl_20260317_003 | Use batch mode with --all when targeting multiple projects d
+    score=2 composite=0.530 cl_20260317_041 | Keep design documents and implementation synchronized by usi
+    score=2 composite=0.364 cl_20260317_028 | Use multi-corpus benchmark sweep with manifest and policy va
+    score=1 composite=0.324 cl_20260317_034 | CLI commands should re-export subcommand modules in the pare
+    score=2 composite=0.295 cl_20260317_009 | When batch module code integration fails, check that batch i
+    score=3 composite=0.295 cl_20260317_048 | Use fail-open philosophy for external service calls to ensur
+    score=5 composite=0.534 cl_20260317_048 | Use fail-open philosophy for external service calls to ensur
+    score=2 composite=0.464 cl_20260317_016 | Add progress indicators and running totals to long-running b
+    score=5 composite=0.378 cl_20260317_037 | Below ~500 pages, context stuffing beats RAG; Grove's value 
+    score=2 composite=0.290 cl_20260317_027 | Wire mid-session re-retrieval via UserPromptSubmit hook to c
+    score=2 composite=0.265 cl_20260317_021 | Add explicit source/provenance markers to synthetically gene
+    score=2 composite=0.508 cl_20260317_016 | Add progress indicators and running totals to long-running b
+    score=5 composite=0.419 cl_20260317_037 | Below ~500 pages, context stuffing beats RAG; Grove's value 
+    score=2 composite=0.417 cl_20260317_048 | Use fail-open philosophy for external service calls to ensur
+    score=1 composite=0.291 cl_20260317_003 | Use batch mode with --all when targeting multiple projects d
+    score=5 composite=0.232 cl_20260317_019 | Session history cache (~1300+ JSONL files per project) is a 
+    score=1 composite=0.521 cl_20260317_016 | Add progress indicators and running totals to long-running b
+    score=1 composite=0.260 cl_20260317_038 | Use optional indexed fields in search backends to embed retr
+    score=2 composite=0.254 cl_20260317_000 | Anthropic Console credits and API credits are completely sep
+    score=1 composite=0.247 cl_20260317_048 | Use fail-open philosophy for external service calls to ensur
+    score=1 composite=0.210 cl_20260317_013 | Don't skip dry-run mode checks before expensive operations l
+    score=4 composite=0.508 cl_20260317_027 | Wire mid-session re-retrieval via UserPromptSubmit hook to c
+    score=3 composite=0.384 cl_20260317_037 | Below ~500 pages, context stuffing beats RAG; Grove's value 
+    score=2 composite=0.369 cl_20260317_016 | Add progress indicators and running totals to long-running b
+    score=4 composite=0.325 cl_20260317_048 | Use fail-open philosophy for external service calls to ensur
+    score=2 composite=0.243 cl_20260317_003 | Use batch mode with --all when targeting multiple projects d
+    score=3 composite=0.514 cl_20260317_016 | Add progress indicators and running totals to long-running b
+    score=4 composite=0.437 cl_20260317_023 | Use judge cache as ground truth for multi-config eval compar
+    score=3 composite=0.421 cl_20260317_037 | Below ~500 pages, context stuffing beats RAG; Grove's value 
+    score=3 composite=0.358 cl_20260317_048 | Use fail-open philosophy for external service calls to ensur
+    score=5 composite=0.284 cl_20260317_017 | Use per-session aggregation instead of global metrics when p
+    score=1 composite=0.520 cl_20260317_033 | When unused import warnings appear only without a feature fl
+    score=2 composite=0.394 cl_20260317_030 | Use feature flags to gate complex subsystems and allow shipp
+    score=2 composite=0.346 cl_20260317_019 | Session history cache (~1300+ JSONL files per project) is a 
+    score=1 composite=0.286 cl_20260317_052 | For opt-in features, use default=false in config and require
+    score=3 composite=0.205 cl_20260317_021 | Add explicit source/provenance markers to synthetically gene
+    score=1 composite=0.508 cl_20260317_016 | Add progress indicators and running totals to long-running b
+    score=5 composite=0.400 cl_20260317_037 | Below ~500 pages, context stuffing beats RAG; Grove's value 
+    score=3 composite=0.380 cl_20260317_048 | Use fail-open philosophy for external service calls to ensur
+    score=1 composite=0.291 cl_20260317_003 | Use batch mode with --all when targeting multiple projects d
+    score=5 composite=0.276 cl_20260317_027 | Wire mid-session re-retrieval via UserPromptSubmit hook to c
+    score=5 composite=0.521 cl_20260317_016 | Add progress indicators and running totals to long-running b
+    score=4 composite=0.397 cl_20260317_003 | Use batch mode with --all when targeting multiple projects d
+    score=5 composite=0.325 cl_20260317_048 | Use fail-open philosophy for external service calls to ensur
+    score=4 composite=0.273 cl_20260317_037 | Below ~500 pages, context stuffing beats RAG; Grove's value 
+    score=4 composite=0.254 cl_20260317_034 | CLI commands should re-export subcommand modules in the pare
+    score=5 composite=0.514 cl_20260317_016 | Add progress indicators and running totals to long-running b
+    score=5 composite=0.422 cl_20260317_003 | Use batch mode with --all when targeting multiple projects d
+    score=5 composite=0.377 cl_20260317_048 | Use fail-open philosophy for external service calls to ensur
+    score=4 composite=0.335 cl_20260317_037 | Below ~500 pages, context stuffing beats RAG; Grove's value 
+    score=5 composite=0.277 cl_20260317_009 | When batch module code integration fails, check that batch i
+    score=4 composite=0.528 cl_20260317_041 | Keep design documents and implementation synchronized by usi
+    score=2 composite=0.514 cl_20260317_027 | Wire mid-session re-retrieval via UserPromptSubmit hook to c
+    score=2 composite=0.331 cl_20260317_019 | Session history cache (~1300+ JSONL files per project) is a 
+    score=1 composite=0.328 cl_20260317_029 | Implement LLM reranking in deferred injection to refine lear
+    score=2 composite=0.284 cl_20260317_037 | Below ~500 pages, context stuffing beats RAG; Grove's value 
+    score=2 composite=0.521 cl_20260317_016 | Add progress indicators and running totals to long-running b
+    score=5 composite=0.500 cl_20260317_023 | Use judge cache as ground truth for multi-config eval compar
+    score=3 composite=0.425 cl_20260317_037 | Below ~500 pages, context stuffing beats RAG; Grove's value 
+    score=5 composite=0.372 cl_20260317_017 | Use per-session aggregation instead of global metrics when p
+    score=3 composite=0.348 cl_20260317_048 | Use fail-open philosophy for external service calls to ensur
+    score=2 composite=0.508 cl_20260317_016 | Add progress indicators and running totals to long-running b
+    score=5 composite=0.422 cl_20260317_037 | Below ~500 pages, context stuffing beats RAG; Grove's value 
+    score=4 composite=0.400 cl_20260317_048 | Use fail-open philosophy for external service calls to ensur
+    score=5 composite=0.338 cl_20260317_027 | Wire mid-session re-retrieval via UserPromptSubmit hook to c
+    score=2 composite=0.284 cl_20260317_003 | Use batch mode with --all when targeting multiple projects d
+  Running: boosted-adaptive on pickup-rank
+
+======================================================================
+BOOSTED-ADAPTIVE — cli backend (haiku)
+======================================================================
+    score=2 composite=0.450 cl_20260308_000 | Use separate root layout templates with router pipelines for
+    score=2 composite=0.345 cl_20260308_002 | Satisfy Credo nesting depth rules through strategic refactor
+    score=2 composite=0.318 cl_20260308_001 | Implement inline RSVP UI on dashboard cards using PubSub sub
+    score=5 composite=0.168 cl_20260304_000 | Phoenix require_authenticated_admin plug leaks route existen
+    score=5 composite=0.450 cl_20260308_000 | Use separate root layout templates with router pipelines for
+    score=2 composite=0.344 cl_20260317_001 | Pre-commit hooks designed for local environments may fail wh
+    score=2 composite=0.331 cl_20260226_000 | Algorithm specification mismatch between design doc and refe
+    score=3 composite=0.294 cl_20260308_002 | Satisfy Credo nesting depth rules through strategic refactor
+    score=3 composite=0.271 cl_20260308_001 | Implement inline RSVP UI on dashboard cards using PubSub sub
+    score=5 composite=0.450 cl_20260308_000 | Use separate root layout templates with router pipelines for
+    score=3 composite=0.306 cl_20260308_001 | Implement inline RSVP UI on dashboard cards using PubSub sub
+    score=4 composite=0.301 cl_20260227_001 | Always run mix format before committing to avoid pre-commit 
+    score=2 composite=0.283 cl_20260308_002 | Satisfy Credo nesting depth rules through strategic refactor
+    score=2 composite=0.250 cl_20260227_003 | Analytics.balance_teams/3 returns player maps with :id field
+    score=3 composite=0.450 cl_20260308_000 | Use separate root layout templates with router pipelines for
+    score=2 composite=0.393 cl_20260308_002 | Satisfy Credo nesting depth rules through strategic refactor
+    score=2 composite=0.343 cl_20260308_001 | Implement inline RSVP UI on dashboard cards using PubSub sub
+    score=1 composite=0.148 cl_20260305_001 | TTL plus link-to-preserve lifecycle for ephemeral-to-permane
+    score=3 composite=0.146 cl_20260305_003 | Avoid default function args when HEEx template always passes
+    score=4 composite=0.444 cl_20260308_000 | Use separate root layout templates with router pipelines for
+    score=2 composite=0.394 cl_20260226_000 | Algorithm specification mismatch between design doc and refe
+    score=1 composite=0.352 cl_20260317_001 | Pre-commit hooks designed for local environments may fail wh
+    score=4 composite=0.270 cl_20260308_002 | Satisfy Credo nesting depth rules through strategic refactor
+    score=4 composite=0.255 cl_20260308_001 | Implement inline RSVP UI on dashboard cards using PubSub sub
+    score=4 composite=0.450 cl_20260308_000 | Use separate root layout templates with router pipelines for
+    score=4 composite=0.347 cl_20260317_001 | Pre-commit hooks designed for local environments may fail wh
+    score=3 composite=0.333 cl_20260226_000 | Algorithm specification mismatch between design doc and refe
+    score=2 composite=0.292 cl_20260308_002 | Satisfy Credo nesting depth rules through strategic refactor
+    score=2 composite=0.270 cl_20260308_001 | Implement inline RSVP UI on dashboard cards using PubSub sub
+    score=1 composite=0.432 cl_20260305_002 | tissue CLI uses show not view for ticket details
+    score=1 composite=0.187 cl_20260305_000 | Share/QR code feature pattern in Phoenix LiveView
+    score=1 composite=0.143 cl_20260304_012 | Pairwise player features: 13 unit + 3 LiveView integration t
+    score=1 composite=0.141 cl_20260308_000 | Use separate root layout templates with router pipelines for
+    score=1 composite=0.138 cl_20260226_005 | League creation form uses flat field names, not nested under
+    score=2 composite=0.450 cl_20260308_002 | Satisfy Credo nesting depth rules through strategic refactor
+    score=2 composite=0.403 cl_20260308_001 | Implement inline RSVP UI on dashboard cards using PubSub sub
+    score=5 composite=0.376 cl_20260317_000 | Docker Compose may fail to attach services to the implicit d
+    score=2 composite=0.375 cl_20260308_000 | Use separate root layout templates with router pipelines for
+    score=5 composite=0.294 cl_20260317_001 | Pre-commit hooks designed for local environments may fail wh
+    score=3 composite=0.508 cl_20260317_000 | Docker Compose may fail to attach services to the implicit d
+    score=2 composite=0.480 cl_20260317_001 | Pre-commit hooks designed for local environments may fail wh
+    score=1 composite=0.201 cl_20260308_002 | Satisfy Credo nesting depth rules through strategic refactor
+    score=2 composite=0.185 cl_20260308_001 | Implement inline RSVP UI on dashboard cards using PubSub sub
+    score=2 composite=0.165 cl_20260308_000 | Use separate root layout templates with router pipelines for
+    score=2 composite=0.417 cl_20260304_006 | Always validate Vector VRL transforms locally before deployi
+    score=5 composite=0.410 cl_20260301_001 | DATABASE_URL cannot use shell interpolation in Kamal env.cle
+    score=1 composite=0.357 cl_20260308_002 | Satisfy Credo nesting depth rules through strategic refactor
+    score=1 composite=0.330 cl_20260308_001 | Implement inline RSVP UI on dashboard cards using PubSub sub
+    score=1 composite=0.293 cl_20260308_000 | Use separate root layout templates with router pipelines for
+    score=2 composite=0.474 cl_20260317_000 | Docker Compose may fail to attach services to the implicit d
+    score=2 composite=0.411 cl_20260308_002 | Satisfy Credo nesting depth rules through strategic refactor
+    score=5 composite=0.410 cl_20260301_001 | DATABASE_URL cannot use shell interpolation in Kamal env.cle
+    score=2 composite=0.379 cl_20260308_001 | Implement inline RSVP UI on dashboard cards using PubSub sub
+    score=1 composite=0.336 cl_20260308_000 | Use separate root layout templates with router pipelines for
+    score=3 composite=0.450 cl_20260308_000 | Use separate root layout templates with router pipelines for
+    score=5 composite=0.374 cl_20260226_000 | Algorithm specification mismatch between design doc and refe
+    score=2 composite=0.357 cl_20260317_001 | Pre-commit hooks designed for local environments may fail wh
+    score=2 composite=0.297 cl_20260308_002 | Satisfy Credo nesting depth rules through strategic refactor
+    score=2 composite=0.264 cl_20260226_001 | Use :openskill_parity test tags for algorithmic validation p
+    score=5 composite=0.508 cl_20260317_000 | Docker Compose may fail to attach services to the implicit d
+    score=3 composite=0.329 cl_20260317_001 | Pre-commit hooks designed for local environments may fail wh
+    score=1 composite=0.432 cl_20260305_000 | Share/QR code feature pattern in Phoenix LiveView
+    score=2 composite=0.299 cl_20260317_005 | Check shared components in multiple locations when fixing re
+    score=1 composite=0.168 cl_20260301_000 | Kamal 2 accessories sharing secret names need entrypoint wra
+    score=4 composite=0.410 cl_20260301_001 | DATABASE_URL cannot use shell interpolation in Kamal env.cle
+    score=1 composite=0.366 cl_20260304_006 | Always validate Vector VRL transforms locally before deployi
+    score=5 composite=0.347 cl_20260317_001 | Pre-commit hooks designed for local environments may fail wh
+    score=4 composite=0.268 cl_20260304_007 | Kamal .kamal/secrets uses single-quoted heredocs disabling s
+    score=2 composite=0.203 cl_20260301_000 | Kamal 2 accessories sharing secret names need entrypoint wra
+    score=2 composite=0.432 cl_20260304_012 | Pairwise player features: 13 unit + 3 LiveView integration t
+    score=2 composite=0.344 cl_20260226_000 | Algorithm specification mismatch between design doc and refe
+    score=2 composite=0.333 cl_20260305_000 | Share/QR code feature pattern in Phoenix LiveView
+    score=1 composite=0.327 cl_20260317_001 | Pre-commit hooks designed for local environments may fail wh
+    score=1 composite=0.286 cl_20260226_001 | Use :openskill_parity test tags for algorithmic validation p
+    score=4 composite=0.450 cl_20260308_002 | Satisfy Credo nesting depth rules through strategic refactor
+    score=5 composite=0.435 cl_20260308_000 | Use separate root layout templates with router pipelines for
+    score=2 composite=0.418 cl_20260308_001 | Implement inline RSVP UI on dashboard cards using PubSub sub
+    score=4 composite=0.181 cl_20260304_000 | Phoenix require_authenticated_admin plug leaks route existen
+    score=2 composite=0.171 cl_20260305_001 | TTL plus link-to-preserve lifecycle for ephemeral-to-permane
+    score=5 composite=0.399 cl_20260227_003 | Analytics.balance_teams/3 returns player maps with :id field
+    score=5 composite=0.318 cl_20260304_012 | Pairwise player features: 13 unit + 3 LiveView integration t
+    score=3 composite=0.288 cl_20260308_002 | Satisfy Credo nesting depth rules through strategic refactor
+    score=2 composite=0.269 cl_20260308_000 | Use separate root layout templates with router pipelines for
+    score=2 composite=0.265 cl_20260308_001 | Implement inline RSVP UI on dashboard cards using PubSub sub
+    score=4 composite=0.450 cl_20260308_000 | Use separate root layout templates with router pipelines for
+    score=1 composite=0.345 cl_20260317_001 | Pre-commit hooks designed for local environments may fail wh
+    score=5 composite=0.341 cl_20260226_000 | Algorithm specification mismatch between design doc and refe
+    score=2 composite=0.286 cl_20260308_002 | Satisfy Credo nesting depth rules through strategic refactor
+    score=4 composite=0.264 cl_20260308_001 | Implement inline RSVP UI on dashboard cards using PubSub sub
+    score=4 composite=0.450 cl_20260308_000 | Use separate root layout templates with router pipelines for
+    score=2 composite=0.394 cl_20260308_002 | Satisfy Credo nesting depth rules through strategic refactor
+    score=2 composite=0.353 cl_20260308_001 | Implement inline RSVP UI on dashboard cards using PubSub sub
+    score=5 composite=0.240 cl_20260301_001 | DATABASE_URL cannot use shell interpolation in Kamal env.cle
+    score=2 composite=0.150 cl_20260304_000 | Phoenix require_authenticated_admin plug leaks route existen
+    score=3 composite=0.450 cl_20260308_002 | Satisfy Credo nesting depth rules through strategic refactor
+    score=2 composite=0.415 cl_20260308_001 | Implement inline RSVP UI on dashboard cards using PubSub sub
+    score=1 composite=0.368 cl_20260308_000 | Use separate root layout templates with router pipelines for
+    score=2 composite=0.366 cl_20260226_004 | RecalculationJob triggers are restricted to 5 valid values
+    score=4 composite=0.176 cl_20260226_003 | Repo.transaction double-wraps return values from callback
+    score=5 composite=0.450 cl_20260308_000 | Use separate root layout templates with router pipelines for
+    score=5 composite=0.341 cl_20260226_000 | Algorithm specification mismatch between design doc and refe
+    score=2 composite=0.337 cl_20260317_001 | Pre-commit hooks designed for local environments may fail wh
+    score=4 composite=0.286 cl_20260308_002 | Satisfy Credo nesting depth rules through strategic refactor
+    score=3 composite=0.264 cl_20260308_001 | Implement inline RSVP UI on dashboard cards using PubSub sub
+    score=3 composite=0.508 cl_20260317_003 | CSS parser warnings about @layer declarations in compiled ou
+    score=5 composite=0.417 cl_20260308_000 | Use separate root layout templates with router pipelines for
+    score=5 composite=0.336 cl_20260317_005 | Check shared components in multiple locations when fixing re
+    score=5 composite=0.325 cl_20260306_001 | Use scrollbar-gutter: stable to prevent layout shift from sc
+    score=2 composite=0.321 cl_20260317_004 | Use whitespace-nowrap to prevent badge text wrapping on mobi
+    score=4 composite=0.410 cl_20260301_001 | DATABASE_URL cannot use shell interpolation in Kamal env.cle
+    score=5 composite=0.389 cl_20260304_006 | Always validate Vector VRL transforms locally before deployi
+    score=1 composite=0.335 cl_20260308_002 | Satisfy Credo nesting depth rules through strategic refactor
+    score=1 composite=0.317 cl_20260308_000 | Use separate root layout templates with router pipelines for
+    score=2 composite=0.306 cl_20260308_001 | Implement inline RSVP UI on dashboard cards using PubSub sub
+    score=2 composite=0.450 cl_20260308_002 | Satisfy Credo nesting depth rules through strategic refactor
+    score=4 composite=0.436 cl_20260317_000 | Docker Compose may fail to attach services to the implicit d
+    score=2 composite=0.435 cl_20260308_001 | Implement inline RSVP UI on dashboard cards using PubSub sub
+    score=1 composite=0.407 cl_20260308_000 | Use separate root layout templates with router pipelines for
+    score=5 composite=0.260 cl_20260226_000 | Algorithm specification mismatch between design doc and refe
+    score=4 composite=0.450 cl_20260308_000 | Use separate root layout templates with router pipelines for
+    score=4 composite=0.447 cl_20260308_002 | Satisfy Credo nesting depth rules through strategic refactor
+    score=2 composite=0.412 cl_20260308_001 | Implement inline RSVP UI on dashboard cards using PubSub sub
+    score=2 composite=0.179 cl_20260304_000 | Phoenix require_authenticated_admin plug leaks route existen
+    score=2 composite=0.163 cl_20260226_000 | Algorithm specification mismatch between design doc and refe
+    score=2 composite=0.427 cl_20260304_006 | Always validate Vector VRL transforms locally before deployi
+    score=2 composite=0.410 cl_20260308_002 | Satisfy Credo nesting depth rules through strategic refactor
+    score=4 composite=0.401 cl_20260301_001 | DATABASE_URL cannot use shell interpolation in Kamal env.cle
+    score=2 composite=0.393 cl_20260308_001 | Implement inline RSVP UI on dashboard cards using PubSub sub
+    score=2 composite=0.336 cl_20260308_000 | Use separate root layout templates with router pipelines for
+    score=3 composite=0.432 cl_20260304_010 | Teammate record mirrors head-to-head: same data loading, UI 
+    score=5 composite=0.426 cl_20260305_002 | tissue CLI uses show not view for ticket details
+    score=3 composite=0.277 cl_20260308_002 | Satisfy Credo nesting depth rules through strategic refactor
+    score=2 composite=0.255 cl_20260308_001 | Implement inline RSVP UI on dashboard cards using PubSub sub
+    score=3 composite=0.227 cl_20260308_000 | Use separate root layout templates with router pipelines for
+    score=2 composite=0.508 cl_20260317_002 | Use fetchpriority="high" on LCP images to improve mobile pag
+    score=1 composite=0.308 cl_20260308_000 | Use separate root layout templates with router pipelines for
+    score=1 composite=0.210 cl_20260317_003 | CSS parser warnings about @layer declarations in compiled ou
+    score=2 composite=0.192 cl_20260308_002 | Satisfy Credo nesting depth rules through strategic refactor
+    score=1 composite=0.169 cl_20260308_001 | Implement inline RSVP UI on dashboard cards using PubSub sub
+    score=5 composite=0.450 cl_20260308_000 | Use separate root layout templates with router pipelines for
+    score=5 composite=0.341 cl_20260226_000 | Algorithm specification mismatch between design doc and refe
+    score=1 composite=0.319 cl_20260317_001 | Pre-commit hooks designed for local environments may fail wh
+    score=3 composite=0.286 cl_20260308_002 | Satisfy Credo nesting depth rules through strategic refactor
+    score=5 composite=0.264 cl_20260308_001 | Implement inline RSVP UI on dashboard cards using PubSub sub
+    score=5 composite=0.508 cl_20260317_005 | Check shared components in multiple locations when fixing re
+    score=2 composite=0.411 cl_20260308_002 | Satisfy Credo nesting depth rules through strategic refactor
+    score=2 composite=0.365 cl_20260308_000 | Use separate root layout templates with router pipelines for
+    score=3 composite=0.310 cl_20260308_001 | Implement inline RSVP UI on dashboard cards using PubSub sub
+    score=2 composite=0.200 cl_20260304_000 | Phoenix require_authenticated_admin plug leaks route existen
+    score=3 composite=0.450 cl_20260308_002 | Satisfy Credo nesting depth rules through strategic refactor
+    score=2 composite=0.374 cl_20260308_001 | Implement inline RSVP UI on dashboard cards using PubSub sub
+    score=2 composite=0.344 cl_20260308_000 | Use separate root layout templates with router pipelines for
+    score=2 composite=0.272 cl_20260301_002 | Phoenix prod.exs exclude: key was sibling of force_ssl:, not
+    score=3 composite=0.154 cl_20260304_000 | Phoenix require_authenticated_admin plug leaks route existen
+    score=5 composite=0.508 cl_20260317_000 | Docker Compose may fail to attach services to the implicit d
+    score=2 composite=0.290 cl_20260317_001 | Pre-commit hooks designed for local environments may fail wh
+    score=5 composite=0.508 cl_20260317_000 | Docker Compose may fail to attach services to the implicit d
+    score=2 composite=0.329 cl_20260317_001 | Pre-commit hooks designed for local environments may fail wh
+    score=4 composite=0.450 cl_20260308_000 | Use separate root layout templates with router pipelines for
+    score=3 composite=0.297 cl_20260308_002 | Satisfy Credo nesting depth rules through strategic refactor
+    score=2 composite=0.274 cl_20260308_001 | Implement inline RSVP UI on dashboard cards using PubSub sub
+    score=3 composite=0.229 cl_20260305_002 | tissue CLI uses show not view for ticket details
+    score=1 composite=0.207 cl_20260304_010 | Teammate record mirrors head-to-head: same data loading, UI 
+    score=5 composite=0.450 cl_20260308_000 | Use separate root layout templates with router pipelines for
+    score=2 composite=0.340 cl_20260317_001 | Pre-commit hooks designed for local environments may fail wh
+    score=3 composite=0.326 cl_20260226_000 | Algorithm specification mismatch between design doc and refe
+    score=4 composite=0.298 cl_20260308_002 | Satisfy Credo nesting depth rules through strategic refactor
+    score=3 composite=0.275 cl_20260308_001 | Implement inline RSVP UI on dashboard cards using PubSub sub
+    score=2 composite=0.508 cl_20260317_003 | CSS parser warnings about @layer declarations in compiled ou
+    score=2 composite=0.252 cl_20260308_000 | Use separate root layout templates with router pipelines for
+    score=3 composite=0.212 cl_20260306_001 | Use scrollbar-gutter: stable to prevent layout shift from sc
+    score=2 composite=0.197 cl_20260308_002 | Satisfy Credo nesting depth rules through strategic refactor
+    score=2 composite=0.181 cl_20260308_001 | Implement inline RSVP UI on dashboard cards using PubSub sub
+  Running: heuristic-enriched(50) on pickup-rank
+
+======================================================================
+HEURISTIC-ENRICHED(50) — cli backend (haiku)
+======================================================================
+    score=2 composite=0.450 cl_20260308_000 | Use separate root layout templates with router pipelines for
+    score=2 composite=0.345 cl_20260308_002 | Satisfy Credo nesting depth rules through strategic refactor
+    score=2 composite=0.318 cl_20260308_001 | Implement inline RSVP UI on dashboard cards using PubSub sub
+    score=5 composite=0.168 cl_20260304_000 | Phoenix require_authenticated_admin plug leaks route existen
+    score=5 composite=0.450 cl_20260308_000 | Use separate root layout templates with router pipelines for
+    score=2 composite=0.341 cl_20260317_001 | Pre-commit hooks designed for local environments may fail wh
+    score=2 composite=0.328 cl_20260226_000 | Algorithm specification mismatch between design doc and refe
+    score=3 composite=0.293 cl_20260308_002 | Satisfy Credo nesting depth rules through strategic refactor
+    score=3 composite=0.268 cl_20260308_001 | Implement inline RSVP UI on dashboard cards using PubSub sub
+    score=5 composite=0.450 cl_20260308_000 | Use separate root layout templates with router pipelines for
+    score=3 composite=0.306 cl_20260308_001 | Implement inline RSVP UI on dashboard cards using PubSub sub
+    score=4 composite=0.301 cl_20260227_001 | Always run mix format before committing to avoid pre-commit 
+    score=2 composite=0.283 cl_20260308_002 | Satisfy Credo nesting depth rules through strategic refactor
+    score=2 composite=0.250 cl_20260227_003 | Analytics.balance_teams/3 returns player maps with :id field
+    score=3 composite=0.450 cl_20260308_000 | Use separate root layout templates with router pipelines for
+    score=2 composite=0.401 cl_20260308_002 | Satisfy Credo nesting depth rules through strategic refactor
+    score=2 composite=0.343 cl_20260308_001 | Implement inline RSVP UI on dashboard cards using PubSub sub
+    score=1 composite=0.148 cl_20260305_001 | TTL plus link-to-preserve lifecycle for ephemeral-to-permane
+    score=3 composite=0.146 cl_20260305_003 | Avoid default function args when HEEx template always passes
+    score=4 composite=0.450 cl_20260308_000 | Use separate root layout templates with router pipelines for
+    score=2 composite=0.390 cl_20260226_000 | Algorithm specification mismatch between design doc and refe
+    score=1 composite=0.349 cl_20260317_001 | Pre-commit hooks designed for local environments may fail wh
+    score=4 composite=0.273 cl_20260308_002 | Satisfy Credo nesting depth rules through strategic refactor
+    score=4 composite=0.253 cl_20260308_001 | Implement inline RSVP UI on dashboard cards using PubSub sub
+    score=4 composite=0.450 cl_20260308_000 | Use separate root layout templates with router pipelines for
+    score=4 composite=0.345 cl_20260317_001 | Pre-commit hooks designed for local environments may fail wh
+    score=3 composite=0.331 cl_20260226_000 | Algorithm specification mismatch between design doc and refe
+    score=2 composite=0.292 cl_20260308_002 | Satisfy Credo nesting depth rules through strategic refactor
+    score=2 composite=0.268 cl_20260308_001 | Implement inline RSVP UI on dashboard cards using PubSub sub
+    score=1 composite=0.432 cl_20260305_002 | tissue CLI uses show not view for ticket details
+    score=1 composite=0.187 cl_20260305_000 | Share/QR code feature pattern in Phoenix LiveView
+    score=1 composite=0.143 cl_20260304_012 | Pairwise player features: 13 unit + 3 LiveView integration t
+    score=1 composite=0.141 cl_20260308_000 | Use separate root layout templates with router pipelines for
+    score=1 composite=0.138 cl_20260226_005 | League creation form uses flat field names, not nested under
+    score=2 composite=0.450 cl_20260308_002 | Satisfy Credo nesting depth rules through strategic refactor
+    score=5 composite=0.424 cl_20260317_000 | Docker Compose may fail to attach services to the implicit d
+    score=2 composite=0.399 cl_20260308_001 | Implement inline RSVP UI on dashboard cards using PubSub sub
+    score=2 composite=0.371 cl_20260308_000 | Use separate root layout templates with router pipelines for
+    score=5 composite=0.330 cl_20260317_001 | Pre-commit hooks designed for local environments may fail wh
+    score=3 composite=0.508 cl_20260317_000 | Docker Compose may fail to attach services to the implicit d
+    score=2 composite=0.480 cl_20260317_001 | Pre-commit hooks designed for local environments may fail wh
+    score=1 composite=0.161 cl_20260308_002 | Satisfy Credo nesting depth rules through strategic refactor
+    score=5 composite=0.410 cl_20260301_001 | DATABASE_URL cannot use shell interpolation in Kamal env.cle
+    score=2 composite=0.389 cl_20260304_006 | Always validate Vector VRL transforms locally before deployi
+    score=5 composite=0.295 cl_20260304_007 | Kamal .kamal/secrets uses single-quoted heredocs disabling s
+    score=1 composite=0.259 cl_20260308_002 | Satisfy Credo nesting depth rules through strategic refactor
+    score=1 composite=0.239 cl_20260308_001 | Implement inline RSVP UI on dashboard cards using PubSub sub
+    score=2 composite=0.477 cl_20260317_000 | Docker Compose may fail to attach services to the implicit d
+    score=5 composite=0.410 cl_20260301_001 | DATABASE_URL cannot use shell interpolation in Kamal env.cle
+    score=2 composite=0.364 cl_20260308_002 | Satisfy Credo nesting depth rules through strategic refactor
+    score=2 composite=0.336 cl_20260308_001 | Implement inline RSVP UI on dashboard cards using PubSub sub
+    score=1 composite=0.298 cl_20260308_000 | Use separate root layout templates with router pipelines for
+    score=3 composite=0.450 cl_20260308_000 | Use separate root layout templates with router pipelines for
+    score=5 composite=0.374 cl_20260226_000 | Algorithm specification mismatch between design doc and refe
+    score=2 composite=0.357 cl_20260317_001 | Pre-commit hooks designed for local environments may fail wh
+    score=2 composite=0.297 cl_20260308_002 | Satisfy Credo nesting depth rules through strategic refactor
+    score=2 composite=0.264 cl_20260226_001 | Use :openskill_parity test tags for algorithmic validation p
+    score=5 composite=0.508 cl_20260317_000 | Docker Compose may fail to attach services to the implicit d
+    score=3 composite=0.291 cl_20260317_001 | Pre-commit hooks designed for local environments may fail wh
+    score=1 composite=0.432 cl_20260305_000 | Share/QR code feature pattern in Phoenix LiveView
+    score=2 composite=0.299 cl_20260317_005 | Check shared components in multiple locations when fixing re
+    score=1 composite=0.168 cl_20260301_000 | Kamal 2 accessories sharing secret names need entrypoint wra
+    score=4 composite=0.410 cl_20260301_001 | DATABASE_URL cannot use shell interpolation in Kamal env.cle
+    score=1 composite=0.366 cl_20260304_006 | Always validate Vector VRL transforms locally before deployi
+    score=5 composite=0.347 cl_20260317_001 | Pre-commit hooks designed for local environments may fail wh
+    score=4 composite=0.268 cl_20260304_007 | Kamal .kamal/secrets uses single-quoted heredocs disabling s
+    score=2 composite=0.203 cl_20260301_000 | Kamal 2 accessories sharing secret names need entrypoint wra
+    score=2 composite=0.416 cl_20260304_012 | Pairwise player features: 13 unit + 3 LiveView integration t
+    score=2 composite=0.394 cl_20260226_000 | Algorithm specification mismatch between design doc and refe
+    score=1 composite=0.359 cl_20260317_001 | Pre-commit hooks designed for local environments may fail wh
+    score=2 composite=0.320 cl_20260305_000 | Share/QR code feature pattern in Phoenix LiveView
+    score=1 composite=0.314 cl_20260226_001 | Use :openskill_parity test tags for algorithmic validation p
+    score=4 composite=0.450 cl_20260308_002 | Satisfy Credo nesting depth rules through strategic refactor
+    score=5 composite=0.435 cl_20260308_000 | Use separate root layout templates with router pipelines for
+    score=2 composite=0.417 cl_20260308_001 | Implement inline RSVP UI on dashboard cards using PubSub sub
+    score=4 composite=0.180 cl_20260304_000 | Phoenix require_authenticated_admin plug leaks route existen
+    score=2 composite=0.172 cl_20260305_001 | TTL plus link-to-preserve lifecycle for ephemeral-to-permane
+    score=5 composite=0.399 cl_20260227_003 | Analytics.balance_teams/3 returns player maps with :id field
+    score=5 composite=0.318 cl_20260304_012 | Pairwise player features: 13 unit + 3 LiveView integration t
+    score=3 composite=0.288 cl_20260308_002 | Satisfy Credo nesting depth rules through strategic refactor
+    score=2 composite=0.269 cl_20260308_000 | Use separate root layout templates with router pipelines for
+    score=2 composite=0.265 cl_20260308_001 | Implement inline RSVP UI on dashboard cards using PubSub sub
+    score=4 composite=0.450 cl_20260308_000 | Use separate root layout templates with router pipelines for
+    score=1 composite=0.345 cl_20260317_001 | Pre-commit hooks designed for local environments may fail wh
+    score=5 composite=0.341 cl_20260226_000 | Algorithm specification mismatch between design doc and refe
+    score=2 composite=0.286 cl_20260308_002 | Satisfy Credo nesting depth rules through strategic refactor
+    score=4 composite=0.264 cl_20260308_001 | Implement inline RSVP UI on dashboard cards using PubSub sub
+    score=4 composite=0.450 cl_20260308_000 | Use separate root layout templates with router pipelines for
+    score=2 composite=0.402 cl_20260308_002 | Satisfy Credo nesting depth rules through strategic refactor
+    score=2 composite=0.353 cl_20260308_001 | Implement inline RSVP UI on dashboard cards using PubSub sub
+    score=5 composite=0.298 cl_20260301_001 | DATABASE_URL cannot use shell interpolation in Kamal env.cle
+    score=5 composite=0.201 cl_20260304_007 | Kamal .kamal/secrets uses single-quoted heredocs disabling s
+    score=3 composite=0.450 cl_20260308_002 | Satisfy Credo nesting depth rules through strategic refactor
+    score=2 composite=0.415 cl_20260308_001 | Implement inline RSVP UI on dashboard cards using PubSub sub
+    score=1 composite=0.368 cl_20260308_000 | Use separate root layout templates with router pipelines for
+    score=2 composite=0.366 cl_20260226_004 | RecalculationJob triggers are restricted to 5 valid values
+    score=4 composite=0.176 cl_20260226_003 | Repo.transaction double-wraps return values from callback
+    score=5 composite=0.450 cl_20260308_000 | Use separate root layout templates with router pipelines for
+    score=5 composite=0.320 cl_20260226_000 | Algorithm specification mismatch between design doc and refe
+    score=2 composite=0.316 cl_20260317_001 | Pre-commit hooks designed for local environments may fail wh
+    score=4 composite=0.283 cl_20260308_002 | Satisfy Credo nesting depth rules through strategic refactor
+    score=3 composite=0.248 cl_20260308_001 | Implement inline RSVP UI on dashboard cards using PubSub sub
+    score=3 composite=0.508 cl_20260317_003 | CSS parser warnings about @layer declarations in compiled ou
+    score=5 composite=0.417 cl_20260308_000 | Use separate root layout templates with router pipelines for
+    score=5 composite=0.379 cl_20260317_005 | Check shared components in multiple locations when fixing re
+    score=2 composite=0.333 cl_20260317_004 | Use whitespace-nowrap to prevent badge text wrapping on mobi
+    score=5 composite=0.325 cl_20260306_001 | Use scrollbar-gutter: stable to prevent layout shift from sc
+    score=5 composite=0.421 cl_20260304_006 | Always validate Vector VRL transforms locally before deployi
+    score=4 composite=0.410 cl_20260301_001 | DATABASE_URL cannot use shell interpolation in Kamal env.cle
+    score=1 composite=0.342 cl_20260308_002 | Satisfy Credo nesting depth rules through strategic refactor
+    score=1 composite=0.317 cl_20260308_000 | Use separate root layout templates with router pipelines for
+    score=2 composite=0.306 cl_20260308_001 | Implement inline RSVP UI on dashboard cards using PubSub sub
+    score=4 composite=0.508 cl_20260317_000 | Docker Compose may fail to attach services to the implicit d
+    score=2 composite=0.421 cl_20260308_002 | Satisfy Credo nesting depth rules through strategic refactor
+    score=2 composite=0.417 cl_20260308_001 | Implement inline RSVP UI on dashboard cards using PubSub sub
+    score=1 composite=0.396 cl_20260308_000 | Use separate root layout templates with router pipelines for
+    score=4 composite=0.290 cl_20260317_001 | Pre-commit hooks designed for local environments may fail wh
+    score=4 composite=0.450 cl_20260308_000 | Use separate root layout templates with router pipelines for
+    score=4 composite=0.401 cl_20260308_002 | Satisfy Credo nesting depth rules through strategic refactor
+    score=2 composite=0.334 cl_20260226_000 | Algorithm specification mismatch between design doc and refe
+    score=2 composite=0.321 cl_20260308_001 | Implement inline RSVP UI on dashboard cards using PubSub sub
+    score=2 composite=0.291 cl_20260305_000 | Share/QR code feature pattern in Phoenix LiveView
+    score=2 composite=0.427 cl_20260304_006 | Always validate Vector VRL transforms locally before deployi
+    score=4 composite=0.373 cl_20260301_001 | DATABASE_URL cannot use shell interpolation in Kamal env.cle
+    score=2 composite=0.351 cl_20260308_002 | Satisfy Credo nesting depth rules through strategic refactor
+    score=2 composite=0.337 cl_20260308_001 | Implement inline RSVP UI on dashboard cards using PubSub sub
+    score=2 composite=0.288 cl_20260308_000 | Use separate root layout templates with router pipelines for
+    score=3 composite=0.432 cl_20260304_010 | Teammate record mirrors head-to-head: same data loading, UI 
+    score=5 composite=0.350 cl_20260305_002 | tissue CLI uses show not view for ticket details
+    score=5 composite=0.297 cl_20260227_003 | Analytics.balance_teams/3 returns player maps with :id field
+    score=4 composite=0.237 cl_20260304_012 | Pairwise player features: 13 unit + 3 LiveView integration t
+    score=3 composite=0.227 cl_20260308_002 | Satisfy Credo nesting depth rules through strategic refactor
+    score=2 composite=0.508 cl_20260317_002 | Use fetchpriority="high" on LCP images to improve mobile pag
+    score=1 composite=0.308 cl_20260308_000 | Use separate root layout templates with router pipelines for
+    score=1 composite=0.210 cl_20260317_003 | CSS parser warnings about @layer declarations in compiled ou
+    score=2 composite=0.192 cl_20260308_002 | Satisfy Credo nesting depth rules through strategic refactor
+    score=1 composite=0.169 cl_20260308_001 | Implement inline RSVP UI on dashboard cards using PubSub sub
+    score=5 composite=0.450 cl_20260308_000 | Use separate root layout templates with router pipelines for
+    score=5 composite=0.304 cl_20260226_000 | Algorithm specification mismatch between design doc and refe
+    score=1 composite=0.284 cl_20260317_001 | Pre-commit hooks designed for local environments may fail wh
+    score=3 composite=0.281 cl_20260308_002 | Satisfy Credo nesting depth rules through strategic refactor
+    score=5 composite=0.235 cl_20260308_001 | Implement inline RSVP UI on dashboard cards using PubSub sub
+    score=5 composite=0.508 cl_20260317_005 | Check shared components in multiple locations when fixing re
+    score=2 composite=0.244 cl_20260308_002 | Satisfy Credo nesting depth rules through strategic refactor
+    score=2 composite=0.183 cl_20260308_000 | Use separate root layout templates with router pipelines for
+    score=3 composite=0.155 cl_20260308_001 | Implement inline RSVP UI on dashboard cards using PubSub sub
+    score=3 composite=0.450 cl_20260308_002 | Satisfy Credo nesting depth rules through strategic refactor
+    score=2 composite=0.374 cl_20260308_001 | Implement inline RSVP UI on dashboard cards using PubSub sub
+    score=2 composite=0.344 cl_20260308_000 | Use separate root layout templates with router pipelines for
+    score=2 composite=0.272 cl_20260301_002 | Phoenix prod.exs exclude: key was sibling of force_ssl:, not
+    score=3 composite=0.154 cl_20260304_000 | Phoenix require_authenticated_admin plug leaks route existen
+    score=5 composite=0.508 cl_20260317_000 | Docker Compose may fail to attach services to the implicit d
+    score=2 composite=0.276 cl_20260317_001 | Pre-commit hooks designed for local environments may fail wh
+    score=5 composite=0.508 cl_20260317_000 | Docker Compose may fail to attach services to the implicit d
+    score=2 composite=0.319 cl_20260317_001 | Pre-commit hooks designed for local environments may fail wh
+    score=4 composite=0.450 cl_20260308_000 | Use separate root layout templates with router pipelines for
+    score=3 composite=0.297 cl_20260308_002 | Satisfy Credo nesting depth rules through strategic refactor
+    score=2 composite=0.274 cl_20260308_001 | Implement inline RSVP UI on dashboard cards using PubSub sub
+    score=3 composite=0.229 cl_20260305_002 | tissue CLI uses show not view for ticket details
+    score=1 composite=0.207 cl_20260304_010 | Teammate record mirrors head-to-head: same data loading, UI 
+    score=5 composite=0.450 cl_20260308_000 | Use separate root layout templates with router pipelines for
+    score=2 composite=0.338 cl_20260317_001 | Pre-commit hooks designed for local environments may fail wh
+    score=3 composite=0.324 cl_20260226_000 | Algorithm specification mismatch between design doc and refe
+    score=4 composite=0.298 cl_20260308_002 | Satisfy Credo nesting depth rules through strategic refactor
+    score=3 composite=0.273 cl_20260308_001 | Implement inline RSVP UI on dashboard cards using PubSub sub
+    score=2 composite=0.508 cl_20260317_003 | CSS parser warnings about @layer declarations in compiled ou
+    score=2 composite=0.252 cl_20260308_000 | Use separate root layout templates with router pipelines for
+    score=3 composite=0.212 cl_20260306_001 | Use scrollbar-gutter: stable to prevent layout shift from sc
+    score=2 composite=0.197 cl_20260308_002 | Satisfy Credo nesting depth rules through strategic refactor
+    score=2 composite=0.181 cl_20260308_001 | Implement inline RSVP UI on dashboard cards using PubSub sub
+  Running: intent-boost on pickup-rank
+
+======================================================================
+INTENT-BOOST — cli backend (haiku)
+======================================================================
+    score=2 composite=0.463 cl_20260308_000 | Use separate root layout templates with router pipelines for
+    score=2 composite=0.345 cl_20260308_002 | Satisfy Credo nesting depth rules through strategic refactor
+    score=2 composite=0.318 cl_20260308_001 | Implement inline RSVP UI on dashboard cards using PubSub sub
+    score=5 composite=0.168 cl_20260304_000 | Phoenix require_authenticated_admin plug leaks route existen
+    score=5 composite=0.463 cl_20260308_000 | Use separate root layout templates with router pipelines for
+    score=2 composite=0.344 cl_20260317_001 | Pre-commit hooks designed for local environments may fail wh
+    score=2 composite=0.338 cl_20260226_000 | Algorithm specification mismatch between design doc and refe
+    score=3 composite=0.300 cl_20260308_002 | Satisfy Credo nesting depth rules through strategic refactor
+    score=3 composite=0.271 cl_20260308_001 | Implement inline RSVP UI on dashboard cards using PubSub sub
+    score=5 composite=0.450 cl_20260308_000 | Use separate root layout templates with router pipelines for
+    score=3 composite=0.306 cl_20260308_001 | Implement inline RSVP UI on dashboard cards using PubSub sub
+    score=4 composite=0.301 cl_20260227_001 | Always run mix format before committing to avoid pre-commit 
+    score=2 composite=0.283 cl_20260308_002 | Satisfy Credo nesting depth rules through strategic refactor
+    score=2 composite=0.251 cl_20260226_000 | Algorithm specification mismatch between design doc and refe
+    score=3 composite=0.450 cl_20260308_000 | Use separate root layout templates with router pipelines for
+    score=2 composite=0.393 cl_20260308_002 | Satisfy Credo nesting depth rules through strategic refactor
+    score=2 composite=0.350 cl_20260308_001 | Implement inline RSVP UI on dashboard cards using PubSub sub
+    score=1 composite=0.155 cl_20260305_001 | TTL plus link-to-preserve lifecycle for ephemeral-to-permane
+    score=3 composite=0.146 cl_20260305_003 | Avoid default function args when HEEx template always passes
+    score=4 composite=0.453 cl_20260308_000 | Use separate root layout templates with router pipelines for
+    score=2 composite=0.421 cl_20260226_000 | Algorithm specification mismatch between design doc and refe
+    score=1 composite=0.352 cl_20260317_001 | Pre-commit hooks designed for local environments may fail wh
+    score=4 composite=0.270 cl_20260308_002 | Satisfy Credo nesting depth rules through strategic refactor
+    score=4 composite=0.264 cl_20260308_001 | Implement inline RSVP UI on dashboard cards using PubSub sub
+    score=4 composite=0.450 cl_20260308_000 | Use separate root layout templates with router pipelines for
+    score=4 composite=0.354 cl_20260317_001 | Pre-commit hooks designed for local environments may fail wh
+    score=3 composite=0.346 cl_20260226_000 | Algorithm specification mismatch between design doc and refe
+    score=2 composite=0.292 cl_20260308_002 | Satisfy Credo nesting depth rules through strategic refactor
+    score=2 composite=0.276 cl_20260308_001 | Implement inline RSVP UI on dashboard cards using PubSub sub
+    score=1 composite=0.446 cl_20260305_002 | tissue CLI uses show not view for ticket details
+    score=1 composite=0.194 cl_20260305_000 | Share/QR code feature pattern in Phoenix LiveView
+    score=1 composite=0.154 cl_20260308_000 | Use separate root layout templates with router pipelines for
+    score=1 composite=0.143 cl_20260304_012 | Pairwise player features: 13 unit + 3 LiveView integration t
+    score=1 composite=0.138 cl_20260226_005 | League creation form uses flat field names, not nested under
+    score=2 composite=0.458 cl_20260308_002 | Satisfy Credo nesting depth rules through strategic refactor
+    score=2 composite=0.403 cl_20260308_001 | Implement inline RSVP UI on dashboard cards using PubSub sub
+    score=2 composite=0.390 cl_20260308_000 | Use separate root layout templates with router pipelines for
+    score=5 composite=0.383 cl_20260317_000 | Docker Compose may fail to attach services to the implicit d
+    score=5 composite=0.317 cl_20260317_001 | Pre-commit hooks designed for local environments may fail wh
+    score=3 composite=0.533 cl_20260317_000 | Docker Compose may fail to attach services to the implicit d
+    score=2 composite=0.480 cl_20260317_001 | Pre-commit hooks designed for local environments may fail wh
+    score=1 composite=0.201 cl_20260308_002 | Satisfy Credo nesting depth rules through strategic refactor
+    score=2 composite=0.185 cl_20260308_001 | Implement inline RSVP UI on dashboard cards using PubSub sub
+    score=2 composite=0.165 cl_20260308_000 | Use separate root layout templates with router pipelines for
+    score=5 composite=0.450 cl_20260301_001 | DATABASE_URL cannot use shell interpolation in Kamal env.cle
+    score=2 composite=0.417 cl_20260304_006 | Always validate Vector VRL transforms locally before deployi
+    score=1 composite=0.357 cl_20260308_002 | Satisfy Credo nesting depth rules through strategic refactor
+    score=1 composite=0.330 cl_20260308_001 | Implement inline RSVP UI on dashboard cards using PubSub sub
+    score=1 composite=0.293 cl_20260308_000 | Use separate root layout templates with router pipelines for
+    score=2 composite=0.474 cl_20260317_000 | Docker Compose may fail to attach services to the implicit d
+    score=5 composite=0.435 cl_20260301_001 | DATABASE_URL cannot use shell interpolation in Kamal env.cle
+    score=2 composite=0.411 cl_20260308_002 | Satisfy Credo nesting depth rules through strategic refactor
+    score=2 composite=0.379 cl_20260308_001 | Implement inline RSVP UI on dashboard cards using PubSub sub
+    score=1 composite=0.336 cl_20260308_000 | Use separate root layout templates with router pipelines for
+    score=3 composite=0.450 cl_20260308_000 | Use separate root layout templates with router pipelines for
+    score=5 composite=0.374 cl_20260226_000 | Algorithm specification mismatch between design doc and refe
+    score=2 composite=0.357 cl_20260317_001 | Pre-commit hooks designed for local environments may fail wh
+    score=2 composite=0.297 cl_20260308_002 | Satisfy Credo nesting depth rules through strategic refactor
+    score=2 composite=0.264 cl_20260226_001 | Use :openskill_parity test tags for algorithmic validation p
+    score=5 composite=0.508 cl_20260317_000 | Docker Compose may fail to attach services to the implicit d
+    score=3 composite=0.344 cl_20260317_001 | Pre-commit hooks designed for local environments may fail wh
+    score=1 composite=0.448 cl_20260305_000 | Share/QR code feature pattern in Phoenix LiveView
+    score=2 composite=0.299 cl_20260317_005 | Check shared components in multiple locations when fixing re
+    score=1 composite=0.168 cl_20260301_000 | Kamal 2 accessories sharing secret names need entrypoint wra
+    score=4 composite=0.419 cl_20260301_001 | DATABASE_URL cannot use shell interpolation in Kamal env.cle
+    score=1 composite=0.375 cl_20260304_006 | Always validate Vector VRL transforms locally before deployi
+    score=5 composite=0.347 cl_20260317_001 | Pre-commit hooks designed for local environments may fail wh
+    score=4 composite=0.278 cl_20260304_007 | Kamal .kamal/secrets uses single-quoted heredocs disabling s
+    score=2 composite=0.212 cl_20260301_000 | Kamal 2 accessories sharing secret names need entrypoint wra
+    score=2 composite=0.432 cl_20260304_012 | Pairwise player features: 13 unit + 3 LiveView integration t
+    score=2 composite=0.344 cl_20260226_000 | Algorithm specification mismatch between design doc and refe
+    score=2 composite=0.333 cl_20260305_000 | Share/QR code feature pattern in Phoenix LiveView
+    score=1 composite=0.327 cl_20260317_001 | Pre-commit hooks designed for local environments may fail wh
+    score=1 composite=0.286 cl_20260226_001 | Use :openskill_parity test tags for algorithmic validation p
+    score=4 composite=0.450 cl_20260308_002 | Satisfy Credo nesting depth rules through strategic refactor
+    score=5 composite=0.435 cl_20260308_000 | Use separate root layout templates with router pipelines for
+    score=2 composite=0.431 cl_20260308_001 | Implement inline RSVP UI on dashboard cards using PubSub sub
+    score=4 composite=0.188 cl_20260304_000 | Phoenix require_authenticated_admin plug leaks route existen
+    score=2 composite=0.185 cl_20260305_001 | TTL plus link-to-preserve lifecycle for ephemeral-to-permane
+    score=5 composite=0.399 cl_20260227_003 | Analytics.balance_teams/3 returns player maps with :id field
+    score=5 composite=0.318 cl_20260304_012 | Pairwise player features: 13 unit + 3 LiveView integration t
+    score=3 composite=0.288 cl_20260308_002 | Satisfy Credo nesting depth rules through strategic refactor
+    score=2 composite=0.269 cl_20260308_000 | Use separate root layout templates with router pipelines for
+    score=2 composite=0.265 cl_20260308_001 | Implement inline RSVP UI on dashboard cards using PubSub sub
+    score=4 composite=0.450 cl_20260308_000 | Use separate root layout templates with router pipelines for
+    score=5 composite=0.348 cl_20260226_000 | Algorithm specification mismatch between design doc and refe
+    score=1 composite=0.345 cl_20260317_001 | Pre-commit hooks designed for local environments may fail wh
+    score=2 composite=0.286 cl_20260308_002 | Satisfy Credo nesting depth rules through strategic refactor
+    score=4 composite=0.264 cl_20260308_001 | Implement inline RSVP UI on dashboard cards using PubSub sub
+    score=4 composite=0.450 cl_20260308_000 | Use separate root layout templates with router pipelines for
+    score=2 composite=0.394 cl_20260308_002 | Satisfy Credo nesting depth rules through strategic refactor
+    score=2 composite=0.353 cl_20260308_001 | Implement inline RSVP UI on dashboard cards using PubSub sub
+    score=5 composite=0.247 cl_20260301_001 | DATABASE_URL cannot use shell interpolation in Kamal env.cle
+    score=2 composite=0.150 cl_20260304_000 | Phoenix require_authenticated_admin plug leaks route existen
+    score=3 composite=0.450 cl_20260308_002 | Satisfy Credo nesting depth rules through strategic refactor
+    score=2 composite=0.415 cl_20260308_001 | Implement inline RSVP UI on dashboard cards using PubSub sub
+    score=1 composite=0.368 cl_20260308_000 | Use separate root layout templates with router pipelines for
+    score=2 composite=0.366 cl_20260226_004 | RecalculationJob triggers are restricted to 5 valid values
+    score=3 composite=0.193 cl_20260226_006 | Float.round/2 with precision 0 returns float not integer
+    score=5 composite=0.450 cl_20260308_000 | Use separate root layout templates with router pipelines for
+    score=5 composite=0.361 cl_20260226_000 | Algorithm specification mismatch between design doc and refe
+    score=2 composite=0.337 cl_20260317_001 | Pre-commit hooks designed for local environments may fail wh
+    score=4 composite=0.293 cl_20260308_002 | Satisfy Credo nesting depth rules through strategic refactor
+    score=3 composite=0.264 cl_20260308_001 | Implement inline RSVP UI on dashboard cards using PubSub sub
+    score=3 composite=0.508 cl_20260317_003 | CSS parser warnings about @layer declarations in compiled ou
+    score=5 composite=0.437 cl_20260308_000 | Use separate root layout templates with router pipelines for
+    score=5 composite=0.365 cl_20260306_001 | Use scrollbar-gutter: stable to prevent layout shift from sc
+    score=5 composite=0.356 cl_20260317_005 | Check shared components in multiple locations when fixing re
+    score=2 composite=0.341 cl_20260317_004 | Use whitespace-nowrap to prevent badge text wrapping on mobi
+    score=4 composite=0.417 cl_20260301_001 | DATABASE_URL cannot use shell interpolation in Kamal env.cle
+    score=5 composite=0.404 cl_20260304_006 | Always validate Vector VRL transforms locally before deployi
+    score=1 composite=0.335 cl_20260308_002 | Satisfy Credo nesting depth rules through strategic refactor
+    score=1 composite=0.317 cl_20260308_000 | Use separate root layout templates with router pipelines for
+    score=2 composite=0.306 cl_20260308_001 | Implement inline RSVP UI on dashboard cards using PubSub sub
+    score=2 composite=0.450 cl_20260308_002 | Satisfy Credo nesting depth rules through strategic refactor
+    score=4 composite=0.436 cl_20260317_000 | Docker Compose may fail to attach services to the implicit d
+    score=2 composite=0.435 cl_20260308_001 | Implement inline RSVP UI on dashboard cards using PubSub sub
+    score=1 composite=0.407 cl_20260308_000 | Use separate root layout templates with router pipelines for
+    score=4 composite=0.261 cl_20260317_001 | Pre-commit hooks designed for local environments may fail wh
+    score=4 composite=0.450 cl_20260308_000 | Use separate root layout templates with router pipelines for
+    score=4 composite=0.447 cl_20260308_002 | Satisfy Credo nesting depth rules through strategic refactor
+    score=2 composite=0.412 cl_20260308_001 | Implement inline RSVP UI on dashboard cards using PubSub sub
+    score=2 composite=0.179 cl_20260304_000 | Phoenix require_authenticated_admin plug leaks route existen
+    score=2 composite=0.163 cl_20260226_000 | Algorithm specification mismatch between design doc and refe
+    score=2 composite=0.427 cl_20260304_006 | Always validate Vector VRL transforms locally before deployi
+    score=2 composite=0.410 cl_20260308_002 | Satisfy Credo nesting depth rules through strategic refactor
+    score=4 composite=0.401 cl_20260301_001 | DATABASE_URL cannot use shell interpolation in Kamal env.cle
+    score=2 composite=0.393 cl_20260308_001 | Implement inline RSVP UI on dashboard cards using PubSub sub
+    score=2 composite=0.336 cl_20260308_000 | Use separate root layout templates with router pipelines for
+    score=3 composite=0.459 cl_20260304_010 | Teammate record mirrors head-to-head: same data loading, UI 
+    score=5 composite=0.433 cl_20260305_002 | tissue CLI uses show not view for ticket details
+    score=3 composite=0.277 cl_20260308_002 | Satisfy Credo nesting depth rules through strategic refactor
+    score=2 composite=0.255 cl_20260308_001 | Implement inline RSVP UI on dashboard cards using PubSub sub
+    score=3 composite=0.227 cl_20260308_000 | Use separate root layout templates with router pipelines for
+    score=2 composite=0.558 cl_20260317_002 | Use fetchpriority="high" on LCP images to improve mobile pag
+    score=1 composite=0.308 cl_20260308_000 | Use separate root layout templates with router pipelines for
+    score=1 composite=0.210 cl_20260317_003 | CSS parser warnings about @layer declarations in compiled ou
+    score=2 composite=0.192 cl_20260308_002 | Satisfy Credo nesting depth rules through strategic refactor
+    score=1 composite=0.169 cl_20260308_001 | Implement inline RSVP UI on dashboard cards using PubSub sub
+    score=5 composite=0.450 cl_20260308_000 | Use separate root layout templates with router pipelines for
+    score=5 composite=0.351 cl_20260226_000 | Algorithm specification mismatch between design doc and refe
+    score=1 composite=0.319 cl_20260317_001 | Pre-commit hooks designed for local environments may fail wh
+    score=3 composite=0.286 cl_20260308_002 | Satisfy Credo nesting depth rules through strategic refactor
+    score=5 composite=0.264 cl_20260308_001 | Implement inline RSVP UI on dashboard cards using PubSub sub
+    score=5 composite=0.508 cl_20260317_005 | Check shared components in multiple locations when fixing re
+    score=2 composite=0.411 cl_20260308_002 | Satisfy Credo nesting depth rules through strategic refactor
+    score=2 composite=0.365 cl_20260308_000 | Use separate root layout templates with router pipelines for
+    score=3 composite=0.310 cl_20260308_001 | Implement inline RSVP UI on dashboard cards using PubSub sub
+    score=2 composite=0.200 cl_20260304_000 | Phoenix require_authenticated_admin plug leaks route existen
+    score=3 composite=0.450 cl_20260308_002 | Satisfy Credo nesting depth rules through strategic refactor
+    score=2 composite=0.374 cl_20260308_001 | Implement inline RSVP UI on dashboard cards using PubSub sub
+    score=2 composite=0.344 cl_20260308_000 | Use separate root layout templates with router pipelines for
+    score=2 composite=0.272 cl_20260301_002 | Phoenix prod.exs exclude: key was sibling of force_ssl:, not
+    score=3 composite=0.154 cl_20260304_000 | Phoenix require_authenticated_admin plug leaks route existen
+    score=5 composite=0.534 cl_20260317_000 | Docker Compose may fail to attach services to the implicit d
+    score=2 composite=0.297 cl_20260317_001 | Pre-commit hooks designed for local environments may fail wh
+    score=5 composite=0.520 cl_20260317_000 | Docker Compose may fail to attach services to the implicit d
+    score=2 composite=0.354 cl_20260317_001 | Pre-commit hooks designed for local environments may fail wh
+    score=4 composite=0.457 cl_20260308_000 | Use separate root layout templates with router pipelines for
+    score=3 composite=0.297 cl_20260308_002 | Satisfy Credo nesting depth rules through strategic refactor
+    score=2 composite=0.287 cl_20260308_001 | Implement inline RSVP UI on dashboard cards using PubSub sub
+    score=3 composite=0.255 cl_20260305_002 | tissue CLI uses show not view for ticket details
+    score=1 composite=0.233 cl_20260304_010 | Teammate record mirrors head-to-head: same data loading, UI 
+    score=5 composite=0.450 cl_20260308_000 | Use separate root layout templates with router pipelines for
+    score=2 composite=0.346 cl_20260317_001 | Pre-commit hooks designed for local environments may fail wh
+    score=3 composite=0.339 cl_20260226_000 | Algorithm specification mismatch between design doc and refe
+    score=4 composite=0.298 cl_20260308_002 | Satisfy Credo nesting depth rules through strategic refactor
+    score=3 composite=0.275 cl_20260308_001 | Implement inline RSVP UI on dashboard cards using PubSub sub
+    score=2 composite=0.508 cl_20260317_003 | CSS parser warnings about @layer declarations in compiled ou
+    score=2 composite=0.252 cl_20260308_000 | Use separate root layout templates with router pipelines for
+    score=3 composite=0.212 cl_20260306_001 | Use scrollbar-gutter: stable to prevent layout shift from sc
+    score=2 composite=0.197 cl_20260308_002 | Satisfy Credo nesting depth rules through strategic refactor
+    score=2 composite=0.181 cl_20260308_001 | Implement inline RSVP UI on dashboard cards using PubSub sub
+  Running: boosted-adaptive on syantra
+
+======================================================================
+BOOSTED-ADAPTIVE — cli backend (haiku)
+======================================================================
+    score=5 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.280 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=5 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.265 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=5 composite=0.192 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=5 composite=0.186 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=5 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=4 composite=0.494 cl_20260314_000 | tissue CLI requires init before first use in a repo
+    score=5 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=3 composite=0.260 cl_20260317_002 | Use classifier probability thresholds tailored to use case r
+    score=5 composite=0.246 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=5 composite=0.224 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=3 composite=0.187 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=2 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.330 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=5 composite=0.220 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=5 composite=0.182 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=5 composite=0.494 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=5 composite=0.489 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.174 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=5 composite=0.163 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=1 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=1 composite=0.205 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=1 composite=0.151 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=5 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=3 composite=0.272 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=3 composite=0.185 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=5 composite=0.182 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=1 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=2 composite=0.176 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=2 composite=0.170 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=1 composite=0.165 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=5 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.383 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=5 composite=0.195 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=5 composite=0.169 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=5 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.278 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=5 composite=0.188 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=2 composite=0.176 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=3 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.381 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=3 composite=0.229 cl_20260314_000 | tissue CLI requires init before first use in a repo
+    score=5 composite=0.213 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=5 composite=0.174 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=4 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.229 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=2 composite=0.494 cl_20260314_000 | tissue CLI requires init before first use in a repo
+    score=5 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.258 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=5 composite=0.169 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=3 composite=0.153 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=5 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=4 composite=0.161 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=4 composite=0.494 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=5 composite=0.347 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=2 composite=0.325 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=3 composite=0.286 cl_20260315_002 | LogReg needs conservative feature addition; TabPFN/RF benefi
+    score=3 composite=0.271 cl_20260317_004 | TabPFN attention-based architecture benefits substantially f
+    score=5 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.157 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=3 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.168 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=1 composite=0.508 cl_20260317_001 | Avoid applying nested cross-validation tuning to small datas
+    score=1 composite=0.402 cl_20260314_004 | XGBoost and RF severely overfit with default params on this 
+    score=1 composite=0.304 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=1 composite=0.304 cl_20260315_001 | XGBoost regularization requires careful intermediate tuning 
+    score=1 composite=0.180 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.494 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=5 composite=0.370 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.148 cl_20260315_006 | C=3.0 confirmed better than C=1.0 for LogReg golden engineer
+    score=2 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.204 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=5 composite=0.200 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=3 composite=0.190 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=5 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=2 composite=0.151 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=1 composite=0.494 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=1 composite=0.308 cl_20260315_002 | LogReg needs conservative feature addition; TabPFN/RF benefi
+    score=1 composite=0.302 cl_20260317_002 | Use classifier probability thresholds tailored to use case r
+    score=4 composite=0.283 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=1 composite=0.226 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=4 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=2 composite=0.494 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=3 composite=0.471 cl_20260314_004 | XGBoost and RF severely overfit with default params on this 
+    score=2 composite=0.334 cl_20260317_001 | Avoid applying nested cross-validation tuning to small datas
+    score=3 composite=0.305 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=3 composite=0.247 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=3 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.226 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=4 composite=0.206 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=5 composite=0.196 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=5 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.295 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=5 composite=0.210 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=5 composite=0.193 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=1 composite=0.508 cl_20260317_000 | Differentiate engineered feature sets by algorithm based on 
+    score=1 composite=0.451 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=1 composite=0.313 cl_20260314_000 | tissue CLI requires init before first use in a repo
+    score=1 composite=0.299 cl_20260315_002 | LogReg needs conservative feature addition; TabPFN/RF benefi
+    score=1 composite=0.277 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=5 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.272 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=5 composite=0.189 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=5 composite=0.184 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=5 composite=0.494 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=5 composite=0.424 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.172 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=5 composite=0.168 cl_20260317_004 | TabPFN attention-based architecture benefits substantially f
+    score=5 composite=0.167 cl_20260315_006 | C=3.0 confirmed better than C=1.0 for LogReg golden engineer
+    score=5 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=4 composite=0.367 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=5 composite=0.171 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=5 composite=0.168 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=5 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.488 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=4 composite=0.171 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=5 composite=0.166 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=3 composite=0.494 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=2 composite=0.475 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=1 composite=0.466 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=1 composite=0.351 cl_20260317_002 | Use classifier probability thresholds tailored to use case r
+    score=1 composite=0.283 cl_20260317_000 | Differentiate engineered feature sets by algorithm based on 
+    score=5 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=4 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.259 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=5 composite=0.209 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=5 composite=0.197 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=5 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.235 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=3 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=3 composite=0.369 cl_20260314_000 | tissue CLI requires init before first use in a repo
+    score=4 composite=0.208 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=4 composite=0.202 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=3 composite=0.195 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=1 composite=0.494 cl_20260314_003 | TabPFN handles high-dimensional engineered features better t
+    score=4 composite=0.422 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=2 composite=0.406 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=1 composite=0.404 cl_20260317_000 | Differentiate engineered feature sets by algorithm based on 
+    score=1 composite=0.398 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=5 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.363 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=5 composite=0.185 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=5 composite=0.183 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=4 composite=0.494 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=2 composite=0.475 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=2 composite=0.466 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=1 composite=0.351 cl_20260317_002 | Use classifier probability thresholds tailored to use case r
+    score=2 composite=0.283 cl_20260317_000 | Differentiate engineered feature sets by algorithm based on 
+    score=2 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=4 composite=0.263 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=3 composite=0.202 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=3 composite=0.195 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=5 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.279 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=3 composite=0.213 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=5 composite=0.198 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=5 composite=0.170 cl_20260317_002 | Use classifier probability thresholds tailored to use case r
+    score=5 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.266 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=3 composite=0.164 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=5 composite=0.155 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=2 composite=0.494 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=2 composite=0.475 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=1 composite=0.466 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=1 composite=0.351 cl_20260317_002 | Use classifier probability thresholds tailored to use case r
+    score=2 composite=0.283 cl_20260317_000 | Differentiate engineered feature sets by algorithm based on 
+    score=3 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.215 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=3 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.175 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=5 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.469 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=3 composite=0.189 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=4 composite=0.185 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=3 composite=0.155 cl_20260315_003 | F2 threshold calibration finds same thresholds as balanced_a
+    score=1 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=1 composite=0.297 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=1 composite=0.242 cl_20260317_002 | Use classifier probability thresholds tailored to use case r
+    score=1 composite=0.219 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=1 composite=0.186 cl_20260317_001 | Avoid applying nested cross-validation tuning to small datas
+    score=4 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=4 composite=0.396 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=4 composite=0.345 cl_20260314_000 | tissue CLI requires init before first use in a repo
+    score=5 composite=0.231 cl_20260314_004 | XGBoost and RF severely overfit with default params on this 
+    score=4 composite=0.183 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=5 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.311 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=5 composite=0.178 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=4 composite=0.178 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=5 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.488 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=5 composite=0.181 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=4 composite=0.169 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=5 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=4 composite=0.311 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=5 composite=0.170 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=5 composite=0.165 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=5 composite=0.154 cl_20260315_001 | XGBoost regularization requires careful intermediate tuning 
+    score=2 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=2 composite=0.224 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=5 composite=0.206 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=4 composite=0.196 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=5 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.225 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=5 composite=0.153 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=4 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.490 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=3 composite=0.205 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=4 composite=0.187 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=4 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=2 composite=0.246 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=1 composite=0.195 cl_20260314_000 | tissue CLI requires init before first use in a repo
+    score=2 composite=0.151 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=5 composite=0.494 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=5 composite=0.494 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=4 composite=0.368 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.378 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=3 composite=0.152 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=4 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.176 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=3 composite=0.163 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=4 composite=0.154 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=5 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=4 composite=0.329 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=5 composite=0.170 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=2 composite=0.169 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=5 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=4 composite=0.179 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=4 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.279 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=5 composite=0.240 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=5 composite=0.181 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=5 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.237 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=4 composite=0.152 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=5 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=3 composite=0.404 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=5 composite=0.173 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=3 composite=0.165 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=5 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.383 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=2 composite=0.205 cl_20260314_000 | tissue CLI requires init before first use in a repo
+    score=2 composite=0.181 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=5 composite=0.176 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=3 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.230 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=5 composite=0.205 cl_20260317_004 | TabPFN attention-based architecture benefits substantially f
+    score=1 composite=0.200 cl_20260317_003 | Extract and apply tuning consensus from nested CV across mul
+    score=5 composite=0.173 cl_20260317_002 | Use classifier probability thresholds tailored to use case r
+    score=5 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.304 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=5 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=4 composite=0.257 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=5 composite=0.211 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+  Running: heuristic-enriched(50) on syantra
+
+======================================================================
+HEURISTIC-ENRICHED(50) — cli backend (haiku)
+======================================================================
+    score=5 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.295 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=5 composite=0.151 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=4 composite=0.150 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=5 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.276 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=5 composite=0.200 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=5 composite=0.190 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=5 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=4 composite=0.494 cl_20260314_000 | tissue CLI requires init before first use in a repo
+    score=5 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=3 composite=0.260 cl_20260317_002 | Use classifier probability thresholds tailored to use case r
+    score=5 composite=0.257 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=5 composite=0.246 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=3 composite=0.205 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=2 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.347 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=5 composite=0.232 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=5 composite=0.192 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=5 composite=0.494 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=5 composite=0.449 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.188 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=5 composite=0.154 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=5 composite=0.148 cl_20260315_006 | C=3.0 confirmed better than C=1.0 for LogReg golden engineer
+    score=1 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=1 composite=0.205 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=1 composite=0.151 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=5 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=3 composite=0.287 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=3 composite=0.191 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=5 composite=0.190 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=1 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=2 composite=0.316 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=1 composite=0.276 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=2 composite=0.243 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=1 composite=0.195 cl_20260317_002 | Use classifier probability thresholds tailored to use case r
+    score=5 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.406 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=5 composite=0.205 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=5 composite=0.185 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=5 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.283 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=5 composite=0.200 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=2 composite=0.182 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=3 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.467 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=5 composite=0.329 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=3 composite=0.227 cl_20260314_000 | tissue CLI requires init before first use in a repo
+    score=5 composite=0.206 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=4 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.254 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=2 composite=0.494 cl_20260314_000 | tissue CLI requires init before first use in a repo
+    score=5 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.273 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=5 composite=0.180 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=3 composite=0.158 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=5 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=4 composite=0.191 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=4 composite=0.494 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=5 composite=0.347 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=2 composite=0.325 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=3 composite=0.286 cl_20260315_002 | LogReg needs conservative feature addition; TabPFN/RF benefi
+    score=3 composite=0.271 cl_20260317_004 | TabPFN attention-based architecture benefits substantially f
+    score=5 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.157 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=3 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.177 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=1 composite=0.508 cl_20260317_001 | Avoid applying nested cross-validation tuning to small datas
+    score=1 composite=0.402 cl_20260314_004 | XGBoost and RF severely overfit with default params on this 
+    score=1 composite=0.304 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=1 composite=0.304 cl_20260315_001 | XGBoost regularization requires careful intermediate tuning 
+    score=1 composite=0.180 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.494 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=5 composite=0.342 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.160 cl_20260315_006 | C=3.0 confirmed better than C=1.0 for LogReg golden engineer
+    score=2 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.211 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=5 composite=0.210 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=3 composite=0.193 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=5 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=2 composite=0.156 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=1 composite=0.494 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=1 composite=0.308 cl_20260315_002 | LogReg needs conservative feature addition; TabPFN/RF benefi
+    score=1 composite=0.302 cl_20260317_002 | Use classifier probability thresholds tailored to use case r
+    score=4 composite=0.283 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=1 composite=0.226 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=4 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=2 composite=0.494 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=3 composite=0.471 cl_20260314_004 | XGBoost and RF severely overfit with default params on this 
+    score=2 composite=0.334 cl_20260317_001 | Avoid applying nested cross-validation tuning to small datas
+    score=3 composite=0.305 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=3 composite=0.247 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=3 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.226 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=4 composite=0.206 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=5 composite=0.196 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=5 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.338 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=5 composite=0.210 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=5 composite=0.201 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=1 composite=0.508 cl_20260317_000 | Differentiate engineered feature sets by algorithm based on 
+    score=1 composite=0.451 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=1 composite=0.313 cl_20260314_000 | tissue CLI requires init before first use in a repo
+    score=1 composite=0.299 cl_20260315_002 | LogReg needs conservative feature addition; TabPFN/RF benefi
+    score=1 composite=0.277 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=5 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.276 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=5 composite=0.189 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=5 composite=0.185 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=5 composite=0.494 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=5 composite=0.419 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.181 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=5 composite=0.177 cl_20260317_004 | TabPFN attention-based architecture benefits substantially f
+    score=5 composite=0.175 cl_20260315_002 | LogReg needs conservative feature addition; TabPFN/RF benefi
+    score=5 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=4 composite=0.386 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=5 composite=0.176 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=5 composite=0.176 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=5 composite=0.494 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=5 composite=0.478 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=4 composite=0.168 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=5 composite=0.161 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=5 composite=0.150 cl_20260315_006 | C=3.0 confirmed better than C=1.0 for LogReg golden engineer
+    score=1 composite=0.494 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=3 composite=0.472 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=2 composite=0.443 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=1 composite=0.327 cl_20260317_002 | Use classifier probability thresholds tailored to use case r
+    score=1 composite=0.270 cl_20260315_003 | F2 threshold calibration finds same thresholds as balanced_a
+    score=5 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=4 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.272 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=5 composite=0.209 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=5 composite=0.197 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=5 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.242 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=3 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=3 composite=0.369 cl_20260314_000 | tissue CLI requires init before first use in a repo
+    score=4 composite=0.208 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=4 composite=0.202 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=3 composite=0.195 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=1 composite=0.494 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=4 composite=0.456 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=1 composite=0.453 cl_20260314_003 | TabPFN handles high-dimensional engineered features better t
+    score=2 composite=0.424 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=1 composite=0.392 cl_20260317_000 | Differentiate engineered feature sets by algorithm based on 
+    score=5 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.364 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=5 composite=0.186 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=5 composite=0.183 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=2 composite=0.494 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=4 composite=0.465 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=2 composite=0.435 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=1 composite=0.321 cl_20260317_002 | Use classifier probability thresholds tailored to use case r
+    score=1 composite=0.267 cl_20260315_003 | F2 threshold calibration finds same thresholds as balanced_a
+    score=2 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=4 composite=0.263 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=3 composite=0.202 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=3 composite=0.195 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=5 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.310 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=3 composite=0.213 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=5 composite=0.202 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=5 composite=0.175 cl_20260317_002 | Use classifier probability thresholds tailored to use case r
+    score=5 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.279 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=3 composite=0.164 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=5 composite=0.157 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=1 composite=0.494 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=2 composite=0.484 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=2 composite=0.457 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=1 composite=0.337 cl_20260317_002 | Use classifier probability thresholds tailored to use case r
+    score=1 composite=0.276 cl_20260315_003 | F2 threshold calibration finds same thresholds as balanced_a
+    score=3 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.230 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=3 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.226 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=5 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.484 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=3 composite=0.193 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=4 composite=0.191 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=3 composite=0.161 cl_20260315_003 | F2 threshold calibration finds same thresholds as balanced_a
+    score=1 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=1 composite=0.297 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=1 composite=0.242 cl_20260317_002 | Use classifier probability thresholds tailored to use case r
+    score=1 composite=0.219 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=1 composite=0.186 cl_20260317_001 | Avoid applying nested cross-validation tuning to small datas
+    score=4 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=4 composite=0.396 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=4 composite=0.345 cl_20260314_000 | tissue CLI requires init before first use in a repo
+    score=5 composite=0.231 cl_20260314_004 | XGBoost and RF severely overfit with default params on this 
+    score=4 composite=0.183 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=5 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.329 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=5 composite=0.184 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=4 composite=0.181 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=5 composite=0.494 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=5 composite=0.451 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.171 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=4 composite=0.154 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=5 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=4 composite=0.321 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=5 composite=0.185 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=5 composite=0.178 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=5 composite=0.156 cl_20260315_001 | XGBoost regularization requires careful intermediate tuning 
+    score=2 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=2 composite=0.224 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=5 composite=0.206 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=4 composite=0.196 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=5 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.250 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=5 composite=0.171 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=5 composite=0.494 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=4 composite=0.468 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=3 composite=0.211 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=4 composite=0.189 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=4 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=2 composite=0.291 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=2 composite=0.196 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=1 composite=0.193 cl_20260314_000 | tissue CLI requires init before first use in a repo
+    score=4 composite=0.190 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=5 composite=0.494 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=4 composite=0.176 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=5 composite=0.494 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=4 composite=0.344 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.431 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=3 composite=0.158 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=4 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.191 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=3 composite=0.168 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=4 composite=0.160 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=5 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=4 composite=0.354 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=5 composite=0.181 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=2 composite=0.178 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=5 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=4 composite=0.179 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=4 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.386 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=5 composite=0.240 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=5 composite=0.194 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=5 composite=0.161 cl_20260317_002 | Use classifier probability thresholds tailored to use case r
+    score=5 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.251 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=4 composite=0.152 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=5 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=3 composite=0.412 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=5 composite=0.175 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=3 composite=0.165 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=5 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.422 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=2 composite=0.205 cl_20260314_000 | tissue CLI requires init before first use in a repo
+    score=2 composite=0.197 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=5 composite=0.191 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=3 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.326 cl_20260317_004 | TabPFN attention-based architecture benefits substantially f
+    score=5 composite=0.321 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=5 composite=0.313 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=5 composite=0.212 cl_20260317_002 | Use classifier probability thresholds tailored to use case r
+    score=5 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.323 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=5 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=4 composite=0.263 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=5 composite=0.219 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+  Running: intent-boost on syantra
+
+======================================================================
+INTENT-BOOST — cli backend (haiku)
+======================================================================
+    score=5 composite=0.521 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.287 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=5 composite=0.159 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=5 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.265 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=5 composite=0.192 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=5 composite=0.186 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=5 composite=0.508 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=4 composite=0.501 cl_20260314_000 | tissue CLI requires init before first use in a repo
+    score=5 composite=0.514 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=3 composite=0.280 cl_20260317_002 | Use classifier probability thresholds tailored to use case r
+    score=5 composite=0.253 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=5 composite=0.244 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=3 composite=0.194 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=2 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.534 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.357 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=5 composite=0.233 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=5 composite=0.188 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=5 composite=0.522 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.521 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=5 composite=0.187 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=5 composite=0.169 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=1 composite=0.523 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=1 composite=0.212 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=5 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=3 composite=0.272 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=3 composite=0.185 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=5 composite=0.182 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=1 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=2 composite=0.183 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=2 composite=0.177 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=1 composite=0.172 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=5 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.383 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=5 composite=0.195 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=5 composite=0.169 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=5 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.278 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=5 composite=0.188 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=2 composite=0.176 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=3 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.381 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=3 composite=0.262 cl_20260314_000 | tissue CLI requires init before first use in a repo
+    score=5 composite=0.230 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=5 composite=0.174 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=4 composite=0.521 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.249 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=5 composite=0.161 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=2 composite=0.508 cl_20260314_000 | tissue CLI requires init before first use in a repo
+    score=5 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.258 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=5 composite=0.169 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=3 composite=0.153 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=5 composite=0.503 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=4 composite=0.161 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=4 composite=0.512 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=5 composite=0.357 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=2 composite=0.325 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=3 composite=0.295 cl_20260315_002 | LogReg needs conservative feature addition; TabPFN/RF benefi
+    score=3 composite=0.280 cl_20260317_004 | TabPFN attention-based architecture benefits substantially f
+    score=5 composite=0.536 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.174 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=3 composite=0.521 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.540 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.204 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=1 composite=0.508 cl_20260317_001 | Avoid applying nested cross-validation tuning to small datas
+    score=1 composite=0.402 cl_20260314_004 | XGBoost and RF severely overfit with default params on this 
+    score=1 composite=0.312 cl_20260315_001 | XGBoost regularization requires careful intermediate tuning 
+    score=1 composite=0.304 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=1 composite=0.189 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.521 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=5 composite=0.403 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.160 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=2 composite=0.501 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.210 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=5 composite=0.200 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=3 composite=0.190 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=5 composite=0.508 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=1 composite=0.521 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=1 composite=0.328 cl_20260315_002 | LogReg needs conservative feature addition; TabPFN/RF benefi
+    score=1 composite=0.315 cl_20260317_002 | Use classifier probability thresholds tailored to use case r
+    score=4 composite=0.296 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=1 composite=0.253 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=4 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=2 composite=0.494 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=3 composite=0.471 cl_20260314_004 | XGBoost and RF severely overfit with default params on this 
+    score=2 composite=0.334 cl_20260317_001 | Avoid applying nested cross-validation tuning to small datas
+    score=3 composite=0.312 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=3 composite=0.254 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=3 composite=0.514 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.233 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=4 composite=0.212 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=5 composite=0.196 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=5 composite=0.514 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.301 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=5 composite=0.230 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=5 composite=0.193 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=5 composite=0.154 cl_20260317_002 | Use classifier probability thresholds tailored to use case r
+    score=1 composite=0.521 cl_20260317_000 | Differentiate engineered feature sets by algorithm based on 
+    score=1 composite=0.464 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=1 composite=0.313 cl_20260314_000 | tissue CLI requires init before first use in a repo
+    score=1 composite=0.306 cl_20260315_002 | LogReg needs conservative feature addition; TabPFN/RF benefi
+    score=1 composite=0.297 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=5 composite=0.517 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.280 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=5 composite=0.196 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=5 composite=0.192 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=5 composite=0.514 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=5 composite=0.424 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.205 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=5 composite=0.201 cl_20260317_004 | TabPFN attention-based architecture benefits substantially f
+    score=5 composite=0.186 cl_20260315_002 | LogReg needs conservative feature addition; TabPFN/RF benefi
+    score=5 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=4 composite=0.367 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=5 composite=0.171 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=5 composite=0.168 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=5 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.488 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=4 composite=0.171 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=5 composite=0.166 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=3 composite=0.501 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=2 composite=0.482 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=1 composite=0.466 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=1 composite=0.351 cl_20260317_002 | Use classifier probability thresholds tailored to use case r
+    score=1 composite=0.283 cl_20260317_000 | Differentiate engineered feature sets by algorithm based on 
+    score=5 composite=0.528 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=4 composite=0.514 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.266 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=5 composite=0.222 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=5 composite=0.197 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=5 composite=0.155 cl_20260317_002 | Use classifier probability thresholds tailored to use case r
+    score=5 composite=0.508 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.235 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=3 composite=0.514 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=3 composite=0.382 cl_20260314_000 | tissue CLI requires init before first use in a repo
+    score=4 composite=0.221 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=4 composite=0.209 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=3 composite=0.195 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=1 composite=0.494 cl_20260314_003 | TabPFN handles high-dimensional engineered features better t
+    score=4 composite=0.422 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=2 composite=0.406 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=1 composite=0.404 cl_20260317_000 | Differentiate engineered feature sets by algorithm based on 
+    score=1 composite=0.398 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=5 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.363 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=5 composite=0.196 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=5 composite=0.185 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=4 composite=0.494 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=2 composite=0.475 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=2 composite=0.466 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=1 composite=0.351 cl_20260317_002 | Use classifier probability thresholds tailored to use case r
+    score=2 composite=0.283 cl_20260317_000 | Differentiate engineered feature sets by algorithm based on 
+    score=2 composite=0.514 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=4 composite=0.269 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=3 composite=0.209 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=3 composite=0.195 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=5 composite=0.155 cl_20260317_002 | Use classifier probability thresholds tailored to use case r
+    score=5 composite=0.514 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.299 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=3 composite=0.220 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=5 composite=0.205 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=5 composite=0.184 cl_20260317_002 | Use classifier probability thresholds tailored to use case r
+    score=5 composite=0.517 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.273 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=3 composite=0.172 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=5 composite=0.171 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=2 composite=0.494 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=2 composite=0.475 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=1 composite=0.466 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=1 composite=0.351 cl_20260317_002 | Use classifier probability thresholds tailored to use case r
+    score=2 composite=0.283 cl_20260317_000 | Differentiate engineered feature sets by algorithm based on 
+    score=3 composite=0.528 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.242 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=3 composite=0.528 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.202 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=5 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.469 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=3 composite=0.189 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=4 composite=0.185 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=3 composite=0.155 cl_20260315_003 | F2 threshold calibration finds same thresholds as balanced_a
+    score=1 composite=0.502 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=1 composite=0.312 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=1 composite=0.250 cl_20260317_002 | Use classifier probability thresholds tailored to use case r
+    score=1 composite=0.235 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=1 composite=0.186 cl_20260317_001 | Avoid applying nested cross-validation tuning to small datas
+    score=4 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=4 composite=0.396 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=4 composite=0.359 cl_20260314_000 | tissue CLI requires init before first use in a repo
+    score=5 composite=0.251 cl_20260314_004 | XGBoost and RF severely overfit with default params on this 
+    score=4 composite=0.189 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=5 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.311 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=5 composite=0.185 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=4 composite=0.184 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=5 composite=0.515 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=5 composite=0.514 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.201 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=4 composite=0.176 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=5 composite=0.516 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=4 composite=0.318 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=5 composite=0.173 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=5 composite=0.170 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=5 composite=0.161 cl_20260315_001 | XGBoost regularization requires careful intermediate tuning 
+    score=2 composite=0.514 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=2 composite=0.231 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=5 composite=0.213 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=4 composite=0.196 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=5 composite=0.511 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.225 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=5 composite=0.169 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=5 composite=0.516 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=4 composite=0.514 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=3 composite=0.232 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=4 composite=0.194 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=4 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=2 composite=0.246 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=1 composite=0.201 cl_20260314_000 | tissue CLI requires init before first use in a repo
+    score=2 composite=0.151 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=5 composite=0.494 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=5 composite=0.521 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=4 composite=0.368 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.162 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=5 composite=0.521 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.418 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=3 composite=0.165 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=4 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.176 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=3 composite=0.163 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=4 composite=0.154 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=5 composite=0.514 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=4 composite=0.336 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=5 composite=0.177 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=2 composite=0.175 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=5 composite=0.511 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=4 composite=0.195 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=4 composite=0.528 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.290 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=5 composite=0.263 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=5 composite=0.181 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=5 composite=0.508 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.237 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=4 composite=0.166 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=5 composite=0.159 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=5 composite=0.521 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=3 composite=0.413 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=3 composite=0.174 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=5 composite=0.173 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=5 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.383 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=2 composite=0.218 cl_20260314_000 | tissue CLI requires init before first use in a repo
+    score=2 composite=0.181 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=5 composite=0.176 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=3 composite=0.516 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.238 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+    score=1 composite=0.214 cl_20260317_003 | Extract and apply tuning consensus from nested CV across mul
+    score=5 composite=0.213 cl_20260317_004 | TabPFN attention-based architecture benefits substantially f
+    score=5 composite=0.187 cl_20260317_002 | Use classifier probability thresholds tailored to use case r
+    score=5 composite=0.494 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=5 composite=0.311 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=5 composite=0.501 cl_20260314_005 | Training scripts must be run via uv from the training direct
+    score=4 composite=0.264 cl_20260314_002 | Golden model configs use M2 normalized features + clinical c
+    score=5 composite=0.218 cl_20260315_000 | Nested CV tuning hurts all models on small datasets (n=489)
+    score=4 composite=0.152 cl_20260314_001 | Engineered ddct/ratio features show higher MI than normalize
+================================================================================
+EVAL SWEEP — MULTI-CORPUS BENCHMARK
+================================================================================
+
+  Corpus: grove (54 learnings, 33 sessions)
+  Config                     Pairs    Avg    Med  Noise%   P@3g    P@3    R@4     F1  Cov%    MRR
+  -------------------------------------------------------------------------------------------------
+  boosted-adaptive             152   3.18    3.0     41%    59%    60%    31%  0.404   94%  0.549
+  heuristic-enriched(50)       146   3.49    4.0     35%    65%    68%    36%  0.463   91%  0.717
+  intent-boost                 155   3.19    3.0     41%    59%    60%    31%  0.409   94%  0.549
+
+  Corpus: pickup-rank (44 learnings, 41 sessions)
+  Config                     Pairs    Avg    Med  Noise%   P@3g    P@3    R@4     F1  Cov%    MRR
+  -------------------------------------------------------------------------------------------------
+  boosted-adaptive             173   2.76    2.0     55%    45%    50%    41%  0.427   90%  0.620
+  heuristic-enriched(50)       170   2.84    2.0     53%    47%    50%    44%  0.455   90%  0.661
+  intent-boost                 173   2.75    2.0     55%    45%    49%    40%  0.422   90%  0.631
+
+  Corpus: syantra (18 learnings, 75 sessions)
+  Config                     Pairs    Avg    Med  Noise%   P@3g    P@3    R@4     F1  Cov%    MRR
+  -------------------------------------------------------------------------------------------------
+  boosted-adaptive             259   3.77    5.0     24%    76%    80%    36%  0.488   99%  0.769
+  heuristic-enriched(50)       267   3.79    5.0     23%    77%    80%    38%  0.506   99%  0.762
+  intent-boost                 265   3.82    5.0     22%    78%    80%    37%  0.505   99%  0.769
+
+
+  Key:
+    Pairs   = (session, learning) pairs judged
+    Avg/Med = mean / median relevance score (1-5)
+    Noise%  = % of pairs scoring <= 2 (irrelevant)
+    P@3g    = precision: % of all surfaced pairs scoring >= 3
+    P@3     = precision per-session: mean of per-session top-3 precision (>= 3)
+    R@4     = recall: % of ground-truth relevant pairs (>= 4) that were surfaced
+    F1      = harmonic mean of P@3g and R@4
+    Cov%    = coverage: % of corpus sessions receiving at least one result
+    MRR     = mean reciprocal rank: avg of 1/rank of first relevant (>= 4) pair
+
+================================================================================

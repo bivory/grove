@@ -39,6 +39,9 @@ All events include a `v` (version) field for schema evolution.
 {"v":1,"ts":"2026-02-06T11:00:00Z","event":"skip","session_id":"abc","reason":"auto: 2 lines, version bump","decider":"agent","lines_changed":2,"ticket_id":"T042"}
 {"v":1,"ts":"2026-02-06T11:00:00Z","event":"archived","learning_id":"L002","reason":"passive_decay"}
 {"v":1,"ts":"2026-02-06T11:00:00Z","event":"restored","learning_id":"L002"}
+{"v":1,"ts":"2026-02-06T11:30:00Z","event":"rejected","session_id":"abc","summary":"The codebase uses Rust","tags":["general"],"reason":"low_specificity","stage":"quality_check"}
+{"v":1,"ts":"2026-02-06T11:30:00Z","event":"rated","learning_id":"L001","useful":true,"context":"review"}
+{"v":1,"ts":"2026-02-06T11:30:00Z","event":"implicitly_referenced","learning_id":"L001","session_id":"abc","overlap_ratio":0.35,"matched_keywords":["async","error-handling"]}
 {"v":1,"ts":"2026-02-06T12:00:00Z","event":"retroflect","session_id":"abc","claude_session_id":"550e8400-e29b-41d4-a716-446655440000","candidates":4,"accepted":2,"project_path":"/Users/dev/my-project"}
 ```
 
@@ -52,6 +55,9 @@ All events include a `v` (version) field for schema evolution.
 | `skip` | session_id, reason, decider, lines_changed, ticket_id? | `grove skip` |
 | `archived` | learning_id, reason | Passive decay check |
 | `restored` | learning_id | `grove maintain` |
+| `rejected` | session_id, summary, tags[], reason, stage | `grove reflect` |
+| `rated` | learning_id, useful, context | `grove review` |
+| `implicitly_referenced` | learning_id, session_id, overlap_ratio, matched_keywords[] | `grove hook session-end` (stop hook) |
 | `retroflect` | session_id, claude_session_id, candidates, accepted, project_path | `grove retroflect` |
 
 ### 1.3 Materialized Cache
@@ -230,7 +236,8 @@ backend:
 | Exact tag match | 1.0 |
 | Partial tag match | 0.5 |
 | File path overlap | 0.8 |
-| Keyword in summary | 0.3 |
+| Keyword in summary | 0.5 |
+| Keyword in detail | 0.2 |
 | No match | 0.0 |
 
 Multiple matches are combined additively (`score +=`), capped at 1.0.
@@ -258,12 +265,12 @@ Where `λ` is tuned so that a 90-day-old learning has weight ~0.3 and a
 Learnings with proven value (high hit rate) get boosted:
 
 ```text
-reference_boost = 0.5 + (hit_rate × 0.5)
+reference_boost = 0.1 + (hit_rate × 0.9)
 ```
 
-Range: 0.5 (never referenced) to 1.0 (always referenced). This prevents
-new learnings from being completely buried by well-established ones while
-still rewarding proven value.
+Range: 0.1 (never referenced) to 1.0 (always referenced). This penalizes
+chronically unreferenced learnings more aggressively while still rewarding
+proven value.
 
 ### 6.4 Final Ranking
 
@@ -296,7 +303,7 @@ For each active learning:
 
 ### 7.2 Decay Immunity
 
-Learnings with a hit rate above a configurable threshold (default: 0.8)
+Learnings with a hit rate above a configurable threshold (default: 0.3)
 are immune to passive decay. They've proven their value and should persist
 until explicitly archived.
 
@@ -324,6 +331,27 @@ When a learning is corrected (status → `superseded`):
 
 Proactive correction notices are best-effort and deferred to v2 if
 implementation complexity is high.
+
+### 7.5 Corpus Consolidation
+
+`grove maintain consolidate` performs LLM-powered corpus maintenance to
+reduce noise and detect stale entries. Three operations:
+
+1. **Grouping:** Cluster active learnings by tag Jaccard similarity
+   (>= 0.5 same category, >= 0.7 cross-category) with union-find for
+   transitive closure. Learnings with fewer than 2 tags are excluded.
+
+2. **Merging:** For each group, an LLM call produces a merged canonical
+   learning (summary + detail + tags). Source learnings are archived on
+   apply. The merged learning inherits the group's shared category.
+
+3. **Staleness detection:** Check `context_files` paths against the
+   project root. Missing files are flagged as stale references.
+
+Dry-run by default (`--apply` to execute). `--stale-only` skips the LLM
+merge step entirely. LLM failures are fail-open (group is skipped).
+
+Uses `judge` config for LLM backend/model selection.
 
 ## 8. Insights Engine
 

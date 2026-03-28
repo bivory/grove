@@ -1,0 +1,373 @@
+{
+  "corpora": [
+    {
+      "corpus_name": "grove",
+      "learning_count": 54,
+      "session_count": 33,
+      "results": [
+        {
+          "config_name": "boosted-adaptive",
+          "corpus_name": "grove",
+          "metrics": {
+            "sessions_evaluated": 31,
+            "sessions_suppressed": 0,
+            "pairs_judged": 152,
+            "avg_relevance": 3.1776315789473686,
+            "median_relevance": 3.0,
+            "score_distribution": [
+              18,
+              45,
+              22,
+              26,
+              41
+            ],
+            "noise_count": 63,
+            "noise_pct": 41.44736842105263,
+            "precision_at_3": 0.5855263157894737,
+            "recall_at_4": 0.3087557603686636,
+            "recall_at_5": 0.2887323943661972,
+            "f1_at_4": 0.4043123029460623,
+            "precision_at_3_per_session": 0.5967741935483871,
+            "sessions_total": 33,
+            "coverage": 0.9393939393939394,
+            "pairs_per_session_min": 2,
+            "pairs_per_session_mean": 4.903225806451613,
+            "pairs_per_session_max": 5,
+            "mrr_at_4": 0.5494623655913978
+          },
+          "judge_stats": {
+            "total_calls": 152,
+            "cache_hits": 152,
+            "new_judgments": 0,
+            "failures": 0
+          },
+          "timestamp": "2026-03-23T22:03:58.208793+00:00"
+        },
+        {
+          "config_name": "heuristic-enriched(50)",
+          "corpus_name": "grove",
+          "metrics": {
+            "sessions_evaluated": 30,
+            "sessions_suppressed": 0,
+            "pairs_judged": 146,
+            "avg_relevance": 3.493150684931507,
+            "median_relevance": 4.0,
+            "score_distribution": [
+              9,
+              42,
+              17,
+              24,
+              54
+            ],
+            "noise_count": 51,
+            "noise_pct": 34.93150684931507,
+            "precision_at_3": 0.6506849315068494,
+            "recall_at_4": 0.35944700460829493,
+            "recall_at_5": 0.38028169014084506,
+            "f1_at_4": 0.46308158610130296,
+            "precision_at_3_per_session": 0.6833333333333335,
+            "sessions_total": 33,
+            "coverage": 0.9090909090909091,
+            "pairs_per_session_min": 2,
+            "pairs_per_session_mean": 4.866666666666666,
+            "pairs_per_session_max": 5,
+            "mrr_at_4": 0.7166666666666667
+          },
+          "judge_stats": {
+            "total_calls": 146,
+            "cache_hits": 146,
+            "new_judgments": 0,
+            "failures": 0
+          },
+          "timestamp": "2026-03-23T22:03:58.315233+00:00"
+        },
+        {
+          "config_name": "intent-boost",
+          "corpus_name": "grove",
+          "metrics": {
+            "sessions_evaluated": 31,
+            "sessions_suppressed": 0,
+            "pairs_judged": 155,
+            "avg_relevance": 3.193548387096774,
+            "median_relevance": 3.0,
+            "score_distribution": [
+              16,
+              48,
+              23,
+              26,
+              42
+            ],
+            "noise_count": 64,
+            "noise_pct": 41.29032258064516,
+            "precision_at_3": 0.5870967741935483,
+            "recall_at_4": 0.31336405529953915,
+            "recall_at_5": 0.29577464788732394,
+            "f1_at_4": 0.40862416218179415,
+            "precision_at_3_per_session": 0.6021505376344085,
+            "sessions_total": 33,
+            "coverage": 0.9393939393939394,
+            "pairs_per_session_min": 5,
+            "pairs_per_session_mean": 5.0,
+            "pairs_per_session_max": 5,
+            "mrr_at_4": 0.5494623655913978
+          },
+          "judge_stats": {
+            "total_calls": 155,
+            "cache_hits": 155,
+            "new_judgments": 0,
+            "failures": 0
+          },
+          "timestamp": "2026-03-23T22:03:59.439680+00:00"
+        }
+      ]
+    },
+    {
+      "corpus_name": "pickup-rank",
+      "learning_count": 44,
+      "session_count": 41,
+      "results": [
+        {
+          "config_name": "boosted-adaptive",
+          "corpus_name": "pickup-rank",
+          "metrics": {
+            "sessions_evaluated": 37,
+            "sessions_suppressed": 0,
+            "pairs_judged": 173,
+            "avg_relevance": 2.7630057803468207,
+            "median_relevance": 2.0,
+            "score_distribution": [
+              27,
+              69,
+              25,
+              22,
+              30
+            ],
+            "noise_count": 96,
+            "noise_pct": 55.49132947976878,
+            "precision_at_3": 0.44508670520231214,
+            "recall_at_4": 0.4094488188976378,
+            "recall_at_5": 0.38961038961038963,
+            "f1_at_4": 0.42652463382157124,
+            "precision_at_3_per_session": 0.49549549549549565,
+            "sessions_total": 41,
+            "coverage": 0.9024390243902439,
+            "pairs_per_session_min": 2,
+            "pairs_per_session_mean": 4.675675675675675,
+            "pairs_per_session_max": 5,
+            "mrr_at_4": 0.6202702702702703
+          },
+          "judge_stats": {
+            "total_calls": 173,
+            "cache_hits": 173,
+            "new_judgments": 0,
+            "failures": 0
+          },
+          "timestamp": "2026-03-23T22:03:59.907692+00:00"
+        },
+        {
+          "config_name": "heuristic-enriched(50)",
+          "corpus_name": "pickup-rank",
+          "metrics": {
+            "sessions_evaluated": 37,
+            "sessions_suppressed": 0,
+            "pairs_judged": 170,
+            "avg_relevance": 2.835294117647059,
+            "median_relevance": 2.0,
+            "score_distribution": [
+              26,
+              64,
+              24,
+              24,
+              32
+            ],
+            "noise_count": 90,
+            "noise_pct": 52.94117647058824,
+            "precision_at_3": 0.47058823529411764,
+            "recall_at_4": 0.4409448818897638,
+            "recall_at_5": 0.4155844155844156,
+            "f1_at_4": 0.45528455284552843,
+            "precision_at_3_per_session": 0.5045045045045046,
+            "sessions_total": 41,
+            "coverage": 0.9024390243902439,
+            "pairs_per_session_min": 2,
+            "pairs_per_session_mean": 4.594594594594595,
+            "pairs_per_session_max": 5,
+            "mrr_at_4": 0.6608108108108108
+          },
+          "judge_stats": {
+            "total_calls": 170,
+            "cache_hits": 170,
+            "new_judgments": 0,
+            "failures": 0
+          },
+          "timestamp": "2026-03-23T22:04:00.442817+00:00"
+        },
+        {
+          "config_name": "intent-boost",
+          "corpus_name": "pickup-rank",
+          "metrics": {
+            "sessions_evaluated": 37,
+            "sessions_suppressed": 0,
+            "pairs_judged": 173,
+            "avg_relevance": 2.7514450867052025,
+            "median_relevance": 2.0,
+            "score_distribution": [
+              27,
+              69,
+              26,
+              22,
+              29
+            ],
+            "noise_count": 96,
+            "noise_pct": 55.49132947976878,
+            "precision_at_3": 0.44508670520231214,
+            "recall_at_4": 0.4015748031496063,
+            "recall_at_5": 0.37662337662337664,
+            "f1_at_4": 0.42221266530480595,
+            "precision_at_3_per_session": 0.4864864864864865,
+            "sessions_total": 41,
+            "coverage": 0.9024390243902439,
+            "pairs_per_session_min": 2,
+            "pairs_per_session_mean": 4.675675675675675,
+            "pairs_per_session_max": 5,
+            "mrr_at_4": 0.6306306306306307
+          },
+          "judge_stats": {
+            "total_calls": 173,
+            "cache_hits": 173,
+            "new_judgments": 0,
+            "failures": 0
+          },
+          "timestamp": "2026-03-23T22:04:01.211171+00:00"
+        }
+      ]
+    },
+    {
+      "corpus_name": "syantra",
+      "learning_count": 18,
+      "session_count": 75,
+      "results": [
+        {
+          "config_name": "boosted-adaptive",
+          "corpus_name": "syantra",
+          "metrics": {
+            "sessions_evaluated": 74,
+            "sessions_suppressed": 0,
+            "pairs_judged": 259,
+            "avg_relevance": 3.7683397683397684,
+            "median_relevance": 5.0,
+            "score_distribution": [
+              35,
+              26,
+              33,
+              35,
+              130
+            ],
+            "noise_count": 61,
+            "noise_pct": 23.552123552123554,
+            "precision_at_3": 0.7644787644787645,
+            "recall_at_4": 0.35714285714285715,
+            "recall_at_5": 0.40752351097178685,
+            "f1_at_4": 0.4868453405458569,
+            "precision_at_3_per_session": 0.7995495495495495,
+            "sessions_total": 75,
+            "coverage": 0.9866666666666667,
+            "pairs_per_session_min": 1,
+            "pairs_per_session_mean": 3.5,
+            "pairs_per_session_max": 5,
+            "mrr_at_4": 0.7691441441441441
+          },
+          "judge_stats": {
+            "total_calls": 259,
+            "cache_hits": 259,
+            "new_judgments": 0,
+            "failures": 0
+          },
+          "timestamp": "2026-03-23T22:04:02.560556+00:00"
+        },
+        {
+          "config_name": "heuristic-enriched(50)",
+          "corpus_name": "syantra",
+          "metrics": {
+            "sessions_evaluated": 74,
+            "sessions_suppressed": 0,
+            "pairs_judged": 267,
+            "avg_relevance": 3.7865168539325844,
+            "median_relevance": 5.0,
+            "score_distribution": [
+              37,
+              24,
+              33,
+              38,
+              135
+            ],
+            "noise_count": 61,
+            "noise_pct": 22.846441947565545,
+            "precision_at_3": 0.7715355805243446,
+            "recall_at_4": 0.37445887445887444,
+            "recall_at_5": 0.4231974921630094,
+            "f1_at_4": 0.5042054851693866,
+            "precision_at_3_per_session": 0.7995495495495494,
+            "sessions_total": 75,
+            "coverage": 0.9866666666666667,
+            "pairs_per_session_min": 1,
+            "pairs_per_session_mean": 3.608108108108108,
+            "pairs_per_session_max": 5,
+            "mrr_at_4": 0.7623873873873873
+          },
+          "judge_stats": {
+            "total_calls": 267,
+            "cache_hits": 267,
+            "new_judgments": 0,
+            "failures": 0
+          },
+          "timestamp": "2026-03-23T22:04:03.831931+00:00"
+        },
+        {
+          "config_name": "intent-boost",
+          "corpus_name": "syantra",
+          "metrics": {
+            "sessions_evaluated": 74,
+            "sessions_suppressed": 0,
+            "pairs_judged": 265,
+            "avg_relevance": 3.818867924528302,
+            "median_relevance": 5.0,
+            "score_distribution": [
+              34,
+              25,
+              33,
+              36,
+              137
+            ],
+            "noise_count": 59,
+            "noise_pct": 22.264150943396228,
+            "precision_at_3": 0.7773584905660378,
+            "recall_at_4": 0.37445887445887444,
+            "recall_at_5": 0.42946708463949845,
+            "f1_at_4": 0.5054426062105987,
+            "precision_at_3_per_session": 0.8018018018018019,
+            "sessions_total": 75,
+            "coverage": 0.9866666666666667,
+            "pairs_per_session_min": 1,
+            "pairs_per_session_mean": 3.581081081081081,
+            "pairs_per_session_max": 5,
+            "mrr_at_4": 0.7691441441441442
+          },
+          "judge_stats": {
+            "total_calls": 265,
+            "cache_hits": 265,
+            "new_judgments": 0,
+            "failures": 0
+          },
+          "timestamp": "2026-03-23T22:04:05.328282+00:00"
+        }
+      ]
+    }
+  ],
+  "configs": [
+    "boosted-adaptive",
+    "heuristic-enriched",
+    "intent-boost"
+  ],
+  "timestamp": "2026-03-23T22:04:05.329323+00:00"
+}

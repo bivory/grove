@@ -3,6 +3,22 @@
 This document describes the testing strategy for grove, covering unit tests,
 integration tests, property-based tests, and simulation harnesses.
 
+> **Note:** Code examples in this document are **design-time pseudocode** that
+> illustrate test intent, not the actual implementation. The real test suite
+> (1826 tests) lives in the source code under `src/` (inline `#[cfg(test)]`
+> modules) and `tests/integration/`. Refer to the actual source files for
+> current type names and API signatures.
+>
+> Key differences from pseudocode below:
+>
+> - `Gate` uses direct method calls (`detect_ticket()`, `block()`, `skip()`,
+>   `complete_reflection()`) instead of the `handle(GateEvent::...)` pattern
+> - `CandidateLearning` (not `LearningCandidate`) is the pre-validation type
+> - Validation uses `validate_with_duplicates()` family instead of separate
+>   `validate_schema()` and `write_gate_filter()` functions
+> - `StatsLogger` (not `StatsTracker`) handles event log writes
+> - `StatsEvent` uses `v` (not `version`) and `data` (not `event_type`) fields
+
 ## 1. Testing Strategy
 
 ### 1.1 Phase 1: With Implementation
@@ -26,11 +42,11 @@ The initial testing phase focuses on **unit tests** for essential functionality:
 An **in-memory backend** supports unit testing:
 
 ```rust
-struct MemoryBackend {
+struct InMemoryBackend {
     learnings: RefCell<HashMap<String, CompoundLearning>>,
 }
 
-struct MemorySessionStore {
+struct InMemorySessionStore {
     sessions: RefCell<HashMap<String, SessionState>>,
 }
 ```

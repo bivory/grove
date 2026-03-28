@@ -240,11 +240,13 @@ pub enum LearningScope {
 
 impl LearningScope {
     /// Check if this scope is committed to the repository.
+    #[cfg(test)]
     pub fn is_committed(&self) -> bool {
         matches!(self, LearningScope::Project | LearningScope::Team)
     }
 
     /// Check if this scope is personal (not shared).
+    #[cfg(test)]
     pub fn is_personal(&self) -> bool {
         matches!(self, LearningScope::Personal | LearningScope::Ephemeral)
     }
@@ -314,6 +316,7 @@ impl WriteGateCriterion {
     }
 
     /// Get the question for this criterion.
+    #[cfg(test)]
     pub fn question(&self) -> &'static str {
         match self {
             WriteGateCriterion::BehaviorChanging => "Would you do something differently next time?",

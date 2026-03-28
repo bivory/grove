@@ -406,3 +406,156 @@ pub fn run_sweep(options: EvalSweepOptions) -> Result<bool, Box<dyn std::error::
 
     Ok(true)
 }
+
+/// Options for the eval dedup-audit command.
+pub struct EvalDedupAuditOptions {
+    pub manifest: Option<String>,
+    pub learnings_path: Option<String>,
+    pub threshold: f64,
+    pub json: bool,
+}
+
+/// Run semantic dedup audit across corpora.
+///
+/// Embeds all learnings using AllMiniLML6V2, computes pairwise cosine similarity,
+/// and flags pairs above the threshold. Requires the `semantic-dedup` feature.
+pub fn run_dedup_audit(options: EvalDedupAuditOptions) -> Result<bool, Box<dyn std::error::Error>> {
+    #[cfg(not(feature = "semantic-dedup"))]
+    {
+        let _ = options;
+        eprintln!("Error: dedup-audit requires the 'semantic-dedup' feature flag.");
+        eprintln!("Rebuild with: cargo build --features semantic-dedup");
+        Ok(false)
+    }
+
+    #[cfg(feature = "semantic-dedup")]
+    {
+        use crate::core::embeddings::{cosine_similarity, EmbeddingProvider, FastEmbedProvider};
+        use crate::eval::corpus::{entry_to_config, load_corpus_manifest, load_learnings};
+
+        /// A flagged pair of semantically similar learnings.
+        #[derive(serde::Serialize)]
+        struct DedupPair {
+            corpus: String,
+            id_a: String,
+            summary_a: String,
+            id_b: String,
+            summary_b: String,
+            similarity: f64,
+        }
+
+        /// Per-corpus audit result.
+        #[derive(serde::Serialize)]
+        struct CorpusDedupResult {
+            corpus: String,
+            learning_count: usize,
+            pairs_checked: usize,
+            pairs_flagged: usize,
+            flagged: Vec<DedupPair>,
+        }
+
+        // Load learnings from manifest or single file
+        let corpora: Vec<(String, Vec<crate::core::learning::CompoundLearning>)> =
+            if let Some(manifest_path) = &options.manifest {
+                let manifest = load_corpus_manifest(&std::path::PathBuf::from(manifest_path))?;
+                manifest
+                    .corpus
+                    .iter()
+                    .map(|entry| {
+                        let config = entry_to_config(entry);
+                        let learnings = load_learnings(&config.learnings_path);
+                        (entry.name.clone(), learnings)
+                    })
+                    .collect()
+            } else if let Some(path) = &options.learnings_path {
+                let learnings = load_learnings(std::path::Path::new(path));
+                vec![("default".to_string(), learnings)]
+            } else {
+                eprintln!("Error: provide --manifest or --learnings-path");
+                return Ok(false);
+            };
+
+        eprintln!("Initializing embedding model (AllMiniLML6V2)...");
+        let provider = FastEmbedProvider::new()?;
+
+        let mut all_results = Vec::new();
+
+        for (name, learnings) in &corpora {
+            if learnings.is_empty() {
+                eprintln!("  {}: 0 learnings, skipping", name);
+                continue;
+            }
+
+            eprintln!("  {}: embedding {} learnings...", name, learnings.len());
+
+            // Embed all summaries
+            let texts: Vec<&str> = learnings.iter().map(|l| l.summary.as_str()).collect();
+            let embeddings = provider.embed(&texts)?;
+
+            // Pairwise comparison
+            let n = learnings.len();
+            let pairs_checked = n * (n - 1) / 2;
+            let mut flagged = Vec::new();
+
+            for i in 0..n {
+                for j in (i + 1)..n {
+                    let sim = cosine_similarity(&embeddings[i], &embeddings[j]);
+                    if sim >= options.threshold {
+                        flagged.push(DedupPair {
+                            corpus: name.clone(),
+                            id_a: learnings[i].id.clone(),
+                            summary_a: learnings[i].summary.clone(),
+                            id_b: learnings[j].id.clone(),
+                            summary_b: learnings[j].summary.clone(),
+                            similarity: sim,
+                        });
+                    }
+                }
+            }
+
+            flagged.sort_by(|a, b| {
+                b.similarity
+                    .partial_cmp(&a.similarity)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
+
+            all_results.push(CorpusDedupResult {
+                corpus: name.clone(),
+                learning_count: n,
+                pairs_checked,
+                pairs_flagged: flagged.len(),
+                flagged,
+            });
+        }
+
+        if options.json {
+            println!("{}", serde_json::to_string_pretty(&all_results)?);
+        } else {
+            for result in &all_results {
+                println!(
+                    "\n=== {} ({} learnings, {} pairs checked) ===",
+                    result.corpus, result.learning_count, result.pairs_checked
+                );
+                if result.flagged.is_empty() {
+                    println!("  No pairs above threshold ({:.2})", options.threshold);
+                } else {
+                    println!(
+                        "  {} pairs flagged (>= {:.2}):\n",
+                        result.pairs_flagged, options.threshold
+                    );
+                    for pair in &result.flagged {
+                        println!(
+                            "  sim={:.4}  {} vs {}",
+                            pair.similarity, pair.id_a, pair.id_b
+                        );
+                        println!("    A: {}", pair.summary_a);
+                        println!("    B: {}", pair.summary_b);
+                        println!();
+                    }
+                }
+            }
+        }
+
+        Ok(true)
+    }
+}

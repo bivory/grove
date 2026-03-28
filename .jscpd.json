@@ -7,7 +7,8 @@
     "**/.git/**",
     "**/tests/**",
     "**/*.lock",
-    "**/*.min.js"
+    "**/*.min.js",
+    "**/.grove/**"
   ],
   "format": ["rust", "markdown", "yaml", "toml", "sql"],
   "minLines": 5,

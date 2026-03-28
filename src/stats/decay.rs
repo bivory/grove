@@ -330,6 +330,7 @@ mod tests {
         LearningStats {
             surfaced: 0,
             referenced: 0,
+            implicit_referenced: 0,
             dismissed,
             corrected: 0,
             hit_rate,
@@ -882,6 +883,7 @@ mod tests {
         LearningStats {
             surfaced: 0,
             referenced: 0,
+            implicit_referenced: 0,
             dismissed,
             corrected: 0,
             hit_rate,

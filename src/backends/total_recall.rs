@@ -34,7 +34,7 @@ use crate::backends::total_recall_format::{
 use crate::backends::traits::{
     MemoryBackend, SearchFilters, SearchQuery, SearchResult, WriteResult,
 };
-use crate::core::{CompoundLearning, Confidence, LearningScope};
+use crate::core::{CompoundLearning, Confidence, LearningScope, LearningStatus};
 use crate::error::Result;
 use crate::util::read_to_string_limited;
 
@@ -763,6 +763,28 @@ impl TotalRecallBackend {
         // Format: [HH:MM] at start of header line, date from ID (cl_YYYYMMDD_NNN)
         let timestamp = self.parse_entry_timestamp(entry, &grove_id);
 
+        // Extract status from metadata line (e.g., "| Status: Archived")
+        let status = entry
+            .lines()
+            .find(|line| line.contains(fmt::LABEL_TAGS) || line.contains(fmt::LABEL_STATUS))
+            .and_then(|line| {
+                line.split('|')
+                    .find(|part| part.trim().starts_with(fmt::LABEL_STATUS))
+                    .map(|part| {
+                        let value = part
+                            .trim()
+                            .strip_prefix(fmt::LABEL_STATUS)
+                            .unwrap_or("")
+                            .trim();
+                        match value.to_lowercase().as_str() {
+                            "archived" => crate::core::LearningStatus::Archived,
+                            "superseded" => crate::core::LearningStatus::Superseded,
+                            _ => crate::core::LearningStatus::Active,
+                        }
+                    })
+            })
+            .unwrap_or(crate::core::LearningStatus::Active);
+
         // Build a partial learning
         Some(CompoundLearning {
             id: grove_id,
@@ -779,7 +801,7 @@ impl TotalRecallBackend {
             timestamp,
             context_files: None,
             relevance_context: None,
-            status: crate::core::LearningStatus::Active,
+            status,
         })
     }
 
@@ -825,6 +847,193 @@ impl TotalRecallBackend {
             .and_then(|date| date.and_hms_opt(hour, minute, 0))
             .map(|naive| DateTime::from_naive_utc_and_offset(naive, Utc))
             .unwrap_or_else(Utc::now)
+    }
+
+    /// Update the status of a learning in the personal file.
+    ///
+    /// The personal file uses `## grove:ID` headings and `**Confidence:** ... | **Created:** ...`
+    /// metadata lines. Status is appended to the Confidence/Created line.
+    fn update_personal_status(
+        &self,
+        _learning_id: &str,
+        grove_marker: &str,
+        new_status: LearningStatus,
+    ) -> Result<bool> {
+        if !self.personal_path.exists() {
+            return Ok(false);
+        }
+
+        let content = read_to_string_limited(&self.personal_path)?;
+        if !content.contains(grove_marker) {
+            return Ok(false);
+        }
+
+        let status_str = match new_status {
+            LearningStatus::Active => "",
+            LearningStatus::Archived => "Archived",
+            LearningStatus::Superseded => "Superseded",
+        };
+
+        // Find the entry and its Confidence/Created metadata line
+        let mut new_lines: Vec<String> = Vec::new();
+        let mut in_target_entry = false;
+        let mut found = false;
+
+        for line in content.lines() {
+            if line.contains(grove_marker) {
+                in_target_entry = true;
+            }
+
+            if in_target_entry && line.contains(LABEL_CONFIDENCE) {
+                // Strip any existing Status: segment
+                let cleaned: String = line
+                    .split('|')
+                    .filter(|part| !part.trim().starts_with(fmt::LABEL_STATUS))
+                    .collect::<Vec<_>>()
+                    .join("|")
+                    .trim_end_matches('|')
+                    .trim()
+                    .to_string();
+
+                if status_str.is_empty() {
+                    new_lines.push(cleaned);
+                } else {
+                    new_lines.push(format!(
+                        "{} {} {} {}",
+                        cleaned,
+                        fmt::METADATA_SEPARATOR.trim(),
+                        fmt::LABEL_STATUS,
+                        status_str
+                    ));
+                }
+                in_target_entry = false;
+                found = true;
+            } else {
+                new_lines.push(line.to_string());
+            }
+        }
+
+        if !found {
+            return Ok(false);
+        }
+
+        // Atomic write
+        let temp_path = self.personal_path.with_extension("md.tmp");
+        fs::write(&temp_path, new_lines.join("\n"))?;
+        fs::rename(&temp_path, &self.personal_path)?;
+
+        Ok(true)
+    }
+
+    /// Update the status of a grove learning in Total Recall memory files.
+    ///
+    /// Searches daily logs and registers for an entry with the given ID,
+    /// then rewrites the metadata line with the new status.
+    /// Returns true if the entry was found and updated.
+    fn update_status_in_memory_files(
+        &self,
+        learning_id: &str,
+        new_status: LearningStatus,
+    ) -> Result<bool> {
+        let grove_marker = format!("{}{}", GROVE_ID_PREFIX, learning_id);
+
+        // Search daily logs and registers
+        for dir_name in &["daily", "registers"] {
+            let dir = self.memory_dir.join(dir_name);
+            if !dir.is_dir() {
+                continue;
+            }
+            let Ok(entries) = fs::read_dir(&dir) else {
+                continue;
+            };
+            for entry in entries.filter_map(|e| e.ok()) {
+                let path = entry.path();
+                if path.extension().is_some_and(|ext| ext == "md")
+                    && self.update_status_in_file(&path, &grove_marker, new_status)?
+                {
+                    return Ok(true);
+                }
+            }
+        }
+
+        Ok(false)
+    }
+
+    /// Update status of a grove entry within a single file.
+    ///
+    /// Finds the metadata line (starting with `Tags:`) for the matching entry
+    /// and adds/updates the `| Status: <status>` segment.
+    fn update_status_in_file(
+        &self,
+        path: &Path,
+        grove_marker: &str,
+        new_status: LearningStatus,
+    ) -> Result<bool> {
+        if !path.exists() {
+            return Ok(false);
+        }
+
+        let content = read_to_string_limited(path)?;
+        if !content.contains(grove_marker) {
+            return Ok(false);
+        }
+
+        let status_str = match new_status {
+            LearningStatus::Active => "", // Remove status marker for active
+            LearningStatus::Archived => "Archived",
+            LearningStatus::Superseded => "Superseded",
+        };
+
+        // Find the entry and its Tags: line
+        let mut new_lines: Vec<String> = Vec::new();
+        let mut in_target_entry = false;
+        let mut found = false;
+
+        for line in content.lines() {
+            if line.contains(grove_marker) {
+                in_target_entry = true;
+            }
+
+            if in_target_entry && line.starts_with(fmt::LABEL_TAGS) {
+                // Strip any existing Status: segment
+                let cleaned: String = line
+                    .split('|')
+                    .filter(|part| !part.trim().starts_with(fmt::LABEL_STATUS))
+                    .collect::<Vec<_>>()
+                    .join("|")
+                    .trim_end_matches('|')
+                    .trim()
+                    .to_string();
+
+                if status_str.is_empty() {
+                    // Active: just use the cleaned line (no Status: marker)
+                    new_lines.push(cleaned);
+                } else {
+                    new_lines.push(format!(
+                        "{} {} {} {}",
+                        cleaned,
+                        fmt::METADATA_SEPARATOR.trim(),
+                        fmt::LABEL_STATUS,
+                        status_str
+                    ));
+                }
+                in_target_entry = false;
+                found = true;
+            } else {
+                new_lines.push(line.to_string());
+            }
+        }
+
+        if !found {
+            return Ok(false);
+        }
+
+        // Atomic write: temp file + rename
+        let temp_path = path.with_extension("md.tmp");
+        fs::write(&temp_path, new_lines.join("\n"))?;
+        fs::rename(&temp_path, path)?;
+
+        Ok(true)
     }
 }
 
@@ -873,6 +1082,46 @@ impl MemoryBackend for TotalRecallBackend {
         };
 
         Ok(self.parse_search_results(&output, filters))
+    }
+
+    fn archive(&self, learning_id: &str) -> Result<()> {
+        // Try personal file first (uses "## grove:ID" headings)
+        if self.personal_path.exists() {
+            let grove_marker = format!("{}{}", GROVE_ID_PREFIX, learning_id);
+            if self.update_personal_status(learning_id, &grove_marker, LearningStatus::Archived)? {
+                return Ok(());
+            }
+        }
+
+        // Try Total Recall memory files (daily logs, registers)
+        if self.update_status_in_memory_files(learning_id, LearningStatus::Archived)? {
+            return Ok(());
+        }
+
+        Err(crate::error::GroveError::backend(format!(
+            "Learning {} not found in Total Recall",
+            learning_id
+        )))
+    }
+
+    fn restore(&self, learning_id: &str) -> Result<()> {
+        // Try personal file first
+        if self.personal_path.exists() {
+            let grove_marker = format!("{}{}", GROVE_ID_PREFIX, learning_id);
+            if self.update_personal_status(learning_id, &grove_marker, LearningStatus::Active)? {
+                return Ok(());
+            }
+        }
+
+        // Try Total Recall memory files
+        if self.update_status_in_memory_files(learning_id, LearningStatus::Active)? {
+            return Ok(());
+        }
+
+        Err(crate::error::GroveError::backend(format!(
+            "Learning {} not found in Total Recall",
+            learning_id
+        )))
     }
 
     fn ping(&self) -> bool {
@@ -2084,5 +2333,152 @@ Tags: #database #performance | Confidence: High"#;
 
         // Case insensitive
         assert!(entry_matches_all_terms(entry, &["TISSUE", "GROVE"]));
+    }
+
+    // -- archive/restore tests --
+
+    fn setup_tr_with_learning() -> (TempDir, TotalRecallBackend, String) {
+        let temp = TempDir::new().unwrap();
+        let memory_dir = temp.path().join("memory");
+        let daily_dir = memory_dir.join("daily");
+        fs::create_dir_all(&daily_dir).unwrap();
+        let personal_path = temp.path().join("personal-learnings.md");
+
+        let backend = TotalRecallBackend::with_paths(&memory_dir, &personal_path, &memory_dir);
+
+        // Write a learning to daily log
+        let mut learning = sample_learning();
+        learning.id = "cl_20260328_099".to_string();
+        let result = backend.write(&learning).unwrap();
+        assert!(result.success);
+
+        (temp, backend, learning.id)
+    }
+
+    #[test]
+    fn test_archive_in_daily_log() {
+        let (_temp, backend, id) = setup_tr_with_learning();
+
+        // Verify it's active before archive
+        let all = backend.list_all().unwrap();
+        assert!(all
+            .iter()
+            .any(|l| l.id == id && l.status == LearningStatus::Active));
+
+        // Archive it
+        backend.archive(&id).unwrap();
+
+        // Verify it's now archived
+        let all = backend.list_all().unwrap();
+        let learning = all.iter().find(|l| l.id == id).unwrap();
+        assert_eq!(learning.status, LearningStatus::Archived);
+    }
+
+    #[test]
+    fn test_restore_after_archive() {
+        let (_temp, backend, id) = setup_tr_with_learning();
+
+        backend.archive(&id).unwrap();
+        let all = backend.list_all().unwrap();
+        assert_eq!(
+            all.iter().find(|l| l.id == id).unwrap().status,
+            LearningStatus::Archived
+        );
+
+        backend.restore(&id).unwrap();
+        let all = backend.list_all().unwrap();
+        assert_eq!(
+            all.iter().find(|l| l.id == id).unwrap().status,
+            LearningStatus::Active
+        );
+    }
+
+    #[test]
+    fn test_archive_not_found() {
+        let temp = TempDir::new().unwrap();
+        let memory_dir = temp.path().join("memory");
+        fs::create_dir_all(memory_dir.join("daily")).unwrap();
+        let personal_path = temp.path().join("personal-learnings.md");
+        let backend = TotalRecallBackend::with_paths(&memory_dir, &personal_path, &memory_dir);
+
+        let result = backend.archive("cl_nonexistent_000");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_grove_entry_with_status() {
+        let temp = TempDir::new().unwrap();
+        let memory_dir = temp.path().join("memory");
+        let personal_path = temp.path().join("personal-learnings.md");
+        let backend = TotalRecallBackend::with_paths(&memory_dir, &personal_path, &memory_dir);
+
+        let entry = "[10:30] **Pattern** (grove:cl_20260328_001): Test summary\n> Some detail\n\nTags: #rust #testing | Confidence: High | Status: Archived";
+        let learning = backend.parse_grove_entry(entry).unwrap();
+        assert_eq!(learning.id, "cl_20260328_001");
+        assert_eq!(learning.status, LearningStatus::Archived);
+    }
+
+    #[test]
+    fn test_parse_grove_entry_without_status_defaults_active() {
+        let temp = TempDir::new().unwrap();
+        let memory_dir = temp.path().join("memory");
+        let personal_path = temp.path().join("personal-learnings.md");
+        let backend = TotalRecallBackend::with_paths(&memory_dir, &personal_path, &memory_dir);
+
+        let entry = "[10:30] **Pattern** (grove:cl_20260328_002): Test summary\n> Some detail\n\nTags: #rust #testing | Confidence: High";
+        let learning = backend.parse_grove_entry(entry).unwrap();
+        assert_eq!(learning.status, LearningStatus::Active);
+    }
+
+    #[test]
+    fn test_archive_personal_learning() {
+        let temp = TempDir::new().unwrap();
+        let memory_dir = temp.path().join("memory");
+        fs::create_dir_all(memory_dir.join("daily")).unwrap();
+        let personal_path = temp.path().join("personal-learnings.md");
+
+        let backend = TotalRecallBackend::with_paths(&memory_dir, &personal_path, &memory_dir);
+
+        // Write a personal-scope learning
+        let mut learning = sample_learning();
+        learning.id = "cl_20260328_050".to_string();
+        learning.scope = LearningScope::Personal;
+        let result = backend.write(&learning).unwrap();
+        assert!(result.success);
+
+        // Verify it's in the personal file
+        let content = fs::read_to_string(&personal_path).unwrap();
+        assert!(content.contains("grove:cl_20260328_050"));
+
+        // Archive it
+        backend.archive("cl_20260328_050").unwrap();
+
+        // Verify the status was added
+        let content = fs::read_to_string(&personal_path).unwrap();
+        assert!(content.contains("Status: Archived"));
+    }
+
+    #[test]
+    fn test_restore_personal_learning() {
+        let temp = TempDir::new().unwrap();
+        let memory_dir = temp.path().join("memory");
+        fs::create_dir_all(memory_dir.join("daily")).unwrap();
+        let personal_path = temp.path().join("personal-learnings.md");
+
+        let backend = TotalRecallBackend::with_paths(&memory_dir, &personal_path, &memory_dir);
+
+        let mut learning = sample_learning();
+        learning.id = "cl_20260328_051".to_string();
+        learning.scope = LearningScope::Personal;
+        backend.write(&learning).unwrap();
+
+        // Archive then restore
+        backend.archive("cl_20260328_051").unwrap();
+        let content = fs::read_to_string(&personal_path).unwrap();
+        assert!(content.contains("Status: Archived"));
+
+        backend.restore("cl_20260328_051").unwrap();
+        let content = fs::read_to_string(&personal_path).unwrap();
+        assert!(!content.contains("Status:"));
     }
 }

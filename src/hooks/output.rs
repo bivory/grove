@@ -18,7 +18,8 @@ impl StopDecision {
     /// Get the exit code for this decision.
     ///
     /// For Stop hooks, Claude Code reads the JSON `decision` field on exit 0.
-    /// This method is retained for TaskCompleted, which uses exit code 2 + stderr.
+    /// Production code uses `exit_codes` constants directly.
+    #[cfg(test)]
     pub fn exit_code(&self) -> i32 {
         match self {
             Self::Approve => 0,

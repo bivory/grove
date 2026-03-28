@@ -7,6 +7,62 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-03-28
+
+### Added
+
+#### Corpus Consolidation
+
+- `grove maintain consolidate` command for LLM-powered corpus maintenance
+  - Groups related learnings by tag Jaccard similarity (>=0.5 same
+    category, >=0.7 cross-category) with union-find transitive closure
+  - Merges overlapping groups into canonical learnings via LLM
+  - Detects stale `context_files` references (files that no longer exist)
+  - Dry-run by default; `--apply` to write merged learnings and archive sources
+  - `--stale-only` mode skips LLM, just checks file staleness
+  - Progress messages on stderr during LLM calls
+  - Strips markdown fences from LLM responses for robust JSON parsing
+
+#### Implicit Reference Detection
+
+- Stop hook analyzes `last_assistant_message` to detect when surfaced
+  learnings were implicitly used (keyword overlap analysis)
+- Configurable via `[implicit_references]` config section (default off)
+- Implicit references count at half-weight in hit rate calculations
+- `grove stats` displays implicit reference count
+
+#### Stats Version Filter
+
+- `grove stats --version 0.9.0` filters stats to a specific release cohort
+- `grove stats --version pre:0.9.0` for pre-release comparison
+- Enables before/after analysis across grove releases
+
+#### Evaluation
+
+- `grove eval dedup-audit` for semantic duplicate analysis across corpora
+
+### Changed
+
+- CLI commands reordered by audience: User, Agent, Developer, Internal
+- CLI commands alphabetized within each audience group
+- `--stale-days`, `--auto-archive`, `--dry-run` flags scoped to
+  `maintain list` and `maintain archive` subcommands (no longer
+  leak as global flags on all maintain subcommands)
+- `maintain` description updated to include consolidate
+
+### Fixed
+
+- Total Recall backend now supports `archive()` and `restore()` (was
+  returning "not supported" error, causing consolidate failures for
+  TR-stored learnings)
+- Total Recall personal file archive fixed: `grove:` prefix in headings
+  caused MarkdownBackend delegation to silently fail
+- `Status:` metadata field added to TR entry format for archive/restore
+  persistence; `parse_grove_entry()` reads status instead of hardcoding
+  Active
+- Removed dead code, consolidated `truncate_str` into single location
+- Improved error handling across search backends
+
 ## [0.9.0] - 2026-03-21
 
 ### Added
@@ -296,7 +352,8 @@ Initial release of Grove, a compound learning gate for Claude Code.
 - Architecture design documents
 - Implementation task roadmap
 
-[Unreleased]: https://github.com/bivory/grove/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/bivory/grove/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/bivory/grove/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/bivory/grove/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/bivory/grove/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/bivory/grove/compare/v0.6.0...v0.7.0

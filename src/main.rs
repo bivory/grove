@@ -54,11 +54,228 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// [Internal] Run a hook (JSON stdin/stdout). Called by Claude Code hooks
-    Hook {
-        /// The hook event type
-        #[arg(value_enum)]
-        event: HookEvent,
+    // ── User commands (alphabetical) ────────────────────────────────────
+    /// [User] Show discovered memory backends
+    Backends {
+        /// Output as JSON
+        #[arg(long, short)]
+        json: bool,
+        /// Suppress output
+        #[arg(long, short)]
+        quiet: bool,
+    },
+
+    /// [User] Clean old session files
+    Clean {
+        /// Output as JSON
+        #[arg(long, short)]
+        json: bool,
+        /// Suppress output
+        #[arg(long, short)]
+        quiet: bool,
+        /// Remove sessions older than duration (e.g., "7d", "24h")
+        #[arg(long)]
+        before: Option<String>,
+        /// Remove orphaned sessions
+        #[arg(long)]
+        orphans: bool,
+        /// Show what would be cleaned without removing
+        #[arg(long)]
+        dry_run: bool,
+    },
+
+    /// [User] Initialize Grove configuration
+    Init {
+        /// Output as JSON
+        #[arg(long, short)]
+        json: bool,
+        /// Suppress output
+        #[arg(long, short)]
+        quiet: bool,
+        /// Force overwrite existing files
+        #[arg(long, short)]
+        force: bool,
+    },
+
+    /// [User] List recent learnings
+    List {
+        /// Output as JSON
+        #[arg(long, short)]
+        json: bool,
+        /// Suppress output
+        #[arg(long, short)]
+        quiet: bool,
+        /// Maximum number of results
+        #[arg(long, short)]
+        limit: Option<usize>,
+        /// Show only stale learnings
+        #[arg(long, conflicts_with = "rejections")]
+        stale: bool,
+        /// Include archived learnings
+        #[arg(long)]
+        include_archived: bool,
+        /// Days until decay to consider stale
+        #[arg(long)]
+        stale_days: Option<u32>,
+        /// Hide usage statistics
+        #[arg(long)]
+        no_stats: bool,
+        /// Sort by field
+        #[arg(long, short, value_enum, default_value = "created")]
+        sort: SortByArg,
+        /// Sort in ascending order (default is descending)
+        #[arg(long)]
+        asc: bool,
+        /// Show rejected candidates instead of accepted learnings
+        #[arg(long, conflicts_with = "stale")]
+        rejections: bool,
+    },
+
+    /// [User] Maintain learnings (archive, restore, consolidate)
+    Maintain {
+        /// Action to perform
+        #[command(subcommand)]
+        action: MaintainAction,
+        /// Output as JSON
+        #[arg(long, short, global = true)]
+        json: bool,
+        /// Suppress output
+        #[arg(long, short, global = true)]
+        quiet: bool,
+    },
+
+    /// [User] Mine past sessions for retroactive learnings
+    Retroflect {
+        /// Project root to retroflect (default: current dir)
+        #[arg(long)]
+        project: Option<String>,
+        /// Auto-discover all projects under ~/.claude/projects/
+        #[arg(long, conflicts_with = "project")]
+        all: bool,
+        /// LLM model for synthesis
+        #[arg(long, default_value = "claude-sonnet-4-20250514")]
+        model: String,
+        /// LLM backend: api or cli
+        #[arg(long, default_value = "api")]
+        backend: String,
+        /// Max sessions to analyze
+        #[arg(long, default_value = "20")]
+        limit: usize,
+        /// Skip sessions with fewer than N user turns
+        #[arg(long, default_value = "3")]
+        min_turns: usize,
+        /// Show candidates without writing
+        #[arg(long)]
+        dry_run: bool,
+        /// Re-analyze previously retroflected sessions
+        #[arg(long)]
+        force: bool,
+        /// Skip cost confirmation prompt
+        #[arg(long)]
+        yes: bool,
+        /// Output results as JSON
+        #[arg(long, short)]
+        json: bool,
+        /// Use Batch API (50% cheaper, async processing)
+        #[arg(long)]
+        batch: bool,
+    },
+
+    /// [User] Review and rate learnings for quality calibration
+    Review {
+        /// Output as JSON
+        #[arg(long, short)]
+        json: bool,
+        /// Suppress output
+        #[arg(long, short)]
+        quiet: bool,
+        /// Number of learnings to sample (default: 5)
+        #[arg(long, short, default_value = "5")]
+        count: usize,
+    },
+
+    /// [User/Agent] Search for learnings
+    Search {
+        /// Search query
+        query: String,
+        /// Output as JSON
+        #[arg(long, short)]
+        json: bool,
+        /// Suppress output
+        #[arg(long, short)]
+        quiet: bool,
+        /// Maximum number of results
+        #[arg(long, short)]
+        limit: Option<usize>,
+        /// Include archived learnings
+        #[arg(long)]
+        include_archived: bool,
+    },
+
+    /// [User] Display quality statistics and insights
+    Stats {
+        /// Output as JSON
+        #[arg(long, short)]
+        json: bool,
+        /// Suppress output
+        #[arg(long, short)]
+        quiet: bool,
+        /// Show detailed stats
+        #[arg(long, short)]
+        detailed: bool,
+        /// Force rebuild the cache
+        #[arg(long)]
+        rebuild: bool,
+        /// Apply safe configuration recommendations
+        #[arg(long)]
+        update_config: bool,
+        /// Filter stats to a specific grove version (e.g., "0.9.0" or "pre:0.9.0")
+        #[arg(long)]
+        version: Option<String>,
+    },
+
+    /// [User] Show detected ticketing system
+    Tickets {
+        /// Output as JSON
+        #[arg(long, short)]
+        json: bool,
+        /// Suppress output
+        #[arg(long, short)]
+        quiet: bool,
+    },
+
+    // ── Agent commands (alphabetical) ─────────────────────────────────
+    /// [Agent] Record a subagent observation
+    Observe {
+        /// The observation note
+        note: String,
+        /// Session ID to use
+        #[arg(long)]
+        session_id: String,
+        /// Output as JSON
+        #[arg(long, short)]
+        json: bool,
+        /// Suppress output
+        #[arg(long, short)]
+        quiet: bool,
+    },
+
+    /// [Agent] Record that surfaced learnings were referenced
+    Ref {
+        /// Learning IDs that were referenced
+        learning_ids: Vec<String>,
+        /// Session ID to use
+        #[arg(long)]
+        session_id: String,
+        /// How the learning was used (optional context)
+        #[arg(long)]
+        how: Option<String>,
+        /// Output as JSON
+        #[arg(long, short)]
+        json: bool,
+        /// Suppress output
+        #[arg(long, short)]
+        quiet: bool,
     },
 
     /// [Agent] Record structured reflection and capture learnings
@@ -99,157 +316,23 @@ enum Commands {
         lines_changed: Option<u32>,
     },
 
-    /// [Agent] Record that surfaced learnings were referenced
-    Ref {
-        /// Learning IDs that were referenced
-        learning_ids: Vec<String>,
-        /// Session ID to use
-        #[arg(long)]
+    // ── Developer / Internal commands (alphabetical) ──────────────────
+    /// [Developer] Debug session state
+    Debug {
+        /// Session ID to inspect
         session_id: String,
-        /// How the learning was used (optional context)
-        #[arg(long)]
-        how: Option<String>,
-        /// Output as JSON
-        #[arg(long, short)]
-        json: bool,
         /// Suppress output
         #[arg(long, short)]
         quiet: bool,
+        /// Set gate status (testing escape hatch)
+        #[arg(long)]
+        set_gate: Option<String>,
     },
 
-    /// [Agent] Record a subagent observation
-    Observe {
-        /// The observation note
-        note: String,
-        /// Session ID to use
-        #[arg(long)]
-        session_id: String,
-        /// Output as JSON
-        #[arg(long, short)]
-        json: bool,
-        /// Suppress output
-        #[arg(long, short)]
-        quiet: bool,
-    },
-
-    /// [User/Agent] Search for learnings
-    Search {
-        /// Search query
-        query: String,
-        /// Output as JSON
-        #[arg(long, short)]
-        json: bool,
-        /// Suppress output
-        #[arg(long, short)]
-        quiet: bool,
-        /// Maximum number of results
-        #[arg(long, short)]
-        limit: Option<usize>,
-        /// Include archived learnings
-        #[arg(long)]
-        include_archived: bool,
-    },
-
-    /// [User] List recent learnings
-    List {
-        /// Output as JSON
-        #[arg(long, short)]
-        json: bool,
-        /// Suppress output
-        #[arg(long, short)]
-        quiet: bool,
-        /// Maximum number of results
-        #[arg(long, short)]
-        limit: Option<usize>,
-        /// Show only stale learnings
-        #[arg(long, conflicts_with = "rejections")]
-        stale: bool,
-        /// Include archived learnings
-        #[arg(long)]
-        include_archived: bool,
-        /// Days until decay to consider stale
-        #[arg(long)]
-        stale_days: Option<u32>,
-        /// Hide usage statistics
-        #[arg(long)]
-        no_stats: bool,
-        /// Sort by field
-        #[arg(long, short, value_enum, default_value = "created")]
-        sort: SortByArg,
-        /// Sort in ascending order (default is descending)
-        #[arg(long)]
-        asc: bool,
-        /// Show rejected candidates instead of accepted learnings
-        #[arg(long, conflicts_with = "stale")]
-        rejections: bool,
-    },
-
-    /// [User] Display quality statistics and insights
-    Stats {
-        /// Output as JSON
-        #[arg(long, short)]
-        json: bool,
-        /// Suppress output
-        #[arg(long, short)]
-        quiet: bool,
-        /// Show detailed stats
-        #[arg(long, short)]
-        detailed: bool,
-        /// Force rebuild the cache
-        #[arg(long)]
-        rebuild: bool,
-        /// Apply safe configuration recommendations
-        #[arg(long)]
-        update_config: bool,
-        /// Filter stats to a specific grove version (e.g., "0.9.0" or "pre:0.9.0")
-        #[arg(long)]
-        version: Option<String>,
-    },
-
-    /// [User] Maintain learnings (archive stale, restore)
-    Maintain {
-        /// Action to perform
+    /// [Developer] Evaluate retrieval quality with offline benchmarks
+    Eval {
         #[command(subcommand)]
-        action: MaintainAction,
-        /// Output as JSON
-        #[arg(long, short, global = true)]
-        json: bool,
-        /// Suppress output
-        #[arg(long, short, global = true)]
-        quiet: bool,
-    },
-
-    /// [User] Initialize Grove configuration
-    Init {
-        /// Output as JSON
-        #[arg(long, short)]
-        json: bool,
-        /// Suppress output
-        #[arg(long, short)]
-        quiet: bool,
-        /// Force overwrite existing files
-        #[arg(long, short)]
-        force: bool,
-    },
-
-    /// [User] Show discovered memory backends
-    Backends {
-        /// Output as JSON
-        #[arg(long, short)]
-        json: bool,
-        /// Suppress output
-        #[arg(long, short)]
-        quiet: bool,
-    },
-
-    /// [User] Show detected ticketing system
-    Tickets {
-        /// Output as JSON
-        #[arg(long, short)]
-        json: bool,
-        /// Suppress output
-        #[arg(long, short)]
-        quiet: bool,
+        action: EvalAction,
     },
 
     /// [Developer] List recent sessions
@@ -263,18 +346,6 @@ enum Commands {
         /// Maximum number of sessions to show
         #[arg(long, short, default_value = "20")]
         limit: usize,
-    },
-
-    /// [Developer] Debug session state
-    Debug {
-        /// Session ID to inspect
-        session_id: String,
-        /// Suppress output
-        #[arg(long, short)]
-        quiet: bool,
-        /// Set gate status (testing escape hatch)
-        #[arg(long)]
-        set_gate: Option<String>,
     },
 
     /// [Developer] View trace events for a session
@@ -295,79 +366,12 @@ enum Commands {
         event_type: Option<String>,
     },
 
-    /// [User] Clean old session files
-    Clean {
-        /// Output as JSON
-        #[arg(long, short)]
-        json: bool,
-        /// Suppress output
-        #[arg(long, short)]
-        quiet: bool,
-        /// Remove sessions older than duration (e.g., "7d", "24h")
-        #[arg(long)]
-        before: Option<String>,
-        /// Remove orphaned sessions
-        #[arg(long)]
-        orphans: bool,
-        /// Show what would be cleaned without removing
-        #[arg(long)]
-        dry_run: bool,
-    },
-
-    /// [User] Review and rate learnings for quality calibration
-    Review {
-        /// Output as JSON
-        #[arg(long, short)]
-        json: bool,
-        /// Suppress output
-        #[arg(long, short)]
-        quiet: bool,
-        /// Number of learnings to sample (default: 5)
-        #[arg(long, short, default_value = "5")]
-        count: usize,
-    },
-
-    /// [User] Mine past sessions for retroactive learnings
-    Retroflect {
-        /// Project root to retroflect (default: current dir)
-        #[arg(long)]
-        project: Option<String>,
-        /// Auto-discover all projects under ~/.claude/projects/
-        #[arg(long, conflicts_with = "project")]
-        all: bool,
-        /// LLM model for synthesis
-        #[arg(long, default_value = "claude-sonnet-4-20250514")]
-        model: String,
-        /// LLM backend: api or cli
-        #[arg(long, default_value = "api")]
-        backend: String,
-        /// Max sessions to analyze
-        #[arg(long, default_value = "20")]
-        limit: usize,
-        /// Skip sessions with fewer than N user turns
-        #[arg(long, default_value = "3")]
-        min_turns: usize,
-        /// Show candidates without writing
-        #[arg(long)]
-        dry_run: bool,
-        /// Re-analyze previously retroflected sessions
-        #[arg(long)]
-        force: bool,
-        /// Skip cost confirmation prompt
-        #[arg(long)]
-        yes: bool,
-        /// Output results as JSON
-        #[arg(long, short)]
-        json: bool,
-        /// Use Batch API (50% cheaper, async processing)
-        #[arg(long)]
-        batch: bool,
-    },
-
-    /// [Developer] Evaluate retrieval quality with offline benchmarks
-    Eval {
-        #[command(subcommand)]
-        action: EvalAction,
+    // ── Internal ──────────────────────────────────────────────────────
+    /// [Internal] Run a hook (called by Claude Code hooks)
+    Hook {
+        /// The hook event type
+        #[arg(value_enum)]
+        event: HookEvent,
     },
 }
 

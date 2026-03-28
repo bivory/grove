@@ -75,30 +75,47 @@ The gate approves exit once you reflect or skip.
 
 ## Commands
 
-### Reflection
+### User Commands
+
+| Command | Description |
+|---------|-------------|
+| `grove search "query"` | Search past learnings |
+| `grove list` | List recent learnings |
+| `grove stats` | Quality dashboard with insights |
+| `grove stats --version 0.9.0` | Stats filtered to a specific release |
+| `grove maintain list` | Review stale learnings approaching decay |
+| `grove maintain archive <ids>` | Archive specific learnings |
+| `grove maintain consolidate` | Group and merge related learnings via LLM |
+| `grove maintain consolidate --stale-only` | Detect stale file references only |
+| `grove review` | Rate learnings for quality calibration |
+| `grove retroflect` | Mine past sessions for learnings |
+| `grove init` | Initialize Grove configuration |
+| `grove backends` | Show discovered backends |
+| `grove tickets` | Show detected ticketing system |
+| `grove clean --before 30d` | Remove old session files |
+
+### Agent Commands
 
 | Command | Description |
 |---------|-------------|
 | `grove reflect` | Capture structured learnings |
 | `grove skip "reason"` | Skip reflection with reason |
+| `grove ref <ids>` | Record that surfaced learnings were referenced |
 | `grove observe "note"` | Log observation (no gate trigger) |
 
-### Information
+### Consolidate (Corpus Maintenance)
 
-| Command | Description |
-|---------|-------------|
-| `grove stats` | Quality dashboard with insights |
-| `grove search "query"` | Search past learnings |
-| `grove list` | List recent learnings |
-| `grove backends` | Show discovered backends |
-| `grove tickets` | Show detected ticketing system |
+Reduce noise and detect stale entries in your learning corpus:
 
-### Maintenance
+```bash
+grove maintain consolidate                    # Dry run — show groups and stale refs
+grove maintain consolidate --apply            # Merge groups, archive sources
+grove maintain consolidate --stale-only       # Just check for stale file references
+grove maintain consolidate --json             # JSON output
+```
 
-| Command | Description |
-|---------|-------------|
-| `grove maintain` | Review and archive stale learnings |
-| `grove clean --before 30d` | Remove old session files |
+Groups related learnings by tag similarity, merges via LLM, and flags
+`context_files` that no longer exist. Dry-run by default.
 
 ### Retroflect (Existing Projects)
 
